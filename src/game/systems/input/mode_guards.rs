@@ -22,7 +22,16 @@ use crate::application::GameMode;
 /// - `Resting`
 /// - `RestMenu`
 /// - `GameLog`
+/// - `CharacterSheet`
 /// - `GameOver`
+///
+/// `CharacterSheet` was added here to fix a stale-mode-guard bug: without it,
+/// `handle_exploration_input_interact`/`handle_exploration_input_movement`
+/// only stood down via the `egui_wants_any_pointer_input` run condition,
+/// which is written in `PostUpdate` -- one frame *after* the Character Sheet
+/// UI draws in `Update` -- so exploration input could leak through on the
+/// frame the sheet opened. Every other modal screen already avoided this by
+/// being listed here; `CharacterSheet` was the one omission.
 ///
 /// Dialogue is intentionally **not** blocked for movement because the current
 /// input flow allows "move to cancel" behavior.
@@ -57,6 +66,7 @@ pub fn movement_blocked_for_mode(mode: &GameMode) -> bool {
             | GameMode::SpellCasting(_)
             | GameMode::TrapNotification(_)
             | GameMode::SkillTraining(_)
+            | GameMode::CharacterSheet(_)
             | GameMode::GameOver
     )
 }
@@ -130,6 +140,12 @@ mod tests {
 
     fn make_dialogue_mode() -> GameMode {
         GameMode::Dialogue(DialogueState::start(1, 1, None, None))
+    }
+
+    fn make_character_sheet_mode() -> GameMode {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        state.mode
     }
 
     fn make_combat_mode() -> GameMode {
@@ -303,6 +319,35 @@ mod tests {
         assert!(
             input_blocked_for_mode(&GameMode::GameOver),
             "All exploration input must be blocked in GameOver — the party is dead"
+        );
+    }
+
+    #[test]
+    fn test_movement_blocked_for_character_sheet_true() {
+        let mode = make_character_sheet_mode();
+        assert!(
+            movement_blocked_for_mode(&mode),
+            "Movement must be blocked while the Character Sheet is open, matching \
+             every other modal screen"
+        );
+    }
+
+    #[test]
+    fn test_interaction_blocked_for_character_sheet_true() {
+        let mode = make_character_sheet_mode();
+        assert!(
+            interaction_blocked_for_mode(&mode),
+            "Interaction must be blocked while the Character Sheet is open, matching \
+             every other modal screen"
+        );
+    }
+
+    #[test]
+    fn test_input_blocked_for_character_sheet_true() {
+        let mode = make_character_sheet_mode();
+        assert!(
+            input_blocked_for_mode(&mode),
+            "All exploration input must be blocked while the Character Sheet is open"
         );
     }
 }

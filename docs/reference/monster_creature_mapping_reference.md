@@ -166,13 +166,81 @@ Tests verify:
 
 ## ID Space Allocation
 
-|    Range    | Purpose              | Allocated/Total | Status   |
-| :---------: | -------------------- | :-------------: | -------- |
-|   1–999     | Monster Creatures    |     14/999      | Active   |
-| 1000–1999   | NPC Creatures        |     13/1000     | Active   |
-| 2000–2999   | Template Creatures   |      2/1000     | Active   |
-| 3000–3999   | Variant Creatures    |      3/1000     | Active   |
-|   4000+     | Custom/Campaign      |    Unlimited    | Open     |
+All numeric IDs in Antares fall into one of two domains: **game-data IDs** (used
+by game logic — stats, combat, items, spells) and **visual/mesh registry IDs**
+(used purely for rendering).  The two domains are independent; the same number
+can appear in both without conflict.
+
+### Visual / Mesh Registry IDs  (`u32`)
+
+All mesh registries share a single `u32` number line.  Ranges are assigned per
+registry type and enforced by the SDK importers.  The `ObjectMeshDatabase`
+merges all registries at runtime using the numeric ID as a string key.
+
+|     Range     | Registry file                   | Rust constant              | Allocated | Status                          |
+| :-----------: | ------------------------------- | -------------------------- | :-------: | ------------------------------- |
+|   **1–999**   | `creatures.ron` — Monsters      | `CreatureCategory::Monsters` | ~20     | Active; enforced by `CreatureIdManager` |
+| **1000–1999** | `creatures.ron` — NPCs          | `CreatureCategory::Npcs`   | ~22       | Active; enforced by `CreatureIdManager` |
+| **2000–2999** | `creatures.ron` — Templates     | `CreatureCategory::Templates` | 0      | Available                       |
+| **3000–3999** | `creatures.ron` — Variants      | `CreatureCategory::Variants`  | 0      | Available                       |
+| **4000–8999** | `creatures.ron` — Custom/campaign | `CreatureCategory::Custom` | 0       | Open; no upper bound enforced   |
+| **9000–9999** | `item_mesh_registry.ron`        | *(no named constant yet)*  | 26        | Active; sub-ranges below        |
+| **10000–10999** | `furniture_mesh_registry.ron` | `FURNITURE_MESH_ID_MIN` *(TBC)* | 8    | Active                          |
+| **11000–11999** | `landscape_mesh_registry.ron` | `LANDSCAPE_MESH_ID_MIN`    | 7         | Active; constant exists in code |
+| **12000–12999** | `object_mesh_registry.ron`   | *(no named constant yet)*  | 4         | **Planned** — currently string-keyed (see next_plans.md) |
+
+#### Item mesh sub-ranges (9000–9999)
+
+| Sub-range   | Category    | Examples                                   |
+| :---------: | ----------- | ------------------------------------------ |
+| 9000–9099   | Weapons     | swords, daggers, staves, bows              |
+| 9100–9199   | Armor       | leather, chain, plate, shield, helmet      |
+| 9200–9299   | Consumables | potions, food                              |
+| 9300–9399   | Accessories | rings, amulets, belts, cloaks              |
+| 9400–9499   | Ammo        | arrows, bolts, stones                      |
+| 9500–9599   | Quest items | scrolls, key items                         |
+
+---
+
+### Game-Data Entity IDs
+
+These IDs are used by game logic (not rendering).  They are stored in game-data
+RON files and are looked up by the domain layer at runtime.
+
+| Entity       | Rust type                     | Current range (tutorial) | Key type    | Notes                                         |
+| ------------ | ----------------------------- | :---------------------: | :---------: | --------------------------------------------- |
+| Items        | `ItemId = u8`                 | 1–210                   | Numeric     | 0 reserved; hard ceiling 255                  |
+| Monsters     | `MonsterId = u8`              | 1–136                   | Numeric     | 0 reserved; hard ceiling 255                  |
+| Spells       | `SpellId = u16`               | 257–1543                | Numeric     | Encoded: high byte = school, low byte = spell number |
+| Maps         | `MapId = u16`                 | 1–8                     | Numeric     | 0 reserved                                    |
+| Dialogues    | `u32`                         | 1–1004                  | Numeric     | No named type alias yet                       |
+| Quests       | `QuestId = u32`               | 0–8                     | Numeric     |                                               |
+| Landscape defs | `LandscapeId = u32`         | 1–7                     | Numeric     | 0 reserved; campaign-local definitions        |
+| Events       | `EventId = u16`               | Per-map                 | Numeric     |                                               |
+| NPCs         | `NpcId = String`              | String                  | String      | e.g. `"tutorial_elder_village"`              |
+| Characters   | `CharacterDefinitionId = String` | String               | String      | e.g. `"tutorial_human_knight"`              |
+| Races        | `RaceId = String`             | String                  | String      | e.g. `"human"`, `"dwarf"`                  |
+| Classes      | `ClassId = String`            | String                  | String      | e.g. `"knight"`, `"cleric"`               |
+| Skills       | `SkillId = String`            | String                  | String      | e.g. `"arcane_lore"`, `"athletics"`       |
+| Conditions   | `ConditionId = String`        | String                  | String      | e.g. `"awake"`, `"blind"`               |
+
+---
+
+### Known Gaps and Inconsistencies
+
+1. **`object_mesh_registry.ron`** uses string keys instead of numeric IDs in
+   the 12000-range — the only mesh registry that does not follow the convention.
+   Fix tracked in `docs/explanation/next_plans.md`.
+2. **No named constants** exist for the item mesh (9000), furniture mesh
+   (10000), or object mesh (12000) range starts.  Only `LANDSCAPE_MESH_ID_MIN`
+   (11000) is defined.  All ranges should have constants in `src/domain/types.rs`.
+3. **No `DialogueId` type alias** — dialogues use a bare `u32`.
+4. **Spell ID encoding** (`SpellId = u16`, high byte = school) means school 0
+   is reserved (IDs 1–255 unused), and school 1 starts at 257.  This is
+   implicit and not enforced anywhere in the SDK.
+5. **Creature range 4000–8999** is theoretically open-ended (`4000..u32::MAX`
+   in `CreatureIdManager`) but bleeds into the item mesh range (9000+) if a
+   campaign creates enough custom creatures — there is no upper-bound guard.
 
 NPC `creature_id` values always fall in the 1000–1999 range. Monster `visual_id` values fall in the 1–999 range. The ranges are enforced by `CreatureIdManager` in the SDK.
 
@@ -202,6 +270,6 @@ NPC `creature_id` values always fall in the 1000–1999 range. Monster `visual_i
 
 ---
 
-**Last Verified**: 2026-02-28
+**Last Verified**: 2026-08-13
 **Test Count**: 4/4 passing
-**Version**: 1.1
+**Version**: 2.0 — expanded to cover all ID spaces

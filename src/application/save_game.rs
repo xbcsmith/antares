@@ -1024,6 +1024,51 @@ mod tests {
     }
 
     #[test]
+    fn test_pre_lore_save_fixture_deserializes_with_lore_none() {
+        // Real save file committed to the tutorial campaign before
+        // `Character.lore` existed (see the Character Bio & Navigation
+        // implementation plan, Phase 2). Unlike
+        // `test_lore_field_serde_default_deserializes` in character.rs
+        // (which synthesizes an old-format string by stripping a freshly
+        // serialized field), this loads a genuinely pre-existing fixture to
+        // confirm `#[serde(default)]` on `Character.lore` keeps real old
+        // saves loadable.
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/campaigns/tutorial/saves/save_20260809_072524.ron"
+        );
+        let contents = std::fs::read_to_string(fixture_path).expect("fixture save file must exist");
+        assert!(
+            !contents.contains("lore:"),
+            "fixture must genuinely predate the lore field for this regression test to be meaningful"
+        );
+
+        let save: SaveGame =
+            ron::from_str(&contents).expect("pre-lore save fixture must still deserialize");
+        save.validate_version()
+            .expect("fixture version must be compatible with the current build");
+
+        assert!(
+            !save.game_state.roster.characters.is_empty(),
+            "fixture must contain roster characters for this test to be meaningful"
+        );
+        for character in &save.game_state.roster.characters {
+            assert!(
+                character.lore.is_none(),
+                "roster character '{}' missing lore field must default to None",
+                character.name
+            );
+        }
+        for character in &save.game_state.party.members {
+            assert!(
+                character.lore.is_none(),
+                "party member '{}' missing lore field must default to None",
+                character.name
+            );
+        }
+    }
+
+    #[test]
     fn test_save_recruited_character() {
         let temp_dir = TempDir::new().unwrap();
         let manager = SaveGameManager::new(temp_dir.path()).unwrap();

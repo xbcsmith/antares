@@ -1,0 +1,21 @@
+## Isolde Dawnfang
+
+## Backstory
+
+Born the youngest princess of the Sunspire Dynasty, Isolde spent her youth confined to pristine marble halls while her older brothers were taught the art of war. While the royal court expected her to serve as a diplomatic figurehead, Isolde secretly spent nights training with heavy war maces and studying sacred combat litanies under the temple guard.
+
+When a shadowy host threatened the borderlands, the king forbade Isolde from joining the vanguard, deeming her safety paramount to the realm's lineage. Refusing to watch her people fall from behind safe castle walls, Isolde traded her silk robes for heavy scale plate, bound her radiant amber crest to her shield, and rode into the night under a mantle of absolute secrecy. Taking the mantle of a War Cleric, she now travels the frontlines, determined to prove that her place is not in the shadow of a throne, but in the white-hot center of battle delivering divine justice to those who protect the innocent.
+
+## Character Profile
+
+Title: Princess of Sunspire, Holy Warrior of the Radiant Shield
+
+Archetype: War Cleric / Martial Divine Champion
+
+Core Motivation: To forge her own destiny through valor rather than birthright, proving her worth on the battlefield while safeguarding the helpless.
+
+Combat Style: Frontline martial support, using divine solar energy channeled through her war mace and staff to blind foes and bolster allies.
+
+## Game Description
+
+Princess of Sunspire, Holy Warrior of the Radiant Shield, seeks to forge her own destiny through valor rather than birthright, proving her worth on the battlefield while safeguarding the helpless

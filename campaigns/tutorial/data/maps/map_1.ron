@@ -3,7 +3,7 @@
     width: 20,
     height: 20,
     name: "Town Square",
-    description: "The bustling town square where adventurers gather",
+    description: "The market square of a small Ashvale settlement where Kira has assembled her company. Quests, merchants, and trouble all converge here.",
     tiles: [
         (
             terrain: Stone,

@@ -267,6 +267,13 @@ The `characters.ron` file defines pre-made characters that can be used in the ca
   - Use case: Pre-made tutorial characters that should immediately be available
   - Characters with `starts_in_party: false` start at the campaign's starting inn
 
+- **`lore_file`** (Option\<String\>, optional, default: `None`): Path to an external RON file containing this character's long-form backstory and profile
+
+  - Path is relative to the campaign root (e.g. `"assets/characters/lore/kira.ron"`)
+  - The referenced file must deserialize as a `CharacterLore` struct: `backstory: String` plus a `profile: (title, archetype, core_motivation, combat_style)` block
+  - If the path is missing, unreadable, or fails to parse, the character loads normally with no lore (a warning is logged) — this field never fails the whole campaign load
+  - Only a malformed path (absolute, or containing `..` traversal) is treated as a hard load error
+
 ### starts_in_party Field Details
 
 The `starts_in_party` field controls party membership at game start:

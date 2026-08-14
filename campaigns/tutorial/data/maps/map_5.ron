@@ -3,7 +3,7 @@
     width: 20,
     height: 15,
     name: "Mountain Pass",
-    description: "A treacherous mountain path",
+    description: "A hidden village sheltered in a high mountain pass, where the party rests and first hears whispers of a stillness spreading in the far north.",
     tiles: [
         (
             terrain: Ground,

@@ -845,11 +845,16 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
 ///
 /// * Exploration, Automap, Inventory, SpellBook, GameLog — standard navigation
 /// * Combat — read-only view; Esc returns to the active combat turn
-/// * CharacterSheet — already open; click updates the focused member in-place
 ///
 /// Blocked in `Dialogue`, `Training`, `MerchantInventory`,
-/// `ContainerInventory`, and `TempleService` where digit-key or click input
-/// conflicts with existing UI elements.
+/// `ContainerInventory`, `TempleService`, and (as of the Phase 5 mouse-input
+/// fix) `CharacterSheet` itself: once the sheet is open, its own
+/// keyboard/mouse navigation (Party Overview grid nav, Single-view
+/// Tab/arrows/digits, the Bio toggle) is the only way to change focus or
+/// content. A HUD portrait click reaching through to
+/// `enter_character_sheet_at` while the sheet was already open double-handled
+/// the same click alongside whatever the sheet's own egui widgets did with
+/// it, which was the root cause of this screen's mouse-click regressions.
 ///
 /// # Examples
 ///
@@ -869,16 +874,17 @@ pub fn portrait_click_allowed(mode: &GameMode) -> bool {
             | GameMode::SpellBook(_)
             | GameMode::GameLog
             | GameMode::Combat(_)
-            | GameMode::CharacterSheet(_)
     )
 }
 
 /// Opens or switches the character sheet when a HUD portrait is clicked.
 ///
 /// Activates from `Exploration`, `Automap`, `Inventory`, `SpellBook`,
-/// `GameLog`, `Combat`, and `CharacterSheet` modes.  Blocked in `Dialogue`,
-/// `Training`, `MerchantInventory`, `ContainerInventory`, and `TempleService`
-/// where click input conflicts with existing UI.
+/// `GameLog`, and `Combat` modes.  Blocked in `Dialogue`, `Training`,
+/// `MerchantInventory`, `ContainerInventory`, `TempleService`, and
+/// `CharacterSheet` (once the sheet is open, its own input handles focus
+/// changes -- see [`portrait_click_allowed`]) where click input conflicts
+/// with existing UI.
 ///
 /// Registered **without** the `not_in_combat` guard so portrait clicks fire
 /// during combat frames as well.  Because [`GameState::enter_character_sheet_at`]
@@ -5334,6 +5340,16 @@ mod portrait_click_tests {
         assert!(!portrait_click_allowed(&GameMode::GameOver));
     }
 
+    #[test]
+    fn test_portrait_click_not_allowed_character_sheet() {
+        // Phase 5 mouse-input fix: HUD portrait clicks are blocked once the
+        // Character Sheet is open -- its own input is the only way to
+        // change focus now (see the doc comment on `portrait_click_allowed`).
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        assert!(!portrait_click_allowed(&state.mode));
+    }
+
     // ── handle_portrait_click_opens_sheet ─────────────────────────────────────────────────────────────────────────
 
     #[test]
@@ -5412,20 +5428,25 @@ mod portrait_click_tests {
     }
 
     #[test]
-    fn test_handle_portrait_click_when_already_in_sheet_updates_index() {
+    fn test_handle_portrait_click_blocked_when_sheet_already_open() {
+        // Phase 5 mouse-input fix: once the Character Sheet is open, HUD
+        // portrait clicks are redundant with (and previously double-handled
+        // alongside) the sheet's own keyboard/mouse navigation, which was
+        // the root cause of this screen's recurring mouse-click regressions.
         let mut state = two_member_state();
-        // Open at index 0.
         state.enter_character_sheet_at(0);
-        assert!(portrait_click_allowed(&state.mode));
-
-        // Click portrait 1 while sheet is already open.
-        state.enter_character_sheet_at(1);
-
         assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+
+        assert!(
+            !portrait_click_allowed(&state.mode),
+            "portrait clicks must be blocked while the Character Sheet is already open"
+        );
+
+        // Mode/focus is unaffected by the (blocked) click attempt -- still
+        // focused on index 0, not re-targeted to whatever portrait was
+        // "clicked".
         if let GameMode::CharacterSheet(ref cs) = state.mode {
-            assert_eq!(cs.focused_index, 1);
-            // Resume mode must still be Exploration (no re-wrapping).
-            assert!(matches!(cs.get_resume_mode(), GameMode::Exploration));
+            assert_eq!(cs.focused_index, 0);
         }
     }
 

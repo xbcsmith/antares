@@ -166,12 +166,12 @@ non-mouse user); `render_party_overview` passes
 
 #### 1.5 Deliverables
 
-- [ ] Arrow-key grid navigation in Party Overview
-- [ ] Enter/Space opens Single view for the highlighted card
-- [ ] Digit keys 1-6 work in both views
-- [ ] Visible highlight on the keyboard-selected card
-- [ ] Updated hint bar for Party Overview (`[↑↓←→] Move  [Enter] View  [1-6] Select  [O] Single  [Esc/P] Close`)
-- [ ] Module doc comment (`character_sheet_ui.rs:21-51`) updated to match
+- [x] Arrow-key grid navigation in Party Overview
+- [x] Enter/Space opens Single view for the highlighted card
+- [x] Digit keys 1-6 work in both views
+- [x] Visible highlight on the keyboard-selected card
+- [x] Updated hint bar for Party Overview (`[↑↓←→] Move  [Enter] View  [1-6] Select  [O] Single  [Esc/P] Close`)
+- [x] Module doc comment (`character_sheet_ui.rs:21-51`) updated to match
 
 #### 1.6 Success Criteria
 
@@ -257,14 +257,14 @@ sites in `src/sdk/database.rs`:
 
 #### 2.5 Deliverables
 
-- [ ] `CharacterLore`/`CharacterProfile` types + fields on `CharacterDefinition`/`Character`, with `Character.lore` marked `#[serde(default)]`
-- [ ] `CharacterDatabase::load_from_campaign` with lore resolution, warn-and-continue error handling
-- [ ] Both `ContentDatabase` loaders updated (including the `load_core` campaign-root derivation)
-- [ ] Old-save-fixture deserialization regression test
-- [ ] Lore RON files authored for tutorial characters under `campaigns/tutorial/assets/characters/lore/`, referenced from `campaigns/tutorial/data/characters.ron`. The full premade roster is 8 characters: Kira, Sirius, Isolde, Mira, Old Gareth, Whisper, Apprentice Zara, and Zhaya — author lore for all 8, or state an explicit inclusion criterion here if scoping down.
-- [ ] `docs/reference/campaign_content_format.md` — add `lore_file` to the characters.ron "Optional Fields" table (currently `:221-266`)
-- [ ] `docs/how-to/character_definition_ron_format.md` — document the new field(s) in the RON format walkthrough
-- [ ] `docs/how-to/create_characters.md` — add `lore_file` to the "Field Reference" table
+- [x] `CharacterLore`/`CharacterProfile` types + fields on `CharacterDefinition`/`Character`, with `Character.lore` marked `#[serde(default)]`
+- [x] `CharacterDatabase::load_from_campaign` with lore resolution, warn-and-continue error handling
+- [x] Both `ContentDatabase` loaders updated (including the `load_core` campaign-root derivation)
+- [x] Old-save-fixture deserialization regression test
+- [x] Lore RON files authored for tutorial characters under `campaigns/tutorial/assets/characters/lore/`, referenced from `campaigns/tutorial/data/characters.ron`. The full premade roster is 8 characters: Kira, Sirius, Isolde, Mira, Old Gareth, Whisper, Apprentice Zara, and Zhaya — author lore for all 8, or state an explicit inclusion criterion here if scoping down.
+- [x] `docs/reference/campaign_content_format.md` — add `lore_file` to the characters.ron "Optional Fields" table (currently `:221-266`)
+- [x] `docs/how-to/character_definition_ron_format.md` — document the new field(s) in the RON format walkthrough
+- [x] `docs/how-to/create_characters.md` — add `lore_file` to the "Field Reference" table
 
 #### 2.6 Success Criteria
 
@@ -314,10 +314,10 @@ match, per the existing convention of keeping doc and rendered hints in sync.
 
 #### 3.5 Deliverables
 
-- [ ] Bio panel state + toggle in `CharacterSheetState`
-- [ ] `B` keyboard shortcut, gated on lore presence
-- [ ] Bio panel rendering (title/archetype/backstory/motivation/combat style)
-- [ ] Hint bar + doc comment updated
+- [x] Bio panel state + toggle in `CharacterSheetState`
+- [x] `B` keyboard shortcut, gated on lore presence
+- [x] Bio panel rendering (title/archetype/backstory/motivation/combat style)
+- [x] Hint bar + doc comment updated
 
 #### 3.6 Success Criteria
 
@@ -355,10 +355,10 @@ edit.
 
 #### 4.5 Deliverables
 
-- [ ] Lore section in the character editor
-- [ ] `docs/how-to/create_characters.md` — "Using the Campaign Builder →
+- [x] Lore section in the character editor
+- [x] `docs/how-to/create_characters.md` — "Using the Campaign Builder →
       Editor Features" section updated to mention the new Lore section
-- [ ] Load/save wired through `campaign_io.rs`
+- [x] Load/save wired through `campaign_io.rs`
 
 #### 4.6 Success Criteria
 
@@ -403,8 +403,8 @@ the double-handling bug in the first place.
 
 #### 5.4 Deliverables
 
-- [ ] `CharacterSheet` added to mode guards
-- [ ] Portrait click-through resolved
+- [x] `CharacterSheet` added to mode guards
+- [x] Portrait click-through resolved
 
 #### 5.5 Success Criteria
 

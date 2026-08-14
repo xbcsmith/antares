@@ -79,6 +79,7 @@ The Characters tab provides:
 - **Add Mode**: Create new character definitions
 - **Edit Mode**: Modify existing definitions
 - **Filter Options**: Filter by race, class, alignment, or premade status
+- **Lore Section**: Optionally add long-form backstory content (title, archetype, core motivation, combat style, and a multi-paragraph backstory) shown in the in-game Character Sheet's Bio panel
 
 ### Creating a Character in the Editor
 
@@ -93,8 +94,9 @@ The Characters tab provides:
 6. Configure starting resources (gold, gems, food)
 7. Select starting items and equipment
 8. Set portrait ID
-9. Mark as premade if this is a player-selectable character
-10. Click **Save**
+9. (Optional) Fill in the **Lore** section — title, archetype, core motivation, combat style, and backstory — to give the character long-form content visible in-game via the Bio panel
+10. Mark as premade if this is a player-selectable character
+11. Click **Save**
 
 ## Manual RON File Editing
 
@@ -237,6 +239,7 @@ You can also edit character definitions directly in RON files.
 | `starting_items`     | Vec    | []      | Item IDs to add to inventory                                                                            |
 | `starting_equipment` | Struct | Empty   | Items to equip in slots                                                                                 |
 | `description`        | String | ""      | Character backstory/bio                                                                                 |
+| `lore_file`          | Option<String> | None    | Path to external RON file with long-form backstory/profile (relative to campaign root) |
 | `is_premade`         | bool   | false   | Player-selectable character                                                                             |
 
 ### Base Stats Structure

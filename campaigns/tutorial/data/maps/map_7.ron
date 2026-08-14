@@ -2,8 +2,8 @@
     id: 7,
     width: 40,
     height: 40,
-    name: "Astronomers Temple",
-    description: "",
+    name: "Temple of the Astronomer",
+    description: "A great stone pyramid rising from the Glass Sea of Khareth, aligned so its capstone catches starlight from a hundred worlds at once.",
     tiles: [
         (
             terrain: Stone,

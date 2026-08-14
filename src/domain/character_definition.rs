@@ -62,6 +62,7 @@ use crate::domain::items::calculate_armor_class;
 use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::SpellSchool;
+use crate::domain::path_security::validate_campaign_relative_path;
 use crate::domain::races::{RaceDatabase, RaceDefinition};
 use crate::domain::skills::CharacterSkillRanks;
 use crate::domain::transactions::equip_item;
@@ -325,6 +326,77 @@ impl StartingEquipment {
     }
 }
 
+// ===== Character Lore =====
+
+/// Structured biographical summary for a character, shown in the Bio panel
+/// (see the character bio & navigation implementation plan, Phase 3).
+///
+/// Distinct from [`CharacterProfile::title`]/etc. on `CharacterDefinition`
+/// itself -- `profile` fields are short, single-line labels rendered
+/// alongside [`CharacterLore::backstory`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character_definition::CharacterProfile;
+///
+/// let profile = CharacterProfile {
+///     title: "The Wandering Blade".to_string(),
+///     archetype: "Reluctant Hero".to_string(),
+///     core_motivation: "Redemption for a broken oath".to_string(),
+///     combat_style: "Aggressive melee, high-risk openings".to_string(),
+/// };
+/// assert_eq!(profile.archetype, "Reluctant Hero");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CharacterProfile {
+    /// Short honorific or epithet shown above the backstory (falls back to
+    /// the character's name in the UI when empty).
+    pub title: String,
+    /// One- or two-word narrative archetype (e.g. "Reluctant Hero").
+    pub archetype: String,
+    /// The single driving motivation behind the character's actions.
+    pub core_motivation: String,
+    /// A short description of how the character fights.
+    pub combat_style: String,
+}
+
+/// Long-form backstory and profile content for a character.
+///
+/// Loaded from an external, per-character RON file referenced by
+/// [`CharacterDefinition::lore_file`], and resolved onto
+/// [`CharacterDefinition::lore`] by
+/// [`CharacterDatabase::load_from_campaign`]. This is deliberately **not** a
+/// duplicate of [`CharacterDefinition::description`]: `description` stays a
+/// short, single-line blurb used everywhere a compact summary is needed
+/// (character selection, tooltips), while `CharacterLore::backstory` is
+/// long-form, scrollable, multi-paragraph content shown only in the Bio
+/// panel.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character_definition::{CharacterLore, CharacterProfile};
+///
+/// let lore = CharacterLore {
+///     backstory: "Born in the ashes of a burned village...".to_string(),
+///     profile: CharacterProfile {
+///         title: "The Wandering Blade".to_string(),
+///         archetype: "Reluctant Hero".to_string(),
+///         core_motivation: "Redemption for a broken oath".to_string(),
+///         combat_style: "Aggressive melee, high-risk openings".to_string(),
+///     },
+/// };
+/// assert!(lore.backstory.starts_with("Born in the ashes"));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CharacterLore {
+    /// Long-form, multi-paragraph backstory text.
+    pub backstory: String,
+    /// Structured profile summary shown alongside the backstory.
+    pub profile: CharacterProfile,
+}
+
 // ===== Character Definition =====
 
 /// Complete definition of a character template
@@ -356,6 +428,8 @@ impl StartingEquipment {
 ///     starting_spells: vec![],
 ///     starting_equipment: StartingEquipment::default(),
 ///     description: "A noble knight seeking glory.".to_string(),
+///     lore_file: None,
+///     lore: None,
 ///     is_premade: true,
 ///     starts_in_party: false,
 ///     creature_id: None,
@@ -445,8 +519,27 @@ pub struct CharacterDefinition {
     pub starting_equipment: StartingEquipment,
 
     /// Character backstory/biography
+    ///
+    /// Stays a short, single-line blurb -- distinct from the long-form
+    /// [`CharacterLore::backstory`] resolved via [`lore_file`](Self::lore_file).
     #[serde(default)]
     pub description: String,
+
+    /// Path to an external RON file (relative to the campaign root)
+    /// containing this character's [`CharacterLore`] -- long-form backstory
+    /// and profile content shown in the Bio panel. `None` means the
+    /// character has no lore content.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lore_file: Option<String>,
+
+    /// Resolved lore content, populated by
+    /// [`CharacterDatabase::load_from_campaign`] when `lore_file` is set and
+    /// the referenced file loads successfully. Not serialized -- this is
+    /// derived at load time from `lore_file`, never authored directly in
+    /// `characters.ron`.
+    #[serde(skip)]
+    pub lore: Option<CharacterLore>,
 
     /// True for pre-made characters, false for templates
     #[serde(default)]
@@ -520,6 +613,8 @@ struct CharacterDefinitionDef {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
+    pub lore_file: Option<String>,
+    #[serde(default)]
     pub is_premade: bool,
     #[serde(default)]
     pub starts_in_party: bool,
@@ -563,6 +658,8 @@ impl From<CharacterDefinitionDef> for CharacterDefinition {
             starting_items: def.starting_items,
             starting_equipment: def.starting_equipment,
             description: def.description,
+            lore_file: def.lore_file,
+            lore: None,
             is_premade: def.is_premade,
             starts_in_party: def.starts_in_party,
             creature_id: def.creature_id,
@@ -626,6 +723,8 @@ impl CharacterDefinition {
             starting_items: Vec::new(),
             starting_equipment: StartingEquipment::new(),
             description: String::new(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -892,6 +991,7 @@ impl CharacterDefinition {
             gold: self.starting_gold,
             gems: self.starting_gems,
             skill_ranks: CharacterSkillRanks::new(),
+            lore: self.lore.clone(),
         };
 
         // Two-pass starting equipment:
@@ -1357,6 +1457,93 @@ impl CharacterDatabase {
             }
             definition.validate()?;
             db.characters.insert(definition.id.clone(), definition);
+        }
+
+        Ok(db)
+    }
+
+    /// Loads a campaign's character database, resolving each character's
+    /// optional `lore_file` into [`CharacterLore`] content.
+    ///
+    /// Mirrors [`CreatureDatabase::load_from_registry`] for path resolution
+    /// via [`validate_campaign_relative_path`] -- but **not** for error
+    /// handling. `load_from_registry` is fail-fast, which is correct for
+    /// creature data; it is wrong here because `lore_file` is optional,
+    /// decorative, per-character content:
+    ///
+    /// - A character with no `lore_file` set loads normally with `lore: None`.
+    /// - A `lore_file` that fails path-security validation (empty, absolute,
+    ///   or attempting `..` traversal) is a **hard error** -- this indicates
+    ///   malformed or malicious campaign data, not an ordinary missing file.
+    /// - A `lore_file` that validates but is unreadable, or whose contents
+    ///   fail to parse as [`CharacterLore`], only logs a warning: that
+    ///   character keeps `lore: None` and the rest of the campaign still
+    ///   loads.
+    ///
+    /// [`CreatureDatabase::load_from_registry`]: crate::domain::visual::creature_database::CreatureDatabase::load_from_registry
+    ///
+    /// # Arguments
+    ///
+    /// * `data_dir` - Path to the campaign's `data/` directory (containing `characters.ron`).
+    /// * `campaign_root` - Path to the campaign root, used to resolve `lore_file` values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `characters.ron` cannot be read, parsed, or
+    /// validated, or if any character's `lore_file` fails path-security
+    /// validation.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::domain::character_definition::CharacterDatabase;
+    /// use std::path::Path;
+    ///
+    /// let campaign_root = Path::new("campaigns/tutorial");
+    /// let data_dir = campaign_root.join("data");
+    ///
+    /// let db = CharacterDatabase::load_from_campaign(&data_dir, campaign_root)
+    ///     .expect("Failed to load campaign character database");
+    /// ```
+    pub fn load_from_campaign(
+        data_dir: &Path,
+        campaign_root: &Path,
+    ) -> Result<Self, CharacterDefinitionError> {
+        let mut db = Self::load_from_file(data_dir.join("characters.ron"))?;
+
+        for definition in db.characters.values_mut() {
+            let Some(lore_file) = definition.lore_file.clone() else {
+                continue;
+            };
+
+            let resolved_path = validate_campaign_relative_path(campaign_root, &lore_file)
+                .map_err(|e| {
+                    CharacterDefinitionError::LoadError(format!(
+                        "Unsafe lore_file '{}' for character '{}': {}",
+                        lore_file, definition.id, e
+                    ))
+                })?;
+
+            let contents = match std::fs::read_to_string(&resolved_path) {
+                Ok(contents) => contents,
+                Err(e) => {
+                    warn!(
+                        "Failed to read lore_file '{}' for character '{}': {}; lore will be unavailable",
+                        lore_file, definition.id, e
+                    );
+                    continue;
+                }
+            };
+
+            match ron::from_str::<CharacterLore>(&contents) {
+                Ok(lore) => definition.lore = Some(lore),
+                Err(e) => {
+                    warn!(
+                        "Failed to parse lore_file '{}' for character '{}': {}; lore will be unavailable",
+                        lore_file, definition.id, e
+                    );
+                }
+            }
         }
 
         Ok(db)
@@ -2403,6 +2590,217 @@ mod tests {
         assert!(matches!(res, Err(CharacterDefinitionError::ParseError(_))));
     }
 
+    // ── CharacterLore ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_character_lore_round_trip_serialization() {
+        let lore = CharacterLore {
+            backstory: "Born in the ashes of a burned village, she swore an oath \
+                        of vengeance that has since curdled into something quieter."
+                .to_string(),
+            profile: CharacterProfile {
+                title: "The Wandering Blade".to_string(),
+                archetype: "Reluctant Hero".to_string(),
+                core_motivation: "Redemption for a broken oath".to_string(),
+                combat_style: "Aggressive melee, high-risk openings".to_string(),
+            },
+        };
+
+        let serialized = ron::to_string(&lore).expect("serialization must succeed");
+        let round_tripped: CharacterLore =
+            ron::from_str(&serialized).expect("deserialization must succeed");
+
+        assert_eq!(lore, round_tripped);
+    }
+
+    // ── CharacterDatabase::load_from_campaign ───────────────────────────────
+
+    /// Minimal valid `characters.ron` body for a single character, with an
+    /// optional `lore_file:` line injected verbatim so callers can supply
+    /// `""`, `Some("...")`, or omit it entirely.
+    fn minimal_character_ron(id: &str, lore_file_line: &str) -> String {
+        format!(
+            r#"[
+    (
+        id: "{id}",
+        name: "Test",
+        race_id: "human",
+        class_id: "knight",
+        sex: Male,
+        alignment: Good,
+        base_stats: (
+            might: 10,
+            intellect: 10,
+            personality: 10,
+            endurance: 10,
+            speed: 10,
+            accuracy: 10,
+            luck: 10,
+        ),
+        {lore_file_line}
+    ),
+]"#
+        )
+    }
+
+    #[test]
+    fn test_load_from_campaign_no_lore_file_loads_with_lore_none() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        std::fs::write(
+            data_dir.join("characters.ron"),
+            minimal_character_ron("no_lore", ""),
+        )
+        .unwrap();
+
+        let db = CharacterDatabase::load_from_campaign(&data_dir, campaign_root)
+            .expect("campaign must load even with no lore_file set");
+
+        let character = db.get_character("no_lore").expect("character must exist");
+        assert!(
+            character.lore.is_none(),
+            "lore must be None when lore_file is unset"
+        );
+    }
+
+    #[test]
+    fn test_load_from_campaign_missing_lore_file_warns_and_continues() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        std::fs::write(
+            data_dir.join("characters.ron"),
+            minimal_character_ron(
+                "missing_lore",
+                r#"lore_file: Some("assets/characters/lore/does_not_exist.ron"),"#,
+            ),
+        )
+        .unwrap();
+
+        let db = CharacterDatabase::load_from_campaign(&data_dir, campaign_root)
+            .expect("campaign must still load when a referenced lore_file is missing");
+
+        let character = db
+            .get_character("missing_lore")
+            .expect("character must exist");
+        assert!(
+            character.lore.is_none(),
+            "lore must be None when the referenced file does not exist"
+        );
+    }
+
+    #[test]
+    fn test_load_from_campaign_invalid_lore_file_warns_and_continues() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        let lore_dir = campaign_root.join("assets/characters/lore");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&lore_dir).unwrap();
+
+        std::fs::write(
+            data_dir.join("characters.ron"),
+            minimal_character_ron(
+                "invalid_lore",
+                r#"lore_file: Some("assets/characters/lore/broken.ron"),"#,
+            ),
+        )
+        .unwrap();
+        std::fs::write(lore_dir.join("broken.ron"), "not valid ron { ] [").unwrap();
+
+        let db = CharacterDatabase::load_from_campaign(&data_dir, campaign_root)
+            .expect("campaign must still load when a referenced lore_file fails to parse");
+
+        let character = db
+            .get_character("invalid_lore")
+            .expect("character must exist");
+        assert!(
+            character.lore.is_none(),
+            "lore must be None when the referenced file fails to parse"
+        );
+    }
+
+    #[test]
+    fn test_load_from_campaign_valid_lore_file_populates_lore() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        let lore_dir = campaign_root.join("assets/characters/lore");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&lore_dir).unwrap();
+
+        std::fs::write(
+            data_dir.join("characters.ron"),
+            minimal_character_ron(
+                "has_lore",
+                r#"lore_file: Some("assets/characters/lore/good.ron"),"#,
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            lore_dir.join("good.ron"),
+            r#"(
+    backstory: "A tale of valor.",
+    profile: (
+        title: "The Bold",
+        archetype: "Hero",
+        core_motivation: "Glory",
+        combat_style: "Frontal assault",
+    ),
+)"#,
+        )
+        .unwrap();
+
+        let db = CharacterDatabase::load_from_campaign(&data_dir, campaign_root)
+            .expect("campaign must load with a valid lore_file");
+
+        let character = db.get_character("has_lore").expect("character must exist");
+        let lore = character
+            .lore
+            .as_ref()
+            .expect("lore must be populated from a valid lore_file");
+        assert_eq!(lore.backstory, "A tale of valor.");
+        assert_eq!(lore.profile.title, "The Bold");
+    }
+
+    #[test]
+    fn test_load_from_campaign_rejects_parent_traversal_lore_file() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        std::fs::write(
+            data_dir.join("characters.ron"),
+            minimal_character_ron("malicious", r#"lore_file: Some("../../etc/passwd"),"#),
+        )
+        .unwrap();
+
+        let result = CharacterDatabase::load_from_campaign(&data_dir, campaign_root);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, CharacterDefinitionError::LoadError(_)));
+        assert!(
+            err.to_string().contains("Unsafe lore_file"),
+            "expected unsafe-path rejection, got: {err}"
+        );
+    }
+
     #[test]
     fn test_character_definition_validate_rejects_non_normalized_portrait_id() {
         // Non-normalized portrait IDs (spaces / uppercase) should be rejected by validate()
@@ -3256,6 +3654,8 @@ mod tests {
                 ..Default::default()
             },
             description: "A test knight".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: true,
             starts_in_party: false,
             creature_id: None,
@@ -3360,6 +3760,8 @@ mod tests {
                 ..Default::default()
             },
             description: "weapon equip test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3423,6 +3825,8 @@ mod tests {
                 ..Default::default()
             },
             description: "unequip test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3485,6 +3889,8 @@ mod tests {
                 ..Default::default()
             },
             description: "AC test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3528,6 +3934,8 @@ mod tests {
             starting_items: vec![],
             starting_equipment: StartingEquipment::new(), // empty
             description: "no-equipment test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3581,6 +3989,8 @@ mod tests {
                 ..Default::default()
             },
             description: "invalid-equip test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3741,6 +4151,8 @@ mod tests {
                 ..Default::default()
             },
             description: "A test sorcerer".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: true,
             starts_in_party: false,
             creature_id: None,
@@ -3788,6 +4200,8 @@ mod tests {
             starting_items: vec![],
             starting_equipment: StartingEquipment::default(),
             description: "Test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: true,
             starts_in_party: false,
             creature_id: None,
@@ -4283,6 +4697,8 @@ mod tests {
                 ..Default::default()
             },
             description: "helmet equip test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -4346,6 +4762,8 @@ mod tests {
                 ..Default::default()
             },
             description: "boots equip test".to_string(),
+            lore_file: None,
+            lore: None,
             is_premade: false,
             starts_in_party: false,
             creature_id: None,

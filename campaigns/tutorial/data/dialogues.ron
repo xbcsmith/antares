@@ -1,17 +1,37 @@
 [
     (
         id: 1,
-        name: "Arcturus Story",
+        name: "Arcturus - The Eternal Wanderer",
         root_node: 1,
         nodes: {
             1: (
                 id: 1,
-                text: "I am the Great Arcturus!",
+                text: "You find me between thoughts — a not-uncommon state. I am Arcturus. I have been called many things across many lives, but here, at the foot of this particular volcano, I am a wizard who has been waiting for exactly the sort of company that arrives when something interesting is about to happen. Shall I guess why you have come, or would you prefer to tell me yourself?",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "Tell me more.",
+                        text: "We need your help.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Who are you, truly?",
                         target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Tell us what you know of the Cosmic Weave.",
+                        target_node: Some(3),
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
@@ -39,7 +59,108 @@
             ),
             2: (
                 id: 2,
-                text: "Hello There! Come and sit and talk a while.",
+                text: "My knowledge comes from a great many incarnations. I have been a hermit, a king, a sailor who knew nothing about sailing. In this life I chose to slow down — to observe rather than to wander. Mount Ashkarron suits me. A mountain that still remembers how to change its shape is, I find, very good company. But you did not trek to my cave to hear about volcanoes.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Tell us what you know of the Weave.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We need your help.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "The Cosmic Weave — the fabric that holds every world, every plane, and every possibility together. For centuries it has frayed slowly at the edges, the sort of fraying most people mistake for ordinary bad luck. The Great Tremor. The Great Gloom. The Great Alignment. Each was a wound in the same cloth. Now something pulls from inside, and the tearing accelerates.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "What can be done?",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "The goblin movements, the storms above the Ironpeaks, three of my arcane instruments gone missing in as many months — none of it coincidence. Before I can help further I need those instruments back. My astrolabe was taken to the Ancient Ruins. A sealed reliquary of mine ended up in the Harrow Downs. Recover them and I will open a path to the one person who sees the full picture.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We will recover your instruments.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We cannot yet. Perhaps later.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "Good. My instruments are old and irreplaceable in ways I will explain when you return. The ruins crawl with kobolds and goblins, and the Harrow Downs opens its doors only to those paying close attention. Go carefully.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            6: (
+                id: 6,
+                text: "The world moves at its own pace whether you are watching or not. Come back when you are ready.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -59,27 +180,47 @@
     ),
     (
         id: 2,
-        name: "Arcturus Brother Story",
+        name: "Aetheris - The Void-Drifter",
         root_node: 1,
         nodes: {
             1: (
                 id: 1,
-                text: "Hello There! I am the brother of the Great Wizard Arcturus. I have a favor to  ask of you. Find my Bar that I lost in the area and return it to me. ",
+                text: "*the smoke from a small fire curls strangely inward, and the figure in the hut notices you a half-second before you arrive* Ah. You are not who I thought you were. My apologies — the Void has a habit of coloring my expectations. I am Aetheris. I stepped through something I should not have, some years ago, and have been finding my footing ever since. I do not often receive visitors. Please, sit.",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "We will return your Bar!",
+                        text: "What did you step through?",
                         target_node: Some(2),
                         conditions: [],
                         actions: [],
-                        ends_dialogue: true,
+                        ends_dialogue: false,
                         sdk_metadata: (
                             managed_content: [],
                         ),
                     ),
                     (
-                        text: "We do not have time. Maybe later",
+                        text: "Who did you think we were?",
                         target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We need your help.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
@@ -97,7 +238,106 @@
             ),
             2: (
                 id: 2,
-                text: "Thank you very much. I look forward to your return.",
+                text: "A tear in the Cosmic Weave — a place where the fabric between this world and elsewhere had grown so thin that stepping through it was, embarrassingly, an accident. I meant to cross the room. I ended up somewhere I could not name, and when I found my way back I was here. In this forest. In this hut. I have been here since. It is, at least, quiet.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Can you help us?",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "That sounds disorienting.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "You remind me — slightly, around the eyes — of people I knew in a different form. I do that sometimes. The Void makes memories unreliable. I am told I have another half, somewhere. A version of me that did not fall through the tear. He would be better at explaining all of this. His name is Arcturus. His cave is at the foot of Mount Ashkarron, at the edge of the Dark Forest.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Take us to Arcturus.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We already know where to find him.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "The goblins you followed here are not acting on their own, I think. That is what I have been trying to tell someone. Something stirs in the deep wood and reaches further than goblins should. I can lead you to Arcturus — he will know more than I do, which is not a high bar at present, but it is true.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Yes, take us to him.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We will find him ourselves. Thank you.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "*gathers his coat, which has one too many pockets* Good. The forest grows stranger after dark and I would rather not explain that to anyone else alone. Come.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -107,9 +347,9 @@
                     managed_content: [],
                 ),
             ),
-            3: (
-                id: 3,
-                text: "Sorry to hear that. Come back anytime.",
+            6: (
+                id: 6,
+                text: "Of course. You know your own path. I will be here if the forest leads you back this way.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -120,7 +360,7 @@
                 ),
             ),
         },
-        speaker_name: Some("Arcturus Brother"),
+        speaker_name: Some("Aetheris"),
         repeatable: false,
         associated_quest: Some(1),
         sdk_metadata: (
@@ -134,7 +374,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Welcome, travelers. I am the elder of this village, keeper of its history and guardian of its people. What brings you to our humble town?",
+                text: "Welcome, travelers. I have kept watch over this village for many years, and I tell you plainly: these are not ordinary troubled times. Strange creatures stir in the wilderness beyond the Dark Forest, goblin scouts range further than they should, and travelers speak of a cold spreading from somewhere in the far north. What brings you to our village?",
                 speaker_override: None,
                 choices: [
                     (
@@ -189,7 +429,7 @@
             ),
             2: (
                 id: 2,
-                text: "Our village has stood for generations, though darker times have befallen us of late. Strange creatures stir in the wilderness, and travelers speak of growing dangers. But we endure, as we always have.",
+                text: "Our village has stood for generations in the river valleys of Ashvale. We have endured floods, harsh winters, and the usual troubles of the road. But what stirs now feels different — larger. The goblins that raid our outlying farms are not disorganized scavengers. They move with purpose, as if directed by something that sees further than they do.",
                 speaker_override: None,
                 choices: [
                     (
@@ -222,7 +462,7 @@
             ),
             3: (
                 id: 3,
-                text: "Ah, you seek purpose! I do have a matter that requires capable hands. Goblins have been raiding our outlying farms. Their camp must be dealt with before they grow bolder.",
+                text: "Goblins have been raiding our outlying farms and driving farmers from their land. We thought it ordinary banditry — but the raids are too coordinated, the scouts too bold. Something stirs in the Dark Forest and the goblins are its outriders. We need capable hands to push them back before they grow bolder.",
                 speaker_override: None,
                 choices: [
                     (
@@ -255,7 +495,7 @@
             ),
             4: (
                 id: 4,
-                text: "Goblin raids, wolves grown unnaturally aggressive, and whispers of darker things in the old places. The world changes, and not for the better.",
+                text: "Goblin raids, creatures grown unnaturally aggressive, whispers of something cold spreading from the north. The Cosmic Weave that holds this world together has been fraying at its edges, though few dare say so plainly. Each strange event fits the same wound.",
                 speaker_override: None,
                 choices: [
                     (
@@ -278,7 +518,7 @@
             ),
             5: (
                 id: 5,
-                text: "Blessings upon you, brave ones. May your blades strike true and your courage never falter. Return when the deed is done.",
+                text: "May the old roads carry you safely. Drive back the goblins and return when the deed is done — there is more I would tell you about what drives them, but first things first.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -323,7 +563,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Welcome to the Cozy Inn! Best beds and warmest meals this side of the mountains. What can I do for you, friend?",
+                text: "Welcome to the Cozy Hearth! Best beds in the Ashvale river valley, and I have it on good authority my stew is passable. These are strange times for travelers, I'll say that much. What can I do for you?",
                 speaker_override: None,
                 choices: [
                     (
@@ -421,7 +661,7 @@
             ),
             3: (
                 id: 3,
-                text: "Oh, plenty of travelers coming through with wild tales. Some wizard\'s been recruiting folks for something or other. And there\'s talk of trouble up in the mountain pass. But then again, there\'s always talk, isn\'t there?",
+                text: "Travelers come through with wild tales these days. Word is there's a wizard up near Mount Ashkarron who's been asking questions, and goblins have been pushing further out of the Dark Forest than anyone's comfortable with. And then there's the cold reports from the north — travelers who came south through the Mountain Pass saying the rivers up there freeze mid-flow. But then again, there's always talk, isn't there?",
                 speaker_override: None,
                 choices: [
                     (
@@ -516,7 +756,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Greetings, traveler! You\'ve got the look of someone who needs quality goods. Lucky for you, I\'ve got the finest wares from here to the capital!",
+                text: "Greetings, adventurer! You've got the look of someone who needs quality goods and won't fuss about the provenance. I've come down from the Mountain Pass road, which means I've earned whatever price I'm asking. What can I show you?",
                 speaker_override: None,
                 choices: [
                     (
@@ -602,7 +842,7 @@
             ),
             3: (
                 id: 3,
-                text: "All over! The mountain pass, the coastal cities, even the deep forests when the roads are safe. Being a traveling merchant means seeing the world - and all its dangers.",
+                text: "All over — Ashvale's river valleys, the Mountain Pass, and once as far as the Glass Sea though I do not recommend that crossing. Being a traveling merchant means seeing the world and all its dangers. Lately the dangers have been more interesting than usual.",
                 speaker_override: None,
                 choices: [
                     (
@@ -658,7 +898,7 @@
             ),
             5: (
                 id: 5,
-                text: "It can be! That\'s why I always travel with guards, or hire adventurers when I can. Speaking of which, if you\'re ever interested in escort work, the guild always needs capable warriors.",
+                text: "It can be! The roads are not what they were — goblin scouts this side of the Dark Forest, undead stirring near the Harrow Downs, and reports of an unnatural cold spreading from somewhere north of the Mountain Pass. The Guild tracks all of it, and prices have adjusted accordingly.",
                 speaker_override: None,
                 choices: [
                     (
@@ -710,7 +950,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "May the light guide your path, traveler. I am the High Priestess of this temple. Do you seek healing for your wounds, or perhaps guidance for your soul?",
+                text: "May the light find you, traveler. I am the High Priestess of this temple, and in these troubled times our doors have never been more needed. The Great Gloom that has pressed on the edges of Ashvale for generations grows bolder. We tend to the sick, protect the frightened, and hold a light that refuses to go out. Do you seek healing, guidance, or something else?",
                 speaker_override: None,
                 choices: [
                     (
@@ -765,7 +1005,7 @@
             ),
             2: (
                 id: 2,
-                text: "This temple has stood as a beacon of hope for centuries. We tend to the sick, comfort the weary, and protect the innocent. In these troubled times, our purpose has never been more vital.",
+                text: "This temple has stood for centuries as a sanctuary against the Great Gloom — the creeping darkness that hungers at the edges of the world. Where the Weave thins, the Gloom presses in. Our work is to hold the light steady in such places and tend to those the darkness has already touched.",
                 speaker_override: None,
                 choices: [
                     (
@@ -798,7 +1038,7 @@
             ),
             3: (
                 id: 3,
-                text: "The path before you is shrouded in shadow, but light always finds a way through darkness. Trust in your companions, stay true to your values, and remember - even the smallest act of kindness can change the world.",
+                text: "The Gloom does not rest and neither do we. What grows strange in the old places, what walks out of the Harrow Downs, what reaches from the far north — these are not separate troubles but one wound in the fabric of the world. Stay true to the light in you, and that light will hold.",
                 speaker_override: None,
                 choices: [
                     (
@@ -831,7 +1071,7 @@
             ),
             4: (
                 id: 4,
-                text: "Dark forces stir in forgotten places. The balance between light and shadow grows precarious. We must all do our part to preserve what is good in this world.",
+                text: "We have seen it before — the fraying at the edges of things, the shadows that learn to hunger. The Weave that holds the world together grows thin wherever the Gloom presses. We do what we can, but what presses from the north now is something more deliberate than shadow. Something chose to still the world.",
                 speaker_override: None,
                 choices: [
                     (
@@ -899,7 +1139,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Thank the gods someone\'s here! I\'ve been wandering these woods for days. Bandits ambushed me on the road - took everything, including my grandfather\'s bow. It\'s been in my family for three generations!",
+                text: "*looks up from a map scratched in the dirt, then exhales with relief* You have the look of people who know what they're doing. I've been tracking unusual goblin movements for three days — not raids, patrols. Organized, with scouts ranging far ahead of the main group. Something is directing them. I lost my bearings when I followed them too deep into the forest and my compass started behaving strangely. I need help getting clear of here.",
                 speaker_override: None,
                 choices: [
                     (
@@ -942,7 +1182,7 @@
             ),
             2: (
                 id: 2,
-                text: "North of here, near the old mill ruins. There were at least six of them - too many for me alone, especially without my bow. They\'re probably still camped there, dividing up their spoils.",
+                text: "The goblins moved southeast from deeper in the Dark Forest, where the Weave thins near the old places of power. They carried something — an instrument, arcane, taken from somewhere. Whatever directs them values that instrument more than any raid. I tried to follow. I should not have tried to follow alone.",
                 speaker_override: None,
                 choices: [
                     (
@@ -975,7 +1215,7 @@
             ),
             3: (
                 id: 3,
-                text: "You will? By the wild, thank you! The bow has a carved eagle on the grip - you can\'t miss it. Please, be careful. Those bandits are dangerous, but that bow means everything to me.",
+                text: "You'd do that? Good. I need to report this to the Rangers Guild — the organized goblin movement is more serious than the villages realize. If you can help me navigate back to the road, I will tell you everything I observed. It may be useful where you are going.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -987,7 +1227,7 @@
             ),
             4: (
                 id: 4,
-                text: "I... I understand. Perhaps the Rangers Guild will send someone. I just hope I can find my way back to civilization first.",
+                text: "Understood. Perhaps the Rangers Guild will send someone better equipped. I hope the forest is done with its strange moods by the time they arrive.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -1012,7 +1252,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "You have the look of seasoned adventurers. Good, for I have a grave matter that requires such courage. The Harrow Downs... an ancient evil has awakened there.",
+                text: "You have the look of seasoned travelers. Good — because what troubles these lands is not simple banditry. The tombs of the Harrow Downs have begun opening from the inside, and the dead that walk out are not the restless kind. They are directed. Something old woke in those ruins, and worse — we hear word of a stillness spreading from far to the north. Two troubles at once. Which one concerns you more?",
                 speaker_override: None,
                 choices: [
                     (
@@ -1067,7 +1307,7 @@
             ),
             2: (
                 id: 2,
-                text: "A Lich. An undead sorcerer of immense power, sealed away centuries ago by heroes of old. But the seals have weakened, and the creature stirs once more. Already, the dead walk in the Harrow Downs.",
+                text: "A powerful undead presence, old and patient. The tombs of an advanced civilization that built with craft we have not matched since — and something that sleeps in the deepest vault has begun stirring. Already the dead walk. Beyond that, rumor reaches us of an unnatural cold spreading from the Frostspire Peaks far to the north. Rivers freeze mid-current. Snow falls without wind. Something has stilled the land up there.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1100,7 +1340,7 @@
             ),
             3: (
                 id: 3,
-                text: "Bless you, heroes. Journey to the Harrow Downs and find the Lich\'s tomb. Destroy the creature before it regains its full strength. The fate of all who live in these lands depends on your success.",
+                text: "Bless you. Journey to the Harrow Downs and seal whatever has opened there. A reliquary was taken from a wizard named Arcturus — retrieve it while you investigate. And keep your ears open for word of the stillness spreading from the north. These troubles may share a root.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1123,7 +1363,7 @@
             ),
             4: (
                 id: 4,
-                text: "You must find its tomb and destroy the phylactery - the vessel containing its soul. Without it, even a Lich can be truly slain. But beware, the creature will not be unguarded.",
+                text: "Search the Harrow Downs for what has opened. There will be a vault, a sealed reliquary that does not belong to the dead — recover it. The dead will quiet when the source of their direction is removed. Beyond that, watch the northern horizon. The stillness is patient and it spreads.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1213,7 +1453,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Well met, travelers! Welcome to the Mountain Rest Inn. Not many folks come through this pass these days, what with all the trouble. But my hearth is warm and my ale is cold!",
+                text: "Well met, travelers! Welcome to the Mountain Rest. Not many come through this pass lately, what with the strange cold coming down from the north and the dead walking near the Harrow Downs. But my hearth is warm, the ale is cold, and I have been running this inn through worse. What can I do for you?",
                 speaker_override: None,
                 choices: [
                     (
@@ -1278,7 +1518,7 @@
             ),
             2: (
                 id: 2,
-                text: "Undead, mostly. Coming from the Harrow Downs, they say. Even seen a few myself on foggy nights. Sent more than one traveler running back the way they came, I can tell you!",
+                text: "Both, truth be told. The dead are the closer problem — Harrow Downs is not far and I've seen shapes on foggy nights I don't care to name. But the cold from the north is the stranger one. Travelers coming south say rivers freeze mid-current up there, snow falls without wind. Something has stilled the land.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1311,7 +1551,7 @@
             ),
             3: (
                 id: 3,
-                text: "This pass has been a trade route for generations. In better times, you\'d see caravans and merchants daily. Now? Just the occasional brave soul and, well, those of you who look like you can handle yourselves.",
+                text: "This pass has been a trade route for generations. In better times, caravans daily. Now only the occasional brave soul. But the inn endures — four generations and a peculiar kind of cold that crept down from the north won't close our doors. Though I wouldn't say no to someone dealing with one or both problems.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1428,7 +1668,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Ah, customers! Rare these days, but always welcome. I\'ve got supplies for the road, weapons for the bold, and artifacts for the curious. What catches your eye?",
+                text: "Ah, customers! Rare these days — most traders won't touch this pass with the dead stirring near the Harrow Downs and the cold creeping down from the north. But I stay. The brave souls who still travel this road need supplies, and they pay well for the privilege. What catches your eye?",
                 speaker_override: None,
                 choices: [
                     (
@@ -1481,7 +1721,7 @@
             ),
             2: (
                 id: 2,
-                text: "The undead, friend. This pass used to be a merchant\'s dream - steady traffic, good prices. Now? Most traders won\'t come near it. But me? I see opportunity where others see danger. Plus, I charge hazard fees.",
+                text: "The dead and the cold, mostly. This pass used to be a merchant's dream. Now I charge what I call the hazard fee. The dead are bad enough, but the cold from the north is stranger — travelers say it doesn't feel like weather. It feels like something decided it.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1589,7 +1829,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Greetings, travelers. I am the High Priest of this temple. In these dark times, we stand as a bastion against the forces of undeath that plague these lands. How may I serve you?",
+                text: "Greetings, travelers. I am the High Priest of this mountain pass temple. The dead walk near the Harrow Downs, and a stillness creeps down from the far north with each passing week. We stand between the living and both. How may I serve you?",
                 speaker_override: None,
                 choices: [
                     (
@@ -1644,7 +1884,7 @@
             ),
             2: (
                 id: 2,
-                text: "They are an abomination, a perversion of the natural order. The Lich in the Harrow Downs commands them, growing stronger with each passing day. If not stopped, its army of the dead will consume all living things.",
+                text: "They rise from the Harrow Downs with a purpose I have not seen before — directed, almost intelligent. Something woke in those ancient tombs. But I am more troubled by what comes from the north. The stillness there is not undeath. It is something else. Something that chose to stop the world rather than end it.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1677,7 +1917,7 @@
             ),
             3: (
                 id: 3,
-                text: "We provide sanctuary to the living and eternal rest to the restless dead. Our priests patrol the roads, blessing travelers and destroying any undead we encounter. It is holy work, but exhausting.",
+                text: "We bless the roads, ward the waymarkers, and destroy the restless dead we find on the passes. It is holy work. The temple has also begun watching the north — the freezing of the Vaelgrim rivers, the snow that falls in silence. Something there has power over stillness itself, and that frightens me more than the walking dead.",
                 speaker_override: None,
                 choices: [
                     (
@@ -1889,40 +2129,32 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Hello there. My name is  Zara. Can I join your party?",
+                text: "*she is sitting cross-legged on a stump, writing very fast in a notebook while her staff glows faintly beside her. She startles as you approach.* Oh! Actual travelers — not kobolds! Wonderful. I am Zara Brightspark, apprentice of the Mage's Guild. Well. Currently-separated-from-her-mentor apprentice, technically. I have been documenting everything I can find while I work out how to locate Master Elian. Are you heading somewhere useful? Or at least somewhere that is not these ruins?",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "Yes, join us!",
-                        target_node: Some(2),
-                        conditions: [],
-                        actions: [
-                            RecruitToParty(
-                                character_id: "apprentice_zara",
-                            ),
-                        ],
-                        ends_dialogue: false,
-                        sdk_metadata: (
-                            managed_content: [],
-                        ),
-                    ),
-                    (
-                        text: "Meet me at the Inn.",
+                        text: "Join our company, Zara.",
                         target_node: Some(3),
                         conditions: [],
-                        actions: [
-                            TriggerEvent(
-                                event_name: "recruit_character_to_inn",
-                            ),
-                        ],
+                        actions: [],
                         ends_dialogue: false,
                         sdk_metadata: (
                             managed_content: [],
                         ),
                     ),
                     (
-                        text: "Not at this time.",
-                        target_node: None,
+                        text: "Tell us about your mentor.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Not today. Good luck.",
+                        target_node: Some(5),
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
@@ -1940,7 +2172,81 @@
             ),
             2: (
                 id: 2,
-                text: "Excellent! I\'m ready to join your adventure.",
+                text: "Master Elian — a battle-mage of considerable experience who thought field training would do me good. He was right. We were separated during an experiment I was calling a Living Constellation — the resulting burst of Lumina energy was magnificent, if somewhat wider than intended — and the Guild believes I am lost. I am not lost. I am conducting unscheduled independent research.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join us, Zara. We can search for him together.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell. Good luck with your research.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "*immediately snaps the notebook shut and springs up* Yes! I mean — I have considered your offer carefully. A company moving with purpose is far more likely to generate interesting data than a stump in a ruin. And if my path crosses Master Elian's, I want to have things worth reporting. Lead on.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join the party now.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [
+                            RecruitToParty(
+                                character_id: "apprentice_zara",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Meet us at the inn.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "The inn — good. I will secure my notes and meet you there. Do NOT let anyone touch my staff in the meantime.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -1950,9 +2256,21 @@
                     managed_content: [],
                 ),
             ),
-            3: (
-                id: 3,
-                text: "I\'ll head to the inn right away. See you there!",
+            5: (
+                id: 5,
+                text: "Understood. These ruins will keep me company. They are very old and have excellent structural documentation. Probably.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            6: (
+                id: 6,
+                text: "Excellent! I am ready to join your adventure. And I promise the Lumina experiments will be contained to a reasonable radius this time.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -1972,44 +2290,46 @@
     ),
     (
         id: 102,
-        name: "Whisper Recruitment ",
+        name: "Whisper Recruitment",
         root_node: 1,
         nodes: {
             1: (
                 id: 1,
-                text: "Hello there. My name is Whisper. Can I join your party?",
+                text: "*you notice her only because she allows it — she was watching from a doorway's shadow for some time before she stepped forward* Vespera Moonshadow. Some know me as Whisper. I am, professionally, a locksmith — and before you form a more colorful impression, that is precisely what I said. I also have a general aptitude for doors, windows, and situations that require more delicacy than a sword. I have been watching your company. You move with purpose. That is either very good or very bad, and I have not decided which yet.",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "Yes, join us!",
+                        text: "Join our company, Whisper.",
                         target_node: Some(2),
                         conditions: [],
-                        actions: [
-                            RecruitToParty(
-                                character_id: "whisper",
-                            ),
-                        ],
+                        actions: [],
                         ends_dialogue: false,
                         sdk_metadata: (
                             managed_content: [],
                         ),
                     ),
                     (
-                        text: "Meet me at the Inn.",
+                        text: "What do you want from us?",
                         target_node: Some(3),
                         conditions: [],
-                        actions: [
-                            TriggerEvent(
-                                event_name: "recruit_character_to_inn",
-                            ),
-                        ],
+                        actions: [],
                         ends_dialogue: false,
                         sdk_metadata: (
                             managed_content: [],
                         ),
                     ),
                     (
-                        text: "Not at this time.",
+                        text: "Tell us about yourself.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
                         target_node: None,
                         conditions: [],
                         actions: [],
@@ -2028,7 +2348,114 @@
             ),
             2: (
                 id: 2,
-                text: "Excellent! I\'m ready to join your adventure.",
+                text: "*a brief, evaluating pause, then a nod* Acceptable. I should warn you: I have certain professional habits that occasionally startle people. Nothing actionable — I simply notice things. Lead on.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join the party now.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [
+                            RecruitToParty(
+                                character_id: "whisper",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Meet us at the inn.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "Not to go back to where I came from. Not to find out the hard way that I misjudged your purpose. Beyond that, I am adaptable. A locksmith who travels with a company that picks worthwhile fights — that is a more interesting life than one who does not. What is the worst that could happen?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join us, then.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "Silver Spires, High Elf court, the kind of life where everything is beautiful and absolutely nothing is interesting. I traded it for a considerably less beautiful but more interesting alternative. *shrugs* The court has not missed me. I have not missed the court.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We could use that experience. Join us.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell, Whisper.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "The inn. Fine. I will take a room and watch the exits. Standard practice.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -2038,9 +2465,9 @@
                     managed_content: [],
                 ),
             ),
-            3: (
-                id: 3,
-                text: "I\'ll head to the inn right away. See you there!",
+            6: (
+                id: 6,
+                text: "*a half-smile* Your loss is not necessarily my loss. I know which way the interesting road goes.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -2573,12 +3000,12 @@
     ),
     (
         id: 1001,
-        name: "Jyeshtha Dialogue",
+        name: "Jyeshtha - The Glass Sea Watcher",
         root_node: 1,
         nodes: {
             1: (
                 id: 1,
-                text: "*opens his eyes slowly, their gaze deep and distant* You have arrived. I am Jyeshtha â\u{80}\u{94} keeper of this temple, wanderer of the paths between worlds. I have watched your approach across many timelines. There is something I must ask of you.",
+                text: "*opens his eyes slowly, their gaze deep and distant* You have arrived. I am Jyeshtha — keeper of this temple, watcher of the paths between worlds. I have observed your approach across many timelines. There is something I must ask of you.",
                 speaker_override: None,
                 choices: [
                     (
@@ -2621,7 +3048,7 @@
             ),
             2: (
                 id: 2,
-                text: "Long ago a relic was fashioned by the first astronomers â\u{80}\u{94} a small jade icosahedron, twenty-faced, that grants sight over great distances and into other worlds entirely. It was lost when the old order scattered. I have spent decades searching the stars for its location, yet the relic resists my sight. I need someone willing to walk the physical world where my gaze cannot reach â\u{80}\u{94} to find it and return it here.",
+                text: "Decades ago I found the jade icosahedron — a relic forged by the first astronomers to see across worlds and through time. The only instrument capable of mapping exactly where the Cosmic Weave is tearing and how fast. I found it. And then a lich king called Eonir Xavian Stalix took it from me. Eonir does not want to destroy Velmoria — he wants to stop it, to freeze one perfect moment before the fraying Weave takes everything he loved a second time. But a relic built to observe cannot survive being used to arrest all motion. Every day he holds it, the stillness bleeds further from Vaelgrim and the fraying elsewhere accelerates. I cannot retrieve it myself — my sight anchors me here, forever watching, never walking. I need someone to walk the road I cannot.",
                 speaker_override: None,
                 choices: [
                     (
@@ -2668,7 +3095,7 @@
             ),
             3: (
                 id: 3,
-                text: "This temple was raised when the first astronomers mapped the paths between worlds. The stones are aligned with constellations that no longer appear in your sky â\u{80}\u{94} because those stars belong to realms adjacent to this one. I have walked many of those paths. But a relic I seek eludes even me.",
+                text: "This temple was raised when the first astronomers mapped the paths between worlds. The stones are aligned with constellations that no longer appear in your sky — because those stars belong to realms adjacent to this one. I have kept vigil here since before the Glass Sea had a name, watching timelines the way other men watch weather. But the pattern I have watched for decades grows desperate.",
                 speaker_override: None,
                 choices: [
                     (
@@ -2701,7 +3128,7 @@
             ),
             4: (
                 id: 4,
-                text: "*bows his head* My gratitude, travelers. The stars have already begun to shift in anticipation of your search. I can offer no map â\u{80}\u{94} only this certainty: the relic exists, and it is meant to be found. When you hold it in your hands, you will know. Return to me when it is done.",
+                text: "*bows his head* My gratitude, travelers. When you stand before Eonir, you may find not a monster but a mourning king still turning the relic over in hands that no longer feel the cold. He will not simply hand it over — some part of him still believes stillness is mercy. Speak with him or take it by force, but bring it back. The Weave cannot wait.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -2713,7 +3140,7 @@
             ),
             5: (
                 id: 5,
-                text: "I wish I could tell you. The relic was last held by a traveling scholar, but those records are centuries old. I have reached across time and seen only fragments â\u{80}\u{94} a cold stone floor, the sound of water, darkness. Beyond that the vision fails. You must follow your own instincts, speak with those who carry long memories, and search where the old roads lead.",
+                text: "The relic was last held by a traveling scholar, but those records are centuries old. I have reached across time and seen only fragments — a cold stone floor, the sound of frozen water, darkness spreading outward from a single source. The stillness comes from the north, from Vaelgrim, from the Frostspire Peaks. That is where your road must lead.",
                 speaker_override: None,
                 choices: [
                     (
@@ -2763,7 +3190,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "Greetings, adventurer. Lost Ranger can help you hone your skills.",
+                text: "Greetings, adventurer. I am a ranger of this region, and I can help you hone the skills that keep you alive in the wild. Tracking, stealth, trap work — the craft of surviving in places where the road ends. What would you learn?",
                 speaker_override: None,
                 choices: [
                     (
@@ -2798,7 +3225,7 @@
             ),
             2: (
                 id: 2,
-                text: "Very well. Lost Ranger shall assess your abilities.",
+                text: "Good. Let us see what you already know and build from there.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -3090,6 +3517,940 @@
             ),
         },
         speaker_name: Some("Isolde Dawnfang"),
+        repeatable: false,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 1004,
+        name: "The Sovereign's Soliloquy",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "*he raises his long, golden fingers, tracing a line in the air as if pulling an invisible thread* You stand in my domain of rest. Tell me, wanderer, does your journey feel like a rush toward a destination, or a slow drift into the unknown?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "A rush toward a destination.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "A slow drift into the unknown.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "I am simply trying to survive.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "Then your life is a sprint across a field of seconds. A noble, if frantic, pursuit. But remember... even the fastest runner eventually finds the end of the path.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "The drift is where true observation lies. To see the world as it unfolds, rather than what it demands of you. You have a patient soul.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "*a faint, weary smile touches his skeletal lips* Survival is the most fundamental geometry of existence. Let us ensure yours lasts long enough to find the Relic I hold.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: Some("Eonir"),
+        repeatable: false,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 104,
+        name: "Kira Valerius - The Exile Knight",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "*she stands in the town square, arms crossed, studying each face that passes with the practiced eye of someone who has been assembling a company one careful decision at a time* I am Kira Valerius. Former knight of Eldoria — what remains of it. I have been building a company here for several weeks. Decent coin, reasonable danger, genuine purpose. You look like you are either here to join or here to take stock of the competition. Either way, I would like to know which.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We are looking for a company to join.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Tell us about Eldoria.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We lead our own company.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "Eldoria was a kingdom on the far coast — art, chivalry, and walls that held for centuries. Then the Void-Blight arrived. A creeping corruption that drained the color from everything it touched and turned heroes into husks. I led the survivors out. *a pause, controlled, not entirely without weight* One day I intend to lead them back. That requires strength I do not yet have. So I build it here.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join our company, Kira.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "A heavy burden to carry.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "*a measured nod, something settling into focus in her expression* Good. I do not make that offer to everyone. I expect honest fighting, honest counsel, and the understanding that we protect the people who cannot protect themselves. Everything else is negotiable. We move when you say.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join the party now.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [
+                            RecruitToParty(
+                                character_id: "tutorial_human_knight",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Meet us at the inn.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We need more time.",
+                        target_node: Some(7),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "The inn — I know the innkeeper. Good establishment. I will see you there.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "Then you lead and I will consider whether your leadership is worth following. *a half-smile* That is how I assemble a company — one careful look at a time. The offer stands either way.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We would welcome your company.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell, then.",
+                        target_node: Some(7),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            6: (
+                id: 6,
+                text: "Then we march. I will carry my own weight — and then some — and I expect the same of everyone beside me. The road will not be easy, but it is worth walking.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            7: (
+                id: 7,
+                text: "Fair enough. The road has plenty of capable people on it. If you change your mind, I will be here.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: Some("Kira"),
+        repeatable: false,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 105,
+        name: "Sirius Xylanthir - The Void-Weave Master",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "*he does not look up from the spell he is inscribing in the air — a lattice of violet light that he adjusts with two fingers, dissatisfied, then disperses entirely* This region has remarkably little arcane interference. Either nothing dangerous lives here or everything dangerous is somewhere else. *finally regards you* Sirius Xylanthir. Sorcerer. You have the look of people heading toward the second possibility. That is the more interesting direction.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join our company.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "What are you looking for?",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Tell us about yourself.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "*the ghost of something that is almost enthusiasm* Then we have an agreement. I will carry my own weight and then some, provided you point me at something worth the expenditure of power. Do not apologize if I am thorough.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join the party now.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [
+                            RecruitToParty(
+                                character_id: "tutorial_elf_sorcerer",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Meet us at the inn.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "Something worth the effort of a real duel. Something that does not simply fall over the moment I begin casting. The elven war-colleges trained me to be careful, methodical, slow. I am none of those things and I find their opinion increasingly irrelevant. A company with genuine enemies — that is useful to me. Are yours genuine?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Very genuine. Join us.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Join us and find out.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "Dark Elf. Centuries in the subterranean reaches studying the Void-Weave — sorcery that draws from the spaces between stars and the silence of the deep. My peers thought mastery of the arcane was an end in itself. I found it was only interesting as a tool for dealing with things that could not simply be walked around. I came to the surface in search of those things.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We have those things. Join us.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "The inn. Adequate. I will be there when you have need of me — which will be sooner than you think.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            6: (
+                id: 6,
+                text: "Good. Try to keep up.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: Some("Sirius"),
+        repeatable: false,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 106,
+        name: "Mira - The Radiant Sentinel",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "*she kneels beside a traveler whose wound she has finished binding, then straightens, staff in hand* There. *to you, quietly* I am Mira. I serve with the Order of the Resplendent Dawn — or I did, before I understood that the people who need healing most are not the ones who come to the temple door. They are on the roads, in the ruins, in the dark places where the light has not reached yet. I go where the wounds are.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join our company, Mira.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Tell us about your order.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "The road is dangerous.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell, Mira.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "The Order of the Resplendent Dawn tends the light that holds against the Great Gloom — a suffocating darkness that has been spreading from the edges of the world for as long as I can remember. I grew up in a village that stood as a lonely outpost against it. I know what the light costs and what it is worth. I know the shadows are not finished growing.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Then come with us. The shadows we face are very real.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "Then I will come. I do not ask for comfort and I will not make false promises — only honest work and every healing prayer I have. Let us go. The Gloom does not rest and neither should we.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join the party now.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [
+                            RecruitToParty(
+                                character_id: "tutorial_human_cleric",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Meet us at the inn.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "*regards the road ahead with the steady calm of someone who has thought this through* I am aware. I was already in danger before you found me. What I need is a company with a purpose worth traveling toward, not just from.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We have that purpose. Join us.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "The inn — yes. I will be ready when you are. I never pack lightly.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            6: (
+                id: 6,
+                text: "I am glad. Wounds find their way to me wherever I am — better to meet them on a path worth walking.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: Some("Mira"),
+        repeatable: false,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 107,
+        name: "Old Gareth - The Last Pillar",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "*he does not look up from the blade he is working on, hammer ringing in a measured rhythm against the anvil* Aye. I know why you are here. Someone told you an old dwarf with a shield and a bad back might be worth asking. *sets the hammer down, finally looks at you* I am Old Gareth Deepstone. Last Pillar of Aethelgard. Former High Protector of a city that no longer exists because I was not everywhere at once when it mattered. So I run a smithy now and pretend the fighting days are behind me. They are not quite as behind me as I pretend.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join our company, Gareth.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Tell us about Aethelgard.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "The cause is worthy of the Last Pillar.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "A city carved into the heart of the Ironpeak Mountains. The finest stonework in the world, or so we believed. Then the Great Tremor came — not accident, not nature, a wound in the world's fabric that split the range open and brought the mountain down on top of us. I anchored the main dome long enough for the people to run. *a long pause* The dome did not hold indefinitely.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "You saved your people.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "What do you carry now?",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "*something heavy and deliberate in the words* The Core Shield. Forged from the center of the shattered mountain — the piece that was already stone before the rest fell. As long as I carry it, something of Aethelgard still stands. *he picks up the shield, its surface bearing a fracture pattern like a memory* I do not carry it for sentiment. I carry it because the people who died there deserve to have someone still paying attention.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "That is a worthy cause. Join ours.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Farewell, Gareth.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "*a long, measuring look, the kind that has sized up enemies for two hundred years* One condition. We are not here for glory, or gold, or stories to tell in warm taverns. We are here because someone needs a wall between them and the dark. *picks up the shield* Right. I will get my axe.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join the party now.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [
+                            RecruitToParty(
+                                character_id: "old_gareth",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Meet us at the inn.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We need more time.",
+                        target_node: Some(7),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "The inn. *a grunt that might be approval* I will be there. Do not order the mutton stew.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            6: (
+                id: 6,
+                text: "Right. *shoulders the Core Shield* Let us see if this cause is worth carrying.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            7: (
+                id: 7,
+                text: "Right. *picks up the hammer* If the cause changes shape and becomes worth the trouble, you know where I am.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: Some("Old Gareth"),
         repeatable: false,
         associated_quest: None,
         sdk_metadata: (
