@@ -154,6 +154,37 @@ Write a plan with a phased approach to add audio features to game and sdk. THINK
 
 ---
 
+### Remove Stale Array-Index Comments from `creatures.ron`
+
+The SDK writes `/*[0]*/`, `/*[1]*/`, ... index comments before every entry in
+`data/creatures.ron` because three save paths pass `.enumerate_arrays(true)` to
+RON's `PrettyConfig`. The comments serve no functional purpose — RON ignores
+them at parse time — and they are actively misleading because the array index
+is **not** the creature `id` (e.g. `/*[20]*/` has `id: 1000`). They go stale
+the moment any entry is inserted or removed mid-list.
+
+No other data file in the campaign uses this option; it is an inconsistency
+unique to the creatures registry writers.
+
+#### Fix
+
+Change `.enumerate_arrays(true)` → `.enumerate_arrays(false)` in all three
+affected callsites:
+
+| File | Location |
+|------|----------|
+| `sdk/campaign_builder/src/campaign_io.rs` | `save_creatures` → `registry_ron_config` |
+| `sdk/campaign_builder/src/creature_assets.rs` | `write_registry_references` |
+| `sdk/campaign_builder/src/creatures_manager.rs` | `save_creatures_registry` |
+
+After the fix, the next SDK save will rewrite `creatures.ron` without the
+comments. No data migration needed — existing files parse identically with or
+without the comments.
+
+✅ COMPLETED
+
+---
+
 ### Fix Skill Trainer SDK — Dialogue ID Visibility, Detail Panel, and Template Bug
 
 #### Background — current state
@@ -264,11 +295,97 @@ Write a plan with a phased approach to update the training dialogues and sdk. TH
 
 ---
 
+### NPC Detail Panel — Show Quest Names Instead of Raw IDs
+
+#### Current behaviour
+
+`show_npc_preview` (`sdk/campaign_builder/src/npc_editor/portrait_picker.rs`)
+renders the Quests section as:
+
+```rust
+for quest_id in &npc.quest_ids {
+    ui.label(format!("• {}", quest_id)); // raw u16 number, insertion order
+}
+```
+
+Quest IDs are shown as bare numbers in the order they appear in the RON file.
+There is no title, no sort, and no way to understand what a quest is without
+looking it up manually.
+
+#### Fix
+
+**1. Pass the quest database to the preview function.**
+
+Change the signature of `show_npc_preview` to accept `available_quests:
+&[Quest]` (mirroring how `available_dialogues: &[DialogueTree]` is already
+passed). Update the two call sites in `npc_editor/mod.rs` that call
+`show_npc_preview` to pass the `NpcEditorState::available_quests` slice.
+
+**2. Sort and resolve quest IDs in the preview.**
+
+Replace the current loop with:
+
+```rust
+let mut sorted_ids = npc.quest_ids.clone();
+sorted_ids.sort_unstable();
+for quest_id in &sorted_ids {
+    let label = available_quests
+        .iter()
+        .find(|q| q.id == *quest_id)
+        .map(|q| format!("• {} — {}", quest_id, q.name))
+        .unwrap_or_else(|| format!("• {} — (unknown)", quest_id));
+    ui.label(label);
+}
+```
+
+**3. Ensure `available_quests` is populated.**
+
+Verify that `NpcEditorState` loads `available_quests` from the campaign quest
+database on campaign open (the same pattern used for `available_dialogues` and
+`available_skills`). If the field is missing or not populated on open, add it.
+
+#### Affected files
+
+| File | Change |
+|------|--------|
+| `sdk/campaign_builder/src/npc_editor/portrait_picker.rs` | Add `available_quests` param; sort + resolve quest names |
+| `sdk/campaign_builder/src/npc_editor/mod.rs` | Pass `available_quests` at both `show_npc_preview` call sites; populate on campaign open if needed |
+
+✅ COMPLETED
+
+---
+
 ### Custom Font Editor
 
 The SDK Campaign Builder needs a way to specify custom fonts for campaigns.
 
 ## Campaign / Story
+
+### Fix Skill Trainer NPC — Ranger Trainer (`tutorial_ranger_trainer`)
+
+#### Root cause
+
+The Lost Ranger's auto-generated skill trainer dialogue (id 1002) contains:
+
+```ron
+OpenSkillTraining(
+    npc_id: "npc_1",
+)
+```
+
+The NPC's actual ID is `"tutorial_ranger_trainer"`.  `npc_id: "npc_1"` does not
+match any NPC in the campaign, so `perform_skill_training_service` cannot find
+the trainer and the skill list is never shown.
+
+#### Fix
+
+In `campaigns/tutorial/data/dialogues.ron`, dialogue id 1002, node 2, change
+`npc_id: "npc_1"` → `npc_id: "tutorial_ranger_trainer"`.
+
+Also verify that `data/test_campaign/data/dialogues.ron` (if it contains a skill
+trainer dialogue) uses the correct NPC ID from the test fixture.
+
+✅ COMPLETED
 
 ---
 
@@ -315,7 +432,7 @@ Write a plan with a phased approach to add a Talk button. THINK HARD and follow 
 
 ---
 
-We should be able to configure any NPC to have the combat triggered switch entity not just Eonir. The Eonir work should be split out for the tutorial campaign once the Generic NPC Combat Trigger work is done. Rework the plan so we have a generic Feature and a example for the tutorial.
+We should be able to configure any NPC to have the combat triggered switch entity not just Eonir. The Eonir work should be split out for the tutorial campaign once the Generic NPC Combat Trigger work is done. Rework the plan so we have a generic Feature and a example for the tutorial. 
 
 ### Eonir the Still — Act IV Boss Fight (Option A)
 
@@ -593,6 +710,12 @@ Write a plan with a phased approach to refactor the object mesh registry. THINK 
 
 ---
 
+### Bevy Migration
+
+Migrating to Bevy 0.19.0
+
+✅ COMPLETED - [Dependency Upgrade Implementation Plan](./dependency_upgrade_implementation_plan.md)
+
 ### Game Tray Icon Implementation Plan
 
 We need to add a tray icon for the game like the ones we added for the SDK.
@@ -601,4 +724,29 @@ We need to add a tray icon for the game like the ones we added for the SDK.
 
 ## Bugs
 
+### Barred Passage
+
+✅ COMPLETED -  The barred passage dialog says you need to find a way to open it. Then we just walked through the gate.
+
+✅ COMPLETED -  Game play issue. Casting First Aid always has no effect in combat.
+
+✅ COMPLETED -  Campaign Builder --> Edit NPC -->  Selecting a Creature ID using the Browse Button is painfully slow and the popup takes forever to render the scroll bars
+
+✅ COMPLETED -  Chests respawn loot when you hit escape.
+
+✅ COMPLETED -  Chest mesh are not showing up.
+
+✅ COMPLETED -  Tutorial Map 4 problems.
+Portal from map 4 to map 2 is not working. Going through it takes me back to map 4 instead of map 2. THen I can't walk straight ahead on the map 4 when coming out of the Dark Forrest Portal. I can turn and walk thorough the trees but can not go two tiles straight ahead. When I do try to go straight ahead something is blocking the path. Strangly if you go back to the portal you get ambushed by 2 bandits that are supposed to be on map 2. I have set the destination to mape 2 (18,10) but I can't edit the portal destination location using the mouse in the Campaign Builder becasue the map is offest and no matter how wide I make the SDK window the map is still cut off.
+
+✅ COMPLETED -  Clicking Save Game looks like it saves the game and then puts the characters back to the starting point completely reset like starting a new game. Try to load the save game gives the same results. I can't figure out where the old save games are stored (on Mac) to delete them.
+
 Portraits should support jpg images.
+
+✅ COMPLETED -  Player Overview in game should not try to rescale the length of the full length portrait image. Move the stats under the image to column 2 and let the portrait scale however it needs as long as it is 340 pixels wide. Resize the image to 340 pixels wide if it is not. Dwarfs and Halflings and Gnomes present problems of length so we rescale to 340 pixels wide and let the length scale however it needs.
+
+✅ COMPLETED -  Save Game on map_2 in the middle of map. Load Game puts the party back at the first Inn. Recruitable NPC that were already recruited and are in your party are back to their starting points on the map. Creating duplicate versions of themselves.
+
+✅ COMPLETED -  Campaign Builder --> Importer --> Furniture --> Furniture Mesh Imports are overwriting last imported mesh even after saving. I imported a mesh and it assigned it Furniture ID 13. Next mesh overwrote it as Furniture ID 13.
+
+✅ COMPLETED -   SDK Campaign Builder adding event Container on map 1. As I add initial items to the container once I get past 4 items I can not see the new items because there are no scroll bars. I should be able to add 100s of items to a container event and be able to scroll through them.

@@ -21,4 +21,3 @@ Combat Style: Ranged magic specialist. Zara uses her staff to cast bursts of "Lu
 Luminous Scholar, Weaver of the Prismatic Spark, seeks to master Lumina-weaving and discover every hidden magical secret the world has to offer while searching for her lost mentor.
 
 ## Dialogues
-

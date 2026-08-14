@@ -2,9 +2,9 @@
 
 ## Backstory
 
-Gareth Deepstone was once the Master Architect and High Protector of Aethelgard, a sprawling city carved into the very heart of the Ironpeak Mountains. While others were content to live within its sturdy cobalt walls, Gareth dedicated his life to ensuring those walls never faltered. He was the "Last Pillar"—the dwarf who stood at the epicenter of the Great Tremor that shattered his home. 
+Gareth Deepstone was once the Master Architect and High Protector of Aethelgard, a sprawling city carved into the very heart of the Ironpeak Mountains. While others were content to live within its sturdy cobalt walls, Gareth dedicated his life to ensuring those walls never faltered. He was the "Last Pillar"—the dwarf who stood at the epicenter of the Great Tremor that shattered his home.
 
-When the mountain groaned and split, most fled toward the valleys, but Gareth anchored himself in the city’s main dome, bracing the falling stone with his own strength so the citizens could escape to safety. He survived the collapse, though his armor is forever scarred by the falling peak and his beard dusted with the silver silt of centuries. 
+When the mountain groaned and split, most fled toward the valleys, but Gareth anchored himself in the city’s main dome, bracing the falling stone with his own strength so the citizens could escape to safety. He survived the collapse, though his armor is forever scarred by the falling peak and his beard dusted with the silver silt of centuries.
 
 Now a wanderer, he carries the *Core Shield*—a masterwork forged from the very center of the shattered mountain. It is said that as long as Gareth holds it aloft, the steady heartbeat of Ironpeak still pulses within the metal. He travels not just to find a new home, but to seek out "tall stories" that are worthy of being carved into the memory of his fallen city, serving as a moving fortress for any adventurer lucky enough to stand in his shadow.
 
@@ -23,4 +23,3 @@ Combat Style: A "walking fortress" approach. Gareth favors slow, inevitable move
 A sturdy and dependable dwarf with a wealth of experience. Old Gareth Deepstone is an excellent choice for players who want a "moving fortress" on the battlefield, offering peak survivability and a steady, grounding presence in every skirmish.
 
 ## Dialogues
-

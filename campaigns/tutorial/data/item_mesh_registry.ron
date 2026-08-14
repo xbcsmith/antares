@@ -47,7 +47,12 @@
     (
         id: 9009,
         name: "ItemMeshBlazingShortSword",
-        filepath: "assets/items/weapons/blazing_short_sword.ron",
+        filepath: "assets/items/sword/blazing_short_sword.ron",
+    ),
+    (
+        id: 9010,
+        name: "ItemMeshShortSword",
+        filepath: "assets/items/sword/short_sword.ron",
     ),
     (
         id: 9101,

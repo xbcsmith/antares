@@ -3005,7 +3005,7 @@
         nodes: {
             1: (
                 id: 1,
-                text: "*opens his eyes slowly, their gaze deep and distant* You have arrived. I am Jyeshtha — keeper of this temple, watcher of the paths between worlds. I have observed your approach across many timelines. There is something I must ask of you."
+                text: "*opens his eyes slowly, their gaze deep and distant* You have arrived. I am Jyeshtha — keeper of this temple, watcher of the paths between worlds. I have observed your approach across many timelines. There is something I must ask of you.",
                 speaker_override: None,
                 choices: [
                     (
@@ -3048,7 +3048,7 @@
             ),
             2: (
                 id: 2,
-                text: "Decades ago I found the jade icosahedron — a relic forged by the first astronomers to see across worlds and through time. The only instrument capable of mapping exactly where the Cosmic Weave is tearing and how fast. I found it. And then a lich king called Eonir Xavian Stalix took it from me. Eonir does not want to destroy Velmoria — he wants to stop it, to freeze one perfect moment before the fraying Weave takes everything he loved a second time. But a relic built to observe cannot survive being used to arrest all motion. Every day he holds it, the stillness bleeds further from Vaelgrim and the fraying elsewhere accelerates. I cannot retrieve it myself — my sight anchors me here, forever watching, never walking. I need someone to walk the road I cannot."
+                text: "Decades ago I found the jade icosahedron — a relic forged by the first astronomers to see across worlds and through time. The only instrument capable of mapping exactly where the Cosmic Weave is tearing and how fast. I found it. And then a lich king called Eonir Xavian Stalix took it from me. Eonir does not want to destroy Velmoria — he wants to stop it, to freeze one perfect moment before the fraying Weave takes everything he loved a second time. But a relic built to observe cannot survive being used to arrest all motion. Every day he holds it, the stillness bleeds further from Vaelgrim and the fraying elsewhere accelerates. I cannot retrieve it myself — my sight anchors me here, forever watching, never walking. I need someone to walk the road I cannot.",
                 speaker_override: None,
                 choices: [
                     (
@@ -3095,7 +3095,7 @@
             ),
             3: (
                 id: 3,
-                text: "This temple was raised when the first astronomers mapped the paths between worlds. The stones are aligned with constellations that no longer appear in your sky — because those stars belong to realms adjacent to this one. I have kept vigil here since before the Glass Sea had a name, watching timelines the way other men watch weather. But the pattern I have watched for decades grows desperate."
+                text: "This temple was raised when the first astronomers mapped the paths between worlds. The stones are aligned with constellations that no longer appear in your sky — because those stars belong to realms adjacent to this one. I have kept vigil here since before the Glass Sea had a name, watching timelines the way other men watch weather. But the pattern I have watched for decades grows desperate.",
                 speaker_override: None,
                 choices: [
                     (
@@ -3128,7 +3128,7 @@
             ),
             4: (
                 id: 4,
-                text: "*bows his head* My gratitude, travelers. When you stand before Eonir, you may find not a monster but a mourning king still turning the relic over in hands that no longer feel the cold. He will not simply hand it over — some part of him still believes stillness is mercy. Speak with him or take it by force, but bring it back. The Weave cannot wait."
+                text: "*bows his head* My gratitude, travelers. When you stand before Eonir, you may find not a monster but a mourning king still turning the relic over in hands that no longer feel the cold. He will not simply hand it over — some part of him still believes stillness is mercy. Speak with him or take it by force, but bring it back. The Weave cannot wait.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -3140,7 +3140,7 @@
             ),
             5: (
                 id: 5,
-                text: "The relic was last held by a traveling scholar, but those records are centuries old. I have reached across time and seen only fragments — a cold stone floor, the sound of frozen water, darkness spreading outward from a single source. The stillness comes from the north, from Vaelgrim, from the Frostspire Peaks. That is where your road must lead."
+                text: "The relic was last held by a traveling scholar, but those records are centuries old. I have reached across time and seen only fragments — a cold stone floor, the sound of frozen water, darkness spreading outward from a single source. The stillness comes from the north, from Vaelgrim, from the Frostspire Peaks. That is where your road must lead.",
                 speaker_override: None,
                 choices: [
                     (

@@ -21,4 +21,3 @@ Combat Style: Erratic but powerful. His magic feels slightly unpredictable, as i
 The Void-Drifter, Echo of the Weave, is a displaced incarnation of Arcturus who brings unpredictable and powerful astral magic to the battlefield, seeking to find his lost relics among the stars.
 
 ## Dialogues
-

@@ -3,7 +3,7 @@
     width: 16,
     height: 16,
     name: "Ancient Ruins",
-    description: "Crumbling stoneworks of a forgotten civilization, now crawling with kobolds and goblins who have made off with Arcturus's astrolabe.",
+    description: "Crumbling stoneworks of a forgotten civilization, now crawling with kobolds and goblins who have made off with Arcturus\'s astrolabe.",
     tiles: [
         (
             terrain: Stone,
