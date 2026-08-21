@@ -537,7 +537,24 @@ pub(super) fn show_npc_preview(
                         .color(egui::Color32::from_rgb(200, 180, 255)),
                 );
             }
-            if !npc.is_merchant && !npc.is_innkeeper && !npc.is_priest {
+            if npc.is_trainer {
+                ui.label(
+                    egui::RichText::new("🎓 Trainer")
+                        .color(egui::Color32::from_rgb(220, 180, 80)),
+                );
+            }
+            if npc.is_skill_trainer {
+                ui.label(
+                    egui::RichText::new("🧠 Skill Trainer")
+                        .color(egui::Color32::from_rgb(180, 220, 80)),
+                );
+            }
+            if !npc.is_merchant
+                && !npc.is_innkeeper
+                && !npc.is_priest
+                && !npc.is_trainer
+                && !npc.is_skill_trainer
+            {
                 ui.label(egui::RichText::new("🧑 NPC").color(egui::Color32::GRAY));
             }
         });
@@ -570,6 +587,17 @@ pub(super) fn show_npc_preview(
             ui.label("Merchant Dialogue:");
             ui.label(merchant_dialogue_status_for_preview(npc, assigned_dialogue));
             ui.end_row();
+
+            if npc.is_trainer || npc.is_skill_trainer {
+                ui.label("Trainer Dialogue:");
+                ui.label(
+                    npc.dialogue_id
+                        .map(|id| id.to_string())
+                        .as_deref()
+                        .unwrap_or("no dialogue assigned"),
+                );
+                ui.end_row();
+            }
 
             ui.label("Quests:");
             if npc.quest_ids.is_empty() {
@@ -637,6 +665,92 @@ pub(super) fn show_npc_preview(
                     ui.label(format!("{:.0}%", economy.sell_rate * 100.0));
                     ui.end_row();
                 }
+            });
+    }
+
+    if npc.is_trainer {
+        ui.add_space(10.0);
+        ui.heading("Trainer");
+        ui.separator();
+
+        egui::Grid::new("npc_preview_trainer_grid")
+            .num_columns(2)
+            .spacing([20.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("Dialogue:");
+                match npc.dialogue_id {
+                    Some(id) => ui.label(id.to_string()),
+                    None => ui.label(
+                        egui::RichText::new("no dialogue assigned").color(egui::Color32::RED),
+                    ),
+                };
+                ui.end_row();
+
+                ui.label("Fee Base:");
+                ui.label(
+                    npc.training_fee_base
+                        .map(|v| format!("{} gold/level", v))
+                        .unwrap_or_else(|| "(campaign default)".to_string()),
+                );
+                ui.end_row();
+
+                ui.label("Fee Multiplier:");
+                ui.label(
+                    npc.training_fee_multiplier
+                        .map(|v| format!("× {:.2}", v))
+                        .unwrap_or_else(|| "(campaign default)".to_string()),
+                );
+                ui.end_row();
+            });
+    }
+
+    if npc.is_skill_trainer {
+        ui.add_space(10.0);
+        ui.heading("Skill Trainer");
+        ui.separator();
+
+        egui::Grid::new("npc_preview_skill_trainer_grid")
+            .num_columns(2)
+            .spacing([20.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("Dialogue:");
+                match npc.dialogue_id {
+                    Some(id) => ui.label(id.to_string()),
+                    None => ui.label(
+                        egui::RichText::new("no dialogue assigned").color(egui::Color32::RED),
+                    ),
+                };
+                ui.end_row();
+
+                ui.label("Trainable Skills:");
+                if npc.trainable_skill_ids.is_empty() {
+                    ui.label("(none)");
+                } else {
+                    ui.label(npc.trainable_skill_ids.join(", "));
+                }
+                ui.end_row();
+
+                if let Some(max_rank) = npc.skill_training_max_rank {
+                    ui.label("Max Rank:");
+                    ui.label(max_rank.to_string());
+                    ui.end_row();
+                }
+
+                ui.label("Fee Base:");
+                ui.label(
+                    npc.skill_training_fee_base
+                        .map(|v| format!("{} gold/rank", v))
+                        .unwrap_or_else(|| "(campaign default)".to_string()),
+                );
+                ui.end_row();
+
+                ui.label("Fee Multiplier:");
+                ui.label(
+                    npc.skill_training_fee_multiplier
+                        .map(|v| format!("× {:.2}", v))
+                        .unwrap_or_else(|| "(campaign default)".to_string()),
+                );
+                ui.end_row();
             });
     }
 

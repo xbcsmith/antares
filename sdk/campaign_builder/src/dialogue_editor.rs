@@ -1433,6 +1433,13 @@ impl DialogueEditorState {
                 return Ok(MerchantDialogueUpdate::AlreadyValid);
             }
 
+            // Repair path: a SDK-managed trainer node exists but targets the wrong NPC ID.
+            // Update it in-place instead of appending a duplicate branch.
+            if dialogue.repair_sdk_trainer_npc_id(&npc.id) {
+                self.has_unsaved_changes = true;
+                return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
+            }
+
             if dialogue.ensure_standard_trainer_branch(&npc.id, &npc.name) {
                 self.has_unsaved_changes = true;
                 return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
@@ -1552,6 +1559,13 @@ impl DialogueEditorState {
 
             if dialogue.contains_open_skill_training_for_npc(&npc.id) {
                 return Ok(MerchantDialogueUpdate::AlreadyValid);
+            }
+
+            // Repair path: a SDK-managed skill trainer node exists but targets the wrong NPC ID.
+            // Update it in-place instead of appending a duplicate branch.
+            if dialogue.repair_sdk_skill_trainer_npc_id(&npc.id) {
+                self.has_unsaved_changes = true;
+                return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
             }
 
             if dialogue.ensure_standard_skill_trainer_branch(&npc.id, &npc.name) {
@@ -4003,5 +4017,119 @@ mod tests {
     fn test_dialogue_editor_has_available_spells() {
         let editor = DialogueEditorState::new();
         assert!(editor.available_spells.is_empty());
+    }
+
+    #[test]
+    fn test_ensure_trainer_dialogue_uses_npc_id() {
+        // Build an editor loaded with a trainer tree that was generated with the
+        // wrong NPC ID ("npc_1"), then call ensure_trainer_dialogue_for_npc
+        // for an NPC whose actual id is "trainer_npc".
+        let mut editor = DialogueEditorState::new();
+        let tree = DialogueTree::standard_trainer_template(10, "npc_1", "NPC 1");
+        editor.load_dialogues(vec![tree]);
+
+        let mut npc = NpcDefinition::new("trainer_npc", "Trainer NPC", "");
+        npc.is_trainer = true;
+        npc.dialogue_id = Some(10);
+
+        let result = editor.ensure_trainer_dialogue_for_npc(&mut npc);
+
+        assert_eq!(
+            result,
+            Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id: 10 }),
+            "must return AugmentedExisting when the wrong NPC ID was repaired"
+        );
+        assert!(
+            editor.dialogues[0].contains_open_training_for_npc("trainer_npc"),
+            "dialogue must now point at the correct NPC"
+        );
+        assert!(
+            !editor.dialogues[0].contains_open_training_for_npc("npc_1"),
+            "old stale NPC ID must no longer be present"
+        );
+        assert!(editor.has_unsaved_changes, "editor must be marked dirty");
+    }
+
+    #[test]
+    fn test_ensure_trainer_dialogue_already_correct_returns_already_valid() {
+        // Template was created with the correct NPC ID — expect AlreadyValid with
+        // no duplicate nodes added.
+        let mut editor = DialogueEditorState::new();
+        let tree = DialogueTree::standard_trainer_template(10, "trainer_npc", "Trainer NPC");
+        editor.load_dialogues(vec![tree]);
+
+        let mut npc = NpcDefinition::new("trainer_npc", "Trainer NPC", "");
+        npc.is_trainer = true;
+        npc.dialogue_id = Some(10);
+
+        let node_count_before = editor.dialogues[0].node_count();
+        let result = editor.ensure_trainer_dialogue_for_npc(&mut npc);
+
+        assert_eq!(
+            result,
+            Ok(MerchantDialogueUpdate::AlreadyValid),
+            "must return AlreadyValid when the NPC ID is already correct"
+        );
+        assert_eq!(
+            editor.dialogues[0].node_count(),
+            node_count_before,
+            "node count must not change when no repair was needed"
+        );
+    }
+
+    #[test]
+    fn test_ensure_skill_trainer_dialogue_uses_npc_id() {
+        // Same as the trainer test but using the skill trainer variants.
+        let mut editor = DialogueEditorState::new();
+        let tree = DialogueTree::standard_skill_trainer_template(20, "npc_1", "NPC 1");
+        editor.load_dialogues(vec![tree]);
+
+        let mut npc = NpcDefinition::new("skill_trainer_npc", "Skill Trainer NPC", "");
+        npc.is_skill_trainer = true;
+        npc.dialogue_id = Some(20);
+
+        let result = editor.ensure_skill_trainer_dialogue_for_npc(&mut npc);
+
+        assert_eq!(
+            result,
+            Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id: 20 }),
+            "must return AugmentedExisting when the wrong NPC ID was repaired"
+        );
+        assert!(
+            editor.dialogues[0].contains_open_skill_training_for_npc("skill_trainer_npc"),
+            "dialogue must now point at the correct NPC"
+        );
+        assert!(
+            !editor.dialogues[0].contains_open_skill_training_for_npc("npc_1"),
+            "old stale NPC ID must no longer be present"
+        );
+        assert!(editor.has_unsaved_changes, "editor must be marked dirty");
+    }
+
+    #[test]
+    fn test_ensure_skill_trainer_dialogue_already_correct_returns_already_valid() {
+        // Template was created with the correct NPC ID — expect AlreadyValid.
+        let mut editor = DialogueEditorState::new();
+        let tree =
+            DialogueTree::standard_skill_trainer_template(20, "skill_trainer_npc", "Skill Trainer");
+        editor.load_dialogues(vec![tree]);
+
+        let mut npc = NpcDefinition::new("skill_trainer_npc", "Skill Trainer", "");
+        npc.is_skill_trainer = true;
+        npc.dialogue_id = Some(20);
+
+        let node_count_before = editor.dialogues[0].node_count();
+        let result = editor.ensure_skill_trainer_dialogue_for_npc(&mut npc);
+
+        assert_eq!(
+            result,
+            Ok(MerchantDialogueUpdate::AlreadyValid),
+            "must return AlreadyValid when the NPC ID is already correct"
+        );
+        assert_eq!(
+            editor.dialogues[0].node_count(),
+            node_count_before,
+            "node count must not change when no repair was needed"
+        );
     }
 }
