@@ -1,3 +1,232 @@
+## Phase 4: Preview Panel — Trainer Badges and Detail Sections
+
+### Summary
+
+Added trainer and skill trainer visibility to the NPC list-view preview panel
+in `sdk/campaign_builder/src/npc_editor/portrait_picker.rs`. Authors now see
+badges, dialogue binding, and full trainer configuration directly in the
+right-hand preview column without opening the edit form.
+
+### Changes (`sdk/campaign_builder/src/npc_editor/portrait_picker.rs`)
+
+**4.1 — Role badge row**
+
+Two new coloured badges added after the existing Priest badge:
+
+| Condition | Badge | Colour |
+|---|---|---|
+| `npc.is_trainer` | `🎓 Trainer` | `RGB(220, 180, 80)` (amber) |
+| `npc.is_skill_trainer` | `🧠 Skill Trainer` | `RGB(180, 220, 80)` (lime) |
+
+Fallback `🧑 NPC` label gate updated to also check `!npc.is_trainer && !npc.is_skill_trainer`.
+
+**4.2 — Identity grid `"Trainer Dialogue:"` row**
+
+Optional row added after `"Merchant Dialogue:"` — shown only when
+`npc.is_trainer || npc.is_skill_trainer`. Displays the `dialogue_id` as a
+string, or `"no dialogue assigned"` when `None`.
+
+**4.3 — Trainer detail section**
+
+`egui::Grid::new("npc_preview_trainer_grid")` block — shown when `npc.is_trainer`:
+- Dialogue ID (red `"no dialogue assigned"` when `None`)
+- Fee Base (value in gold/level, or `"(campaign default)"`)
+- Fee Multiplier (`× N.NN`, or `"(campaign default)"`)
+
+**4.4 — Skill Trainer detail section**
+
+`egui::Grid::new("npc_preview_skill_trainer_grid")` block — shown when `npc.is_skill_trainer`:
+- Dialogue ID (red label when `None`)
+- Trainable Skills (comma-joined list, or `"(none)"`)
+- Max Rank (only when `Some`)
+- Fee Base (gold/rank or campaign default)
+- Fee Multiplier or campaign default
+
+All four `egui::Grid` IDs are unique and do not collide with existing grids.
+
+### Tests Added (4, in `sdk/campaign_builder/src/npc_editor/mod.rs`)
+
+| Test | What it verifies |
+|------|------------------|
+| `test_show_npc_preview_shows_trainer_badge` | Gate logic: `is_trainer = true` suppresses `🧑 NPC` fallback; UI render does not panic |
+| `test_show_npc_preview_shows_skill_trainer_badge` | Gate logic: `is_skill_trainer = true` suppresses fallback; UI render does not panic |
+| `test_show_npc_preview_trainer_with_no_dialogue_id_shows_red_label` | `dialogue_id: None` with `is_trainer = true` renders without panic (red label path) |
+| `test_show_npc_preview_skill_trainer_skills_list` | `is_skill_trainer = true` with multiple skills, `skill_training_max_rank: Some(5)` renders without panic |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run` (root workspace) — 5507 passed, 0 failed
+- `cargo nextest run` (sdk/campaign_builder) — 2506 passed, 0 failed
+
+---
+
+## Phase 3: Edit Panel — Dialogue ID Picker in Trainer Sections
+
+### Summary
+
+Added a `Dialogue:` ComboBox to both the `🎓 Is Trainer` and `🧠 Is Skill Trainer`
+sections in `sdk/campaign_builder/src/npc_editor/mod.rs`. Authors can now
+assign any loaded dialogue to a trainer or skill trainer directly from the
+trainer section, without scrolling back to the unrelated top-level
+"Dialogue & Quests" picker.
+
+### Changes (`sdk/campaign_builder/src/npc_editor/mod.rs`)
+
+**Trainer section** — inserted immediately after the coloured status label
+and before the "Training Fee Base" fee fields:
+
+- `ComboBox::from_id_salt("npc_trainer_dialogue_picker")` iterates
+  `available_dialogues`; each entry wrapped in `push_id(dialogue.id, …)`
+- `(none)` entry wrapped in `push_id("npc_trainer_dialogue_none", …)`
+- `needs_save = true` on every selection
+- `ui.small("Dialogue must contain an OpenTraining action for this NPC.")` hint
+
+**Skill trainer section** — inserted immediately after the coloured status
+label and before the "Trainable Skills" multi-selector:
+
+- `ComboBox::from_id_salt("npc_skill_trainer_dialogue_picker")` — identical
+  structure, different `id_salt` and hint text
+- Hint: `"Dialogue must contain an OpenSkillTraining action for this NPC."`
+
+Both pickers satisfy SDK AGENTS.md rules:
+- Rule 1 (`push_id` on every loop iteration body) ✓
+- Rule 3 (`ComboBox::from_id_salt`) ✓
+
+### Tests Added
+
+Two unit tests added to `mod tests` in `sdk/campaign_builder/src/npc_editor/mod.rs`:
+
+| Test | Assertion |
+|------|-----------|
+| `test_edit_panel_trainer_shows_dialogue_combobox` | Selecting dialogue 42 sets `dialogue_id = "42"`; selected_text resolves to `"42: Ranger Trainer Dialogue"` |
+| `test_edit_panel_skill_trainer_shows_dialogue_combobox` | Selecting dialogue 55 sets `dialogue_id = "55"`; selected_text resolves to `"55: Mage Skill Dialogue"` |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run` (sdk/campaign_builder) — 2502 passed, 0 failed
+
+---
+
+## Phase 2: SDK Dialogue Editor — Wire the Repair Path
+
+### Summary
+
+Wired the Phase 1 repair methods into the existing SDK dialogue editor functions
+in `sdk/campaign_builder/src/dialogue_editor.rs`. Trainer NPCs whose
+auto-generated dialogue was created with the wrong NPC ID are now corrected
+in-place instead of silently receiving a duplicate branch.
+
+### Changes
+
+**`ensure_trainer_dialogue_for_npc`** (`sdk/campaign_builder/src/dialogue_editor.rs`)
+
+Inserted a repair path between the `AlreadyValid` early-return and the
+branch-insertion path:
+
+```rust
+// Repair path: a SDK-managed trainer node exists but targets the wrong NPC ID.
+// Update it in-place instead of appending a duplicate branch.
+if dialogue.repair_sdk_trainer_npc_id(&npc.id) {
+    self.has_unsaved_changes = true;
+    return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
+}
+```
+
+**`ensure_skill_trainer_dialogue_for_npc`** — same repair path using
+`repair_sdk_skill_trainer_npc_id`.
+
+### Repair Path Flow (now complete)
+
+```
+ensure_*_dialogue_for_npc(npc)
+  ├─ dialogue.contains_open_*_for_npc(&npc.id)
+  │    └─ true  → AlreadyValid (no change)
+  ├─ dialogue.repair_sdk_*_npc_id(&npc.id)          ← NEW
+  │    └─ true  → AugmentedExisting (wrong ID fixed in-place)
+  └─ dialogue.ensure_standard_*_branch(&npc.id, …)
+       └─ true  → AugmentedExisting (new branch appended)
+       └─ false → Error
+```
+
+### Tests Added
+
+Four unit tests added to the existing `mod tests` block in
+`sdk/campaign_builder/src/dialogue_editor.rs`:
+
+| Test | Assertion |
+|------|-----------|
+| `test_ensure_trainer_dialogue_uses_npc_id` | Returns `AugmentedExisting`; correct ID present; stale ID gone; `has_unsaved_changes` set |
+| `test_ensure_trainer_dialogue_already_correct_returns_already_valid` | Returns `AlreadyValid`; node count unchanged |
+| `test_ensure_skill_trainer_dialogue_uses_npc_id` | Skill trainer mirror of above |
+| `test_ensure_skill_trainer_dialogue_already_correct_returns_already_valid` | Skill trainer no-op mirror |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run` (root workspace) — 5507 passed, 0 failed
+- `cargo nextest run` (sdk/campaign_builder) — 2500 passed, 0 failed
+
+---
+
+## Phase 1: Domain — `DialogueTree` Repair Methods
+
+### Summary
+
+Added two new repair methods to `DialogueTree` in `src/domain/dialogue.rs` as
+part of the Fix Skill Trainer SDK plan. These methods form the domain layer of
+the repair path that prevents duplicate branch insertion when a trainer dialogue
+was generated with a stale or wrong NPC ID.
+
+### New Methods
+
+| Method | Location | Purpose |
+|--------|----------|---------|
+| `DialogueTree::repair_sdk_trainer_npc_id` | `src/domain/dialogue.rs` | Finds all `TrainerOpenNode`-marked nodes and patches any `OpenTraining { npc_id }` action that does not match the supplied correct ID. Returns `true` when at least one action was updated. |
+| `DialogueTree::repair_sdk_skill_trainer_npc_id` | `src/domain/dialogue.rs` | Same pattern for `SkillTrainerOpenNode`-marked nodes and `OpenSkillTraining { npc_id }` actions. |
+
+### Design
+
+Both methods follow the same pattern:
+- Iterate `self.nodes.values_mut()`
+- For each node whose `sdk_metadata.managed_content` contains the relevant
+  `TrainerOpenNode` / `SkillTrainerOpenNode` marker:
+  - Patch mismatched `npc_id` in `node.actions`
+  - Patch mismatched `npc_id` in each `choice.actions`
+- Return `true` if any action was changed, `false` otherwise (no-op)
+
+They are inserted immediately after their respective
+`ensure_standard_*_branch` siblings and before
+`remove_sdk_managed_*_content`, preserving the existing ordering convention.
+
+### Tests Added
+
+Four unit tests added to the existing `mod tests` block in
+`src/domain/dialogue.rs`:
+
+| Test | Assertion |
+|------|-----------|
+| `test_repair_sdk_trainer_npc_id_updates_wrong_id` | Returns `true`; tree contains correct ID; old ID gone |
+| `test_repair_sdk_trainer_npc_id_is_noop_when_already_correct` | Returns `false`; tree unchanged |
+| `test_repair_sdk_skill_trainer_npc_id_updates_wrong_id` | Returns `true`; tree contains correct ID; old ID gone |
+| `test_repair_sdk_skill_trainer_npc_id_is_noop_when_already_correct` | Returns `false`; tree unchanged |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — 5507 passed, 0 failed
+
+---
+
 ## Dialogue Overhaul: All Characters Recruitable, Lore-Consistent Trees
 
 ### Summary
