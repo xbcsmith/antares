@@ -1,3 +1,54 @@
+## Phase 1: Domain — `DialogueTree` Repair Methods
+
+### Summary
+
+Added two new repair methods to `DialogueTree` in `src/domain/dialogue.rs` as
+part of the Fix Skill Trainer SDK plan. These methods form the domain layer of
+the repair path that prevents duplicate branch insertion when a trainer dialogue
+was generated with a stale or wrong NPC ID.
+
+### New Methods
+
+| Method | Location | Purpose |
+|--------|----------|---------|
+| `DialogueTree::repair_sdk_trainer_npc_id` | `src/domain/dialogue.rs` | Finds all `TrainerOpenNode`-marked nodes and patches any `OpenTraining { npc_id }` action that does not match the supplied correct ID. Returns `true` when at least one action was updated. |
+| `DialogueTree::repair_sdk_skill_trainer_npc_id` | `src/domain/dialogue.rs` | Same pattern for `SkillTrainerOpenNode`-marked nodes and `OpenSkillTraining { npc_id }` actions. |
+
+### Design
+
+Both methods follow the same pattern:
+- Iterate `self.nodes.values_mut()`
+- For each node whose `sdk_metadata.managed_content` contains the relevant
+  `TrainerOpenNode` / `SkillTrainerOpenNode` marker:
+  - Patch mismatched `npc_id` in `node.actions`
+  - Patch mismatched `npc_id` in each `choice.actions`
+- Return `true` if any action was changed, `false` otherwise (no-op)
+
+They are inserted immediately after their respective
+`ensure_standard_*_branch` siblings and before
+`remove_sdk_managed_*_content`, preserving the existing ordering convention.
+
+### Tests Added
+
+Four unit tests added to the existing `mod tests` block in
+`src/domain/dialogue.rs`:
+
+| Test | Assertion |
+|------|-----------|
+| `test_repair_sdk_trainer_npc_id_updates_wrong_id` | Returns `true`; tree contains correct ID; old ID gone |
+| `test_repair_sdk_trainer_npc_id_is_noop_when_already_correct` | Returns `false`; tree unchanged |
+| `test_repair_sdk_skill_trainer_npc_id_updates_wrong_id` | Returns `true`; tree contains correct ID; old ID gone |
+| `test_repair_sdk_skill_trainer_npc_id_is_noop_when_already_correct` | Returns `false`; tree unchanged |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — 5507 passed, 0 failed
+
+---
+
 ## Dialogue Overhaul: All Characters Recruitable, Lore-Consistent Trees
 
 ### Summary

@@ -627,6 +627,59 @@ impl DialogueTree {
         true
     }
 
+    /// Finds all SDK-managed trainer nodes (those marked with
+    /// [`DialogueSdkManagedContent::TrainerOpenNode`]) and updates any
+    /// [`DialogueAction::OpenTraining`] action whose `npc_id` differs from
+    /// `correct_npc_id`.
+    ///
+    /// Returns `true` when at least one action was updated.
+    ///
+    /// This is the repair path for trainer dialogues that were generated with a
+    /// stale or wrong NPC ID.  It is called by
+    /// `DialogueEditorState::ensure_trainer_dialogue_for_npc` before the more
+    /// invasive branch-insertion path.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueAction, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::standard_trainer_template(10, "old_npc", "Old NPC");
+    /// assert!(!tree.repair_sdk_trainer_npc_id("old_npc")); // already correct — no change
+    /// assert!(tree.repair_sdk_trainer_npc_id("new_npc"));  // wrong ID — fixed
+    /// assert!(tree.contains_open_training_for_npc("new_npc"));
+    /// ```
+    pub fn repair_sdk_trainer_npc_id(&mut self, correct_npc_id: &str) -> bool {
+        let mut changed = false;
+        for node in self.nodes.values_mut() {
+            if node
+                .sdk_metadata
+                .managed_content
+                .contains(&DialogueSdkManagedContent::TrainerOpenNode)
+            {
+                for action in node.actions.iter_mut() {
+                    if let DialogueAction::OpenTraining { npc_id } = action {
+                        if npc_id != correct_npc_id {
+                            *npc_id = correct_npc_id.to_string();
+                            changed = true;
+                        }
+                    }
+                }
+                for choice in node.choices.iter_mut() {
+                    for action in choice.actions.iter_mut() {
+                        if let DialogueAction::OpenTraining { npc_id } = action {
+                            if npc_id != correct_npc_id {
+                                *npc_id = correct_npc_id.to_string();
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        changed
+    }
+
     /// Removes SDK-managed trainer dialogue content from this tree.
     ///
     /// Returns `true` when any trainer content was removed and `false` when
@@ -880,6 +933,59 @@ impl DialogueTree {
             .insert(DialogueSdkManagedContent::SkillTrainerBranchInsertion);
 
         true
+    }
+
+    /// Finds all SDK-managed skill trainer nodes (those marked with
+    /// [`DialogueSdkManagedContent::SkillTrainerOpenNode`]) and updates any
+    /// [`DialogueAction::OpenSkillTraining`] action whose `npc_id` differs
+    /// from `correct_npc_id`.
+    ///
+    /// Returns `true` when at least one action was updated.
+    ///
+    /// This is the repair path for skill trainer dialogues that were generated
+    /// with a stale or wrong NPC ID.  It is called by
+    /// `DialogueEditorState::ensure_skill_trainer_dialogue_for_npc` before the
+    /// more invasive branch-insertion path.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueAction, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::standard_skill_trainer_template(10, "old_npc", "Old NPC");
+    /// assert!(!tree.repair_sdk_skill_trainer_npc_id("old_npc")); // already correct — no change
+    /// assert!(tree.repair_sdk_skill_trainer_npc_id("new_npc"));  // wrong ID — fixed
+    /// assert!(tree.contains_open_skill_training_for_npc("new_npc"));
+    /// ```
+    pub fn repair_sdk_skill_trainer_npc_id(&mut self, correct_npc_id: &str) -> bool {
+        let mut changed = false;
+        for node in self.nodes.values_mut() {
+            if node
+                .sdk_metadata
+                .managed_content
+                .contains(&DialogueSdkManagedContent::SkillTrainerOpenNode)
+            {
+                for action in node.actions.iter_mut() {
+                    if let DialogueAction::OpenSkillTraining { npc_id } = action {
+                        if npc_id != correct_npc_id {
+                            *npc_id = correct_npc_id.to_string();
+                            changed = true;
+                        }
+                    }
+                }
+                for choice in node.choices.iter_mut() {
+                    for action in choice.actions.iter_mut() {
+                        if let DialogueAction::OpenSkillTraining { npc_id } = action {
+                            if npc_id != correct_npc_id {
+                                *npc_id = correct_npc_id.to_string();
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        changed
     }
 
     /// Removes SDK-managed skill trainer dialogue content from this tree.
@@ -2605,5 +2711,66 @@ mod tests {
         assert!(DialogueSdkManagedContent::SkillTrainerOpenNode.is_skill_trainer_marker());
         assert!(!DialogueSdkManagedContent::TrainerOpenNode.is_skill_trainer_marker());
         assert!(!DialogueSdkManagedContent::MerchantOpenNode.is_skill_trainer_marker());
+    }
+
+    #[test]
+    fn test_repair_sdk_trainer_npc_id_updates_wrong_id() {
+        let mut tree = DialogueTree::standard_trainer_template(10, "wrong_npc", "Wrong NPC");
+
+        let repaired = tree.repair_sdk_trainer_npc_id("correct_npc");
+
+        assert!(repaired, "must return true when an action was updated");
+        assert!(
+            tree.contains_open_training_for_npc("correct_npc"),
+            "tree must now contain OpenTraining for the correct NPC"
+        );
+        assert!(
+            !tree.contains_open_training_for_npc("wrong_npc"),
+            "tree must no longer contain OpenTraining for the wrong NPC"
+        );
+    }
+
+    #[test]
+    fn test_repair_sdk_trainer_npc_id_is_noop_when_already_correct() {
+        let mut tree = DialogueTree::standard_trainer_template(10, "correct_npc", "Correct NPC");
+
+        let repaired = tree.repair_sdk_trainer_npc_id("correct_npc");
+
+        assert!(
+            !repaired,
+            "must return false when the NPC ID is already correct"
+        );
+        assert!(tree.contains_open_training_for_npc("correct_npc"));
+    }
+
+    #[test]
+    fn test_repair_sdk_skill_trainer_npc_id_updates_wrong_id() {
+        let mut tree = DialogueTree::standard_skill_trainer_template(10, "wrong_npc", "Wrong NPC");
+
+        let repaired = tree.repair_sdk_skill_trainer_npc_id("correct_npc");
+
+        assert!(repaired, "must return true when an action was updated");
+        assert!(
+            tree.contains_open_skill_training_for_npc("correct_npc"),
+            "tree must now contain OpenSkillTraining for the correct NPC"
+        );
+        assert!(
+            !tree.contains_open_skill_training_for_npc("wrong_npc"),
+            "tree must no longer contain OpenSkillTraining for the wrong NPC"
+        );
+    }
+
+    #[test]
+    fn test_repair_sdk_skill_trainer_npc_id_is_noop_when_already_correct() {
+        let mut tree =
+            DialogueTree::standard_skill_trainer_template(10, "correct_npc", "Correct NPC");
+
+        let repaired = tree.repair_sdk_skill_trainer_npc_id("correct_npc");
+
+        assert!(
+            !repaired,
+            "must return false when the NPC ID is already correct"
+        );
+        assert!(tree.contains_open_skill_training_for_npc("correct_npc"));
     }
 }
