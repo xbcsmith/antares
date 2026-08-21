@@ -745,7 +745,9 @@ fn load_object_entries_from_registry(campaign_dir: &Path) -> Vec<ObjectEntry> {
     };
 
     let mut entries = Vec::new();
-    for (key, path) in registry.meshes {
+    for entry_ref in registry.entries {
+        let key = entry_ref.name.clone(); // Phase 1: use name as key; Phase 3 will add id
+        let path = entry_ref.filepath.clone();
         let asset_path = campaign_dir.join(&path);
         let Ok(contents) = std::fs::read_to_string(&asset_path) else {
             continue;
@@ -805,12 +807,21 @@ fn sync_object_mesh_registry_entry(
         ObjectMeshRegistryFile::default()
     };
 
+    // Find existing entry by old name (or new name if no rename), or assign next ID.
+    let lookup_key = old_key.unwrap_or(new_key);
+    let id = registry
+        .entries
+        .iter()
+        .find(|e| e.name == lookup_key)
+        .map(|e| e.id)
+        .unwrap_or_else(|| registry.entries.iter().map(|e| e.id).max().unwrap_or(0) + 1);
+
     if let Some(old) = old_key {
         if old != new_key {
-            registry.rename(old, new_key);
+            registry.rename(id, new_key);
         }
     }
-    registry.upsert(new_key, file_path);
+    registry.upsert(id, new_key, file_path);
     // Registry save failure is self-healing: `save_objects` rewrites the whole
     // registry on the next campaign save, so this discard is intentional.
     #[allow(clippy::let_underscore_must_use)]
@@ -1188,8 +1199,8 @@ mod tests {
             .unwrap();
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("good_key", "assets/meshes/objects/good.ron");
-        registry.upsert("bad_key", "assets/meshes/objects/missing.ron");
+        registry.upsert(0, "good_key", "assets/meshes/objects/good.ron");
+        registry.upsert(1, "bad_key", "assets/meshes/objects/missing.ron");
         std::fs::create_dir_all(tmp.path().join("data")).unwrap();
         registry
             .save(&tmp.path().join("data/object_mesh_registry.ron"))
@@ -1229,9 +1240,13 @@ mod tests {
         let registry =
             ObjectMeshRegistryFile::load(&tmp.path().join("data/object_mesh_registry.ron"))
                 .unwrap();
-        assert!(!registry.meshes.contains_key("old_chest"));
+        assert!(!registry.entries.iter().any(|e| e.name == "old_chest"));
         assert_eq!(
-            registry.meshes.get("new_chest").map(String::as_str),
+            registry
+                .entries
+                .iter()
+                .find(|e| e.name == "new_chest")
+                .map(|e| e.filepath.as_str()),
             Some("assets/meshes/objects/old_chest.ron")
         );
 

@@ -2158,7 +2158,9 @@ impl CampaignBuilderApp {
                 match ObjectMeshRegistryFile::load(&registry_path) {
                     Ok(registry) => {
                         let mut entries = Vec::new();
-                        for (key, path) in registry.meshes {
+                        for entry_ref in registry.entries {
+                            let path = entry_ref.filepath.clone();
+                            let key = entry_ref.name.clone(); // Phase 1: use name as key; Phase 3 will add id
                             let asset_path = dir.join(&path);
                             match fs::read_to_string(&asset_path) {
                                 Ok(contents) => {
@@ -2247,10 +2249,10 @@ impl CampaignBuilderApp {
             .ok_or(CampaignIoError::NoCampaignDir)?;
 
         let mut registry = ObjectMeshRegistryFile::default();
-        for entry in &self.campaign_data.objects {
+        for (idx, entry) in self.campaign_data.objects.iter().enumerate() {
             let full_path = dir.join(&entry.file_path);
             write_ron_to_path(&full_path, &entry.definition, "object")?;
-            registry.upsert(&entry.key, &entry.file_path);
+            registry.upsert(idx as u32, &entry.key, &entry.file_path);
         }
 
         let registry_path = dir.join("data/object_mesh_registry.ron");
@@ -3884,8 +3886,8 @@ mod tests {
         write_test_object_asset(&good_asset_path, "GoodObject");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("good_key", "assets/meshes/objects/good.ron");
-        registry.upsert("missing_key", "assets/meshes/objects/missing.ron");
+        registry.upsert(0, "good_key", "assets/meshes/objects/good.ron");
+        registry.upsert(1, "missing_key", "assets/meshes/objects/missing.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();
@@ -3993,7 +3995,7 @@ mod tests {
         write_test_object_asset(&asset_path, "GoodObject");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("good_key", "assets/meshes/objects/good.ron");
+        registry.upsert(0, "good_key", "assets/meshes/objects/good.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();
@@ -4016,7 +4018,7 @@ mod tests {
         let asset_a_path = dir_a.join("assets/meshes/objects/a.ron");
         write_test_object_asset(&asset_a_path, "ObjectA");
         let mut registry_a = ObjectMeshRegistryFile::default();
-        registry_a.upsert("a_key", "assets/meshes/objects/a.ron");
+        registry_a.upsert(0, "a_key", "assets/meshes/objects/a.ron");
         let registry_a_path = dir_a.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_a_path.parent().unwrap()).unwrap();
         registry_a.save(&registry_a_path).unwrap();
@@ -4026,7 +4028,7 @@ mod tests {
         let asset_b_path = dir_b.join("assets/meshes/objects/b.ron");
         write_test_object_asset(&asset_b_path, "ObjectB");
         let mut registry_b = ObjectMeshRegistryFile::default();
-        registry_b.upsert("b_key", "assets/meshes/objects/b.ron");
+        registry_b.upsert(0, "b_key", "assets/meshes/objects/b.ron");
         let registry_b_path = dir_b.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_b_path.parent().unwrap()).unwrap();
         registry_b.save(&registry_b_path).unwrap();
@@ -4069,7 +4071,7 @@ mod tests {
         write_test_object_asset(&asset_path, "NewChest");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("NewChest", "assets/meshes/objects/new_chest.ron");
+        registry.upsert(0, "NewChest", "assets/meshes/objects/new_chest.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();
@@ -4096,7 +4098,7 @@ mod tests {
         write_test_object_asset(&asset_path, "NewChest");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("NewChest", "assets/meshes/objects/new_chest.ron");
+        registry.upsert(0, "NewChest", "assets/meshes/objects/new_chest.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();

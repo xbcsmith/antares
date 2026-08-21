@@ -1,4 +1,116 @@
-## Phase 4: Preview Panel — Trainer Badges and Detail Sections
+## Phase 1: Object Mesh Registry Refactor — Domain Type Changes
+
+### Summary
+
+Rewrote `src/domain/world/object_mesh.rs` to introduce `ObjectMeshEntry` as
+the new first-class domain type for registry entries, replacing the old
+`BTreeMap<String, String>` storage in `ObjectMeshRegistryFile`. Added dual-
+format load support so legacy `ObjectMeshRegistry(meshes: {...})` files
+continue to load transparently alongside the new array-of-entries format.
+
+### Files Changed
+
+**`src/domain/world/object_mesh.rs`**
+
+- Added `pub struct ObjectMeshEntry { id: u32, name: String, filepath: String }`
+  with `Debug, Clone, Serialize, Deserialize, PartialEq` derives.
+- Replaced `ObjectMeshRegistryFile { meshes: BTreeMap<String, String> }` with
+  `ObjectMeshRegistryFile { entries: Vec<ObjectMeshEntry> }` (sorted by `id`).
+- Removed private `struct ObjectMeshRegistry`; added private
+  `struct ObjectMeshRegistryLegacy { meshes: BTreeMap<String, String> }` for
+  the legacy fallback path.
+- New `upsert(&mut self, id: u32, name: &str, filepath: &str)`: inserts or
+  replaces by `id`; re-sorts by `id` on insert.
+- New `rename(&mut self, id: u32, new_name: &str) -> bool`: mutates `name`
+  field of matching entry in-place.
+- New `remove(&mut self, id: u32) -> Option<ObjectMeshEntry>`: removes and
+  returns entry by `id`.
+- `save()` now serializes `&self.entries` (plain array) directly via
+  `ron::ser::to_string_pretty`.
+- `load()` dual-format: tries `ron::from_str::<Vec<ObjectMeshEntry>>` first;
+  on failure parses via `ron::Value` and deserializes as
+  `ObjectMeshRegistryLegacy`, synthesizing `ObjectMeshEntry { id: 0, name: key,
+  filepath: path }` per legacy map entry.
+- `ObjectMeshDatabase::load_from_registry` now delegates to
+  `ObjectMeshRegistryFile::load()`. Key selection: `entry.id > 0` → use
+  `entry.id.to_string()`; `entry.id == 0` (legacy sentinel) → use `entry.name`
+  so pre-Phase-1 campaigns with human-readable string keys keep resolving.
+- Removed `test_object_mesh_registry_file_load_real_tutorial_campaign_file`
+  (Rule 5 violation). Added
+  `test_object_mesh_registry_file_load_test_campaign_fixture` pointing at
+  `data/test_campaign/data/object_mesh_registry.ron`.
+- All 18 in-module tests and 11 SDK object-mesh tests pass.
+
+### Key Design Decision: Legacy Key Fallback
+
+Legacy-format entries are synthesized with `id: 0`. If `load_from_registry`
+never used `entry.name` as a key, every legacy entry would collide under `"0"`
+in the database map. Instead, `id == 0` is treated as the legacy sentinel and
+`entry.name` is used as the lookup key. This preserves string-keyed lookups
+(e.g. `has_mesh("barrel")`) for any campaign still written in the old format.
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features`: 5507 passed, 8 skipped, 0 failed
+
+---
+
+## Phase 1: Object Mesh Registry Refactor — SDK Call-Site Migration
+
+### Summary
+
+Updated all SDK call sites that referenced the old `ObjectMeshRegistryFile` API
+(`meshes: BTreeMap<String, String>`, 2-arg `upsert`, string-keyed `rename`) to use
+the new domain API (`entries: Vec<ObjectMeshEntry>`, 3-arg `upsert(id, name, filepath)`,
+id-keyed `rename(id, new_name)`).
+
+### Files Changed
+
+**`sdk/campaign_builder/src/campaign_io.rs`**
+
+- `load_objects`: Changed iteration from `for (key, path) in registry.meshes` to
+  `for entry_ref in registry.entries`, extracting `key = entry_ref.name.clone()` and
+  `path = entry_ref.filepath.clone()` (Phase 1: name used as key; Phase 3 adds id).
+- `save_objects`: Replaced `for entry in &self.campaign_data.objects` with
+  `for (idx, entry) in self.campaign_data.objects.iter().enumerate()`, and updated
+  `upsert` call to `registry.upsert(idx as u32, &entry.key, &entry.file_path)`
+  (Phase 3 will replace `idx` with a real persistent id).
+- Tests: Updated all `registry.upsert("key", "path")` calls to 3-arg form with
+  sequential IDs (0, 1, ...).
+
+**`sdk/campaign_builder/src/obj_importer_ui.rs`**
+
+- `upsert_object_mesh_registry_entry`: Updated to preserve existing entry ID by
+  looking up the entry by name, falling back to `max(existing_ids) + 1` for new
+  entries, then calling `registry.upsert(id, mesh_key, relative_path)`.
+- Test `test_export_object_mesh_upserts_existing_registry_entry_by_key`: Updated
+  `upsert` calls to 3-arg form and replaced `registry.meshes.*` assertions with
+  `registry.entries.iter().find(|e| e.name == ...)` pattern.
+
+**`sdk/campaign_builder/src/objects_editor.rs`**
+
+- `load_object_entries_from_registry`: Changed `for (key, path) in registry.meshes`
+  to `for entry_ref in registry.entries` with name-as-key extraction.
+- `sync_object_mesh_registry_entry`: Replaced string-keyed `rename(old, new_key)`
+  with ID lookup + `rename(id, new_key)`, and updated `upsert` to 3-arg form.
+  ID lookup finds existing entry by old name (or new name if no rename), then falls
+  back to `max(ids) + 1` for brand-new entries.
+- Tests: Updated `upsert` calls and `registry.meshes.*` assertions to new API.
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- All 13 affected tests pass (`test_load_objects_*`, `test_save_objects_*`,
+  `test_open_campaign_*`, `test_object_mesh_import_*`, `test_export_object_mesh_*`,
+  `test_load_object_entries_*`, `test_write_and_sync_*`)
+
+---
+
 
 ### Summary
 
