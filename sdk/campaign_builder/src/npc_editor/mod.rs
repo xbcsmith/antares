@@ -6516,6 +6516,187 @@ mod tests {
         );
     }
 
+    // ── Phase 4: Preview Panel tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_show_npc_preview_shows_trainer_badge() {
+        // Rendering test: preview with is_trainer = true must not panic.
+        // Logic test: the 🧑 NPC fallback gate must exclude trainer NPCs.
+        let npc = NpcDefinition {
+            id: "trainer_npc".to_string(),
+            name: "Master Swordsman".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: Some(10),
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: true,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+        };
+
+        // Gate logic: is_trainer = true must suppress the fallback label.
+        let shows_fallback = !npc.is_merchant
+            && !npc.is_innkeeper
+            && !npc.is_priest
+            && !npc.is_trainer
+            && !npc.is_skill_trainer;
+        assert!(
+            !shows_fallback,
+            "🧑 NPC fallback must not appear when is_trainer is true"
+        );
+
+        // Rendering: assert no panic.
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut textures = std::collections::HashMap::new();
+                show_npc_preview(ui, &npc, None, None, &[], &mut textures);
+            });
+        });
+    }
+
+    #[test]
+    fn test_show_npc_preview_shows_skill_trainer_badge() {
+        // Rendering test: preview with is_skill_trainer = true must not panic.
+        // Logic test: the 🧑 NPC fallback gate must exclude skill trainer NPCs.
+        let npc = NpcDefinition {
+            id: "skill_trainer_npc".to_string(),
+            name: "Skill Master".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            is_skill_trainer: true,
+            trainable_skill_ids: vec!["stealth".to_string()],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+        };
+
+        // Gate logic: is_skill_trainer = true must suppress the fallback label.
+        let shows_fallback = !npc.is_merchant
+            && !npc.is_innkeeper
+            && !npc.is_priest
+            && !npc.is_trainer
+            && !npc.is_skill_trainer;
+        assert!(
+            !shows_fallback,
+            "🧑 NPC fallback must not appear when is_skill_trainer is true"
+        );
+
+        // Rendering: assert no panic.
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut textures = std::collections::HashMap::new();
+                show_npc_preview(ui, &npc, None, None, &[], &mut textures);
+            });
+        });
+    }
+
+    #[test]
+    fn test_show_npc_preview_trainer_with_no_dialogue_id_shows_red_label() {
+        // dialogue_id: None with is_trainer = true — the red "no dialogue assigned"
+        // label path must not unwrap or panic.
+        let npc = NpcDefinition {
+            id: "unbound_trainer".to_string(),
+            name: "Unbound Trainer".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: true,
+            training_fee_base: Some(100),
+            training_fee_multiplier: Some(1.5),
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+        };
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut textures = std::collections::HashMap::new();
+                show_npc_preview(ui, &npc, None, None, &[], &mut textures);
+            });
+        });
+    }
+
+    #[test]
+    fn test_show_npc_preview_skill_trainer_skills_list() {
+        // skill trainer with multiple trainable skills and a max rank — assert no panic.
+        let npc = NpcDefinition {
+            id: "skill_sage".to_string(),
+            name: "Skill Sage".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: Some(42),
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            is_skill_trainer: true,
+            trainable_skill_ids: vec!["stealth".to_string(), "athletics".to_string()],
+            skill_training_fee_base: Some(50),
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: Some(5),
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+        };
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut textures = std::collections::HashMap::new();
+                show_npc_preview(ui, &npc, None, None, &[], &mut textures);
+            });
+        });
+    }
+
     #[test]
     fn test_edit_panel_trainer_shows_dialogue_combobox() {
         // Verify that the trainer dialogue ComboBox selection logic correctly

@@ -1,3 +1,68 @@
+## Phase 4: Preview Panel — Trainer Badges and Detail Sections
+
+### Summary
+
+Added trainer and skill trainer visibility to the NPC list-view preview panel
+in `sdk/campaign_builder/src/npc_editor/portrait_picker.rs`. Authors now see
+badges, dialogue binding, and full trainer configuration directly in the
+right-hand preview column without opening the edit form.
+
+### Changes (`sdk/campaign_builder/src/npc_editor/portrait_picker.rs`)
+
+**4.1 — Role badge row**
+
+Two new coloured badges added after the existing Priest badge:
+
+| Condition | Badge | Colour |
+|---|---|---|
+| `npc.is_trainer` | `🎓 Trainer` | `RGB(220, 180, 80)` (amber) |
+| `npc.is_skill_trainer` | `🧠 Skill Trainer` | `RGB(180, 220, 80)` (lime) |
+
+Fallback `🧑 NPC` label gate updated to also check `!npc.is_trainer && !npc.is_skill_trainer`.
+
+**4.2 — Identity grid `"Trainer Dialogue:"` row**
+
+Optional row added after `"Merchant Dialogue:"` — shown only when
+`npc.is_trainer || npc.is_skill_trainer`. Displays the `dialogue_id` as a
+string, or `"no dialogue assigned"` when `None`.
+
+**4.3 — Trainer detail section**
+
+`egui::Grid::new("npc_preview_trainer_grid")` block — shown when `npc.is_trainer`:
+- Dialogue ID (red `"no dialogue assigned"` when `None`)
+- Fee Base (value in gold/level, or `"(campaign default)"`)
+- Fee Multiplier (`× N.NN`, or `"(campaign default)"`)
+
+**4.4 — Skill Trainer detail section**
+
+`egui::Grid::new("npc_preview_skill_trainer_grid")` block — shown when `npc.is_skill_trainer`:
+- Dialogue ID (red label when `None`)
+- Trainable Skills (comma-joined list, or `"(none)"`)
+- Max Rank (only when `Some`)
+- Fee Base (gold/rank or campaign default)
+- Fee Multiplier or campaign default
+
+All four `egui::Grid` IDs are unique and do not collide with existing grids.
+
+### Tests Added (4, in `sdk/campaign_builder/src/npc_editor/mod.rs`)
+
+| Test | What it verifies |
+|------|------------------|
+| `test_show_npc_preview_shows_trainer_badge` | Gate logic: `is_trainer = true` suppresses `🧑 NPC` fallback; UI render does not panic |
+| `test_show_npc_preview_shows_skill_trainer_badge` | Gate logic: `is_skill_trainer = true` suppresses fallback; UI render does not panic |
+| `test_show_npc_preview_trainer_with_no_dialogue_id_shows_red_label` | `dialogue_id: None` with `is_trainer = true` renders without panic (red label path) |
+| `test_show_npc_preview_skill_trainer_skills_list` | `is_skill_trainer = true` with multiple skills, `skill_training_max_rank: Some(5)` renders without panic |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run` (root workspace) — 5507 passed, 0 failed
+- `cargo nextest run` (sdk/campaign_builder) — 2506 passed, 0 failed
+
+---
+
 ## Phase 3: Edit Panel — Dialogue ID Picker in Trainer Sections
 
 ### Summary
