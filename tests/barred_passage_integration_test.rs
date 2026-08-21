@@ -201,7 +201,8 @@ fn test_barred_passage_dialogue_is_repeatable() {
 // Tests — object mesh registry
 // ---------------------------------------------------------------------------
 
-/// P5-BP8: "barred_passage" key must appear in the unified object mesh registry.
+/// P5-BP8: The barred passage mesh must appear in the unified object mesh registry,
+/// keyed by its numeric id (12006).
 #[test]
 fn test_barred_passage_mesh_registered_in_object_mesh_registry() {
     let content = Campaign::load("data/test_campaign")
@@ -210,8 +211,8 @@ fn test_barred_passage_mesh_registered_in_object_mesh_registry() {
         .expect("test campaign content should load");
 
     assert!(
-        content.object_meshes.has_mesh("barred_passage"),
-        "'barred_passage' must be registered in data/test_campaign/data/object_mesh_registry.ron"
+        content.object_meshes.has_mesh("12006"),
+        "'12006' (Barred Passage) must be registered in data/test_campaign/data/object_mesh_registry.ron"
     );
 }
 

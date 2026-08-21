@@ -1,3 +1,69 @@
+## Phase 2: Object Mesh Registry Refactor — Remove Legacy Fallback
+
+### Summary
+
+Converted all object mesh registry data to the new array-of-entries format and
+removed the legacy `ObjectMeshRegistry(meshes: {...})` fallback from
+`src/domain/world/object_mesh.rs`. All entries are now keyed exclusively by
+`entry.id.to_string()` in `ObjectMeshDatabase`; name-based string keys are gone.
+
+### Files Changed
+
+**`src/domain/world/object_mesh.rs`**
+
+- Removed `BTreeMap` from imports (`std::collections::HashMap` only).
+- Deleted `ObjectMeshRegistryLegacy { meshes: BTreeMap<String, String> }` private
+  struct (was the fallback deserialize target).
+- Removed the four-line "Dual-format support" paragraph from the module-level doc
+  comment.
+- Simplified `load()`: direct `ron::from_str::<Vec<ObjectMeshEntry>>` — no
+  try-then-fallback, no `ron::Value` intermediary.
+- Updated `load()` doc comment: removed the `## Format detection` section that
+  described both formats; now only documents the array format.
+- Updated `load_from_registry()` doc comment: replaced the `**Key selection**`
+  paragraph with a single line (`Each entry is keyed by entry.id.to_string()`).
+- Simplified key selection in `load_from_registry()` loop: removed the
+  `if entry.id > 0 { ... } else { ... }` branch; now always `entry.id.to_string()`.
+- Test `test_object_mesh_registry_file_load_legacy_named_format` renamed to
+  `test_load_legacy_format_returns_error_after_removal`; assertions flipped to
+  confirm the legacy format now returns `ObjectMeshError::ParseError`.
+- Test `test_object_mesh_registry_file_load_test_campaign_fixture` tightened:
+  asserts exactly 6 entries and first entry id == 12001.
+- New test `test_campaign_loader_object_meshes_keyed_by_numeric_id`: verifies
+  `has_mesh("12001")` passes and `has_mesh("oak_tree")` fails against the test
+  campaign fixture.
+
+**`src/sdk/database.rs`**
+
+- `test_object_mesh_registry_loads_from_primary_file`: updated written registry
+  from legacy `ObjectMeshRegistry(meshes: {...})` format to the new array format
+  `[(id: 12001, name: "barrel", filepath: "...")]`; updated assertion from
+  `has_mesh("barrel")` to `has_mesh("12001")`.
+
+**`tests/barred_passage_integration_test.rs`**
+
+- `test_barred_passage_mesh_registered_in_object_mesh_registry`: updated
+  assertion from `has_mesh("barred_passage")` to `has_mesh("12006")` (the
+  numeric ID of the Barred Passage entry in the test campaign fixture).
+
+### Key Design Decision: Legacy Fallback Removed
+
+With all data files now in the new array format, the `ron::Value`-based
+legacy fallback and `ObjectMeshRegistryLegacy` are dead code. Removing them
+simplifies `load()` to a direct parse and makes the error surface cleaner —
+any file not in `Vec<ObjectMeshEntry>` shape now immediately returns a
+`ParseError` rather than silently synthesizing `id: 0` entries.
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features -E 'test(object_mesh) | test(barred_passage)'`:
+  38/38 passed
+
+---
+
 ## Phase 1: Object Mesh Registry Refactor — Domain Type Changes
 
 ### Summary
@@ -111,6 +177,7 @@ id-keyed `rename(id, new_name)`).
 
 ---
 
+## Phase 4: Preview Panel — Trainer Badges and Detail Sections
 
 ### Summary
 

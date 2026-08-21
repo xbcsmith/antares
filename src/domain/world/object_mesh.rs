@@ -31,11 +31,6 @@
 //! `CreatureDefinition` RON asset file — the same format used by creature,
 //! item, landscape, and furniture mesh registries.
 //!
-//! Dual-format support: the legacy `ObjectMeshRegistry(meshes: {...})` named-
-//! struct format is still loaded transparently. Legacy entries are synthesized
-//! as `ObjectMeshEntry { id: 0, name: <key>, filepath: <path> }`. The new
-//! array format is tried first on every load.
-//!
 //! # Examples
 //!
 //! ```
@@ -47,7 +42,7 @@
 //! assert!(db.lookup("oak_tree").is_none());
 //! ```
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -134,17 +129,6 @@ pub struct ObjectMeshEntry {
     pub filepath: String,
 }
 
-/// Legacy RON schema for `ObjectMeshRegistry(meshes: {...})` files.
-///
-/// Used only as a fallback deserialize target inside [`ObjectMeshRegistryFile::load`]
-/// when the primary array-of-entries format is not detected. The `ron::Value`
-/// intermediary discards the struct-name token, so both `ObjectMeshRegistry`
-/// and any other named-struct wrapper deserialize successfully into this type.
-#[derive(Debug, Deserialize)]
-struct ObjectMeshRegistryLegacy {
-    meshes: BTreeMap<String, String>,
-}
-
 /// Editable, round-trippable representation of `object_mesh_registry.ron`.
 ///
 /// This is the **write-capable** counterpart to [`ObjectMeshDatabase`].
@@ -185,9 +169,7 @@ impl ObjectMeshRegistryFile {
     /// an absent file means for their use case — that decision is kept out
     /// of this domain type on purpose.
     ///
-    /// ## Format detection
-    ///
-    /// The new array-of-entries format is tried first:
+    /// The registry file must use the array-of-entries format:
     ///
     /// ```ron
     /// [
@@ -195,26 +177,12 @@ impl ObjectMeshRegistryFile {
     /// ]
     /// ```
     ///
-    /// If that parse fails, the function falls back to the legacy named-struct
-    /// format via `ron::Value` (which discards the struct-name token):
-    ///
-    /// ```ron
-    /// ObjectMeshRegistry(
-    ///     meshes: {
-    ///         "barred_passage": "assets/meshes/objects/barred_door.ron",
-    ///     }
-    /// )
-    /// ```
-    ///
-    /// Legacy entries are synthesized with `id: 0` and `name` set to the map
-    /// key. Both `campaigns/tutorial`-era files and new SDK-written files load
-    /// correctly.
-    ///
     /// # Errors
     ///
     /// Returns [`ObjectMeshError::ReadError`] if `path` cannot be read (this
     /// includes a non-existent file), and [`ObjectMeshError::ParseError`] if
-    /// the contents are neither valid new-format nor valid legacy-format RON.
+    /// the contents are not valid RON or do not match the expected
+    /// `Vec<ObjectMeshEntry>` shape.
     ///
     /// # Examples
     ///
@@ -228,30 +196,8 @@ impl ObjectMeshRegistryFile {
     pub fn load(path: &Path) -> Result<Self, ObjectMeshError> {
         let content =
             std::fs::read_to_string(path).map_err(|e| ObjectMeshError::ReadError(e.to_string()))?;
-
-        // Try new array-of-entries format first.
-        if let Ok(entries) = ron::from_str::<Vec<ObjectMeshEntry>>(&content) {
-            return Ok(Self { entries });
-        }
-
-        // Fall back to legacy ObjectMeshRegistry(meshes: {...}) format via
-        // ron::Value so that any named-struct identifier is silently discarded.
-        let value: ron::Value =
-            ron::from_str(&content).map_err(|e| ObjectMeshError::ParseError(e.to_string()))?;
-        let legacy: ObjectMeshRegistryLegacy = value
-            .into_rust()
+        let entries = ron::from_str::<Vec<ObjectMeshEntry>>(&content)
             .map_err(|e| ObjectMeshError::ParseError(e.to_string()))?;
-
-        let entries = legacy
-            .meshes
-            .into_iter()
-            .map(|(key, fp)| ObjectMeshEntry {
-                id: 0,
-                name: key,
-                filepath: fp,
-            })
-            .collect();
-
         Ok(Self { entries })
     }
 
@@ -419,15 +365,10 @@ impl ObjectMeshDatabase {
 
     /// Loads an `ObjectMeshDatabase` from `object_mesh_registry.ron`.
     ///
-    /// Delegates parsing to [`ObjectMeshRegistryFile::load`], which supports
-    /// both the new array-of-entries format and the legacy
-    /// `ObjectMeshRegistry(meshes: {...})` format transparently.
+    /// Delegates parsing to [`ObjectMeshRegistryFile::load`], which expects
+    /// the array-of-entries format.
     ///
-    /// **Key selection**: new-format entries (non-zero `id`) are keyed by
-    /// `entry.id.to_string()` (e.g. `"12001"`). Legacy-format entries are
-    /// synthesized with `id: 0`; those fall back to `entry.name` as the key
-    /// so that pre-Phase-1 campaigns using human-readable string keys
-    /// continue to resolve without modification.
+    /// Each entry is keyed by `entry.id.to_string()` (e.g. `"12001"`).
     ///
     /// This does **not** merge the legacy landscape or furniture registries —
     /// call [`merge_landscape`](Self::merge_landscape) and
@@ -459,15 +400,7 @@ impl ObjectMeshDatabase {
         let mut db = Self::new();
 
         for entry in registry.entries {
-            // New-format entries carry a non-zero id used as the lookup key.
-            // Legacy entries are synthesized with id=0; fall back to name so
-            // that pre-Phase-1 campaigns with human-readable string keys keep
-            // resolving correctly.
-            let key = if entry.id > 0 {
-                entry.id.to_string()
-            } else {
-                entry.name.clone()
-            };
+            let key = entry.id.to_string();
             let filepath = &entry.filepath;
 
             // Reject untrusted registry paths that are empty, absolute, or
@@ -878,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn test_object_mesh_registry_file_load_legacy_named_format() {
+    fn test_load_legacy_format_returns_error_after_removal() {
         use std::io::Write;
 
         let tmp = tempfile::TempDir::new().unwrap();
@@ -894,13 +827,11 @@ mod tests {
             )
             .unwrap();
 
-        let loaded = ObjectMeshRegistryFile::load(&registry_path).unwrap();
-        assert_eq!(loaded.entries.len(), 1);
-        assert_eq!(loaded.entries[0].id, 0);
-        assert_eq!(loaded.entries[0].name, "barred_passage");
-        assert_eq!(
-            loaded.entries[0].filepath,
-            "assets/meshes/objects/barred_door.ron"
+        let result = ObjectMeshRegistryFile::load(&registry_path);
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), ObjectMeshError::ParseError(_)),
+            "expected ParseError for legacy named-struct format"
         );
     }
 
@@ -908,9 +839,35 @@ mod tests {
     fn test_object_mesh_registry_file_load_test_campaign_fixture() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("data/test_campaign/data/object_mesh_registry.ron");
-        // Phase 1: file is still in legacy format; dual-format load must succeed.
         let loaded = ObjectMeshRegistryFile::load(&fixture_path).unwrap();
-        assert!(!loaded.entries.is_empty());
+        assert_eq!(
+            loaded.entries.len(),
+            6,
+            "expected 6 entries in test campaign fixture"
+        );
+        assert_eq!(
+            loaded.entries[0].id, 12001,
+            "first entry id should be 12001"
+        );
+    }
+
+    #[test]
+    fn test_campaign_loader_object_meshes_keyed_by_numeric_id() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let registry_path = manifest_dir.join("data/test_campaign/data/object_mesh_registry.ron");
+        let campaign_root = manifest_dir.join("data/test_campaign");
+
+        let db = ObjectMeshDatabase::load_from_registry(&registry_path, &campaign_root)
+            .expect("test campaign object mesh registry must load");
+
+        assert!(
+            db.has_mesh("12001"),
+            "numeric id key '12001' must be present"
+        );
+        assert!(
+            !db.has_mesh("oak_tree"),
+            "legacy string key 'oak_tree' must not be present"
+        );
     }
 
     #[test]
