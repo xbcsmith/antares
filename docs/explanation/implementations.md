@@ -1,3 +1,66 @@
+## Phase 2: SDK Dialogue Editor — Wire the Repair Path
+
+### Summary
+
+Wired the Phase 1 repair methods into the existing SDK dialogue editor functions
+in `sdk/campaign_builder/src/dialogue_editor.rs`. Trainer NPCs whose
+auto-generated dialogue was created with the wrong NPC ID are now corrected
+in-place instead of silently receiving a duplicate branch.
+
+### Changes
+
+**`ensure_trainer_dialogue_for_npc`** (`sdk/campaign_builder/src/dialogue_editor.rs`)
+
+Inserted a repair path between the `AlreadyValid` early-return and the
+branch-insertion path:
+
+```rust
+// Repair path: a SDK-managed trainer node exists but targets the wrong NPC ID.
+// Update it in-place instead of appending a duplicate branch.
+if dialogue.repair_sdk_trainer_npc_id(&npc.id) {
+    self.has_unsaved_changes = true;
+    return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
+}
+```
+
+**`ensure_skill_trainer_dialogue_for_npc`** — same repair path using
+`repair_sdk_skill_trainer_npc_id`.
+
+### Repair Path Flow (now complete)
+
+```
+ensure_*_dialogue_for_npc(npc)
+  ├─ dialogue.contains_open_*_for_npc(&npc.id)
+  │    └─ true  → AlreadyValid (no change)
+  ├─ dialogue.repair_sdk_*_npc_id(&npc.id)          ← NEW
+  │    └─ true  → AugmentedExisting (wrong ID fixed in-place)
+  └─ dialogue.ensure_standard_*_branch(&npc.id, …)
+       └─ true  → AugmentedExisting (new branch appended)
+       └─ false → Error
+```
+
+### Tests Added
+
+Four unit tests added to the existing `mod tests` block in
+`sdk/campaign_builder/src/dialogue_editor.rs`:
+
+| Test | Assertion |
+|------|-----------|
+| `test_ensure_trainer_dialogue_uses_npc_id` | Returns `AugmentedExisting`; correct ID present; stale ID gone; `has_unsaved_changes` set |
+| `test_ensure_trainer_dialogue_already_correct_returns_already_valid` | Returns `AlreadyValid`; node count unchanged |
+| `test_ensure_skill_trainer_dialogue_uses_npc_id` | Skill trainer mirror of above |
+| `test_ensure_skill_trainer_dialogue_already_correct_returns_already_valid` | Skill trainer no-op mirror |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run` (root workspace) — 5507 passed, 0 failed
+- `cargo nextest run` (sdk/campaign_builder) — 2500 passed, 0 failed
+
+---
+
 ## Phase 1: Domain — `DialogueTree` Repair Methods
 
 ### Summary
