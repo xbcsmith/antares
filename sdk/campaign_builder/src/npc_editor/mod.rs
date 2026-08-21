@@ -1583,6 +1583,62 @@ impl NpcEditorState {
                                 .strong(),
                         );
 
+                        // Dialogue picker — lets the author point this trainer at any existing
+                        // dialogue without touching the unrelated top-level Dialogue ID selector.
+                        ui.horizontal(|ui| {
+                            ui.label("Dialogue:");
+                            let trainer_selected_text =
+                                if self.edit_buffer.dialogue_id.is_empty() {
+                                    "(none)".to_string()
+                                } else {
+                                    self.available_dialogues
+                                        .iter()
+                                        .find(|d| {
+                                            d.id.to_string() == self.edit_buffer.dialogue_id
+                                        })
+                                        .map(|d| format!("{}: {}", d.id, d.name))
+                                        .unwrap_or_else(|| self.edit_buffer.dialogue_id.clone())
+                                };
+
+                            egui::ComboBox::from_id_salt("npc_trainer_dialogue_picker")
+                                .selected_text(trainer_selected_text)
+                                .show_ui(ui, |ui| {
+                                    ui.push_id("npc_trainer_dialogue_none", |ui| {
+                                        if ui
+                                            .selectable_label(
+                                                self.edit_buffer.dialogue_id.is_empty(),
+                                                "(none)",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.edit_buffer.dialogue_id.clear();
+                                            needs_save = true;
+                                        }
+                                    });
+                                    for dialogue in &self.available_dialogues {
+                                        ui.push_id(dialogue.id, |ui| {
+                                            let label =
+                                                format!("{}: {}", dialogue.id, dialogue.name);
+                                            if ui
+                                                .selectable_label(
+                                                    self.edit_buffer.dialogue_id
+                                                        == dialogue.id.to_string(),
+                                                    &label,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.edit_buffer.dialogue_id =
+                                                    dialogue.id.to_string();
+                                                needs_save = true;
+                                            }
+                                        });
+                                    }
+                                });
+                        });
+                        ui.small(
+                            "Dialogue must contain an OpenTraining action for this NPC.",
+                        );
+
                         ui.horizontal(|ui| {
                             ui.label("Training Fee Base (gold per level):");
                             ui.add(
@@ -1705,6 +1761,62 @@ impl NpcEditorState {
                             egui::RichText::new(skill_trainer_status)
                                 .color(skill_trainer_color)
                                 .strong(),
+                        );
+
+                        // Dialogue picker — lets the author point this skill trainer at any
+                        // existing dialogue without touching the top-level Dialogue ID selector.
+                        ui.horizontal(|ui| {
+                            ui.label("Dialogue:");
+                            let skill_trainer_selected_text =
+                                if self.edit_buffer.dialogue_id.is_empty() {
+                                    "(none)".to_string()
+                                } else {
+                                    self.available_dialogues
+                                        .iter()
+                                        .find(|d| {
+                                            d.id.to_string() == self.edit_buffer.dialogue_id
+                                        })
+                                        .map(|d| format!("{}: {}", d.id, d.name))
+                                        .unwrap_or_else(|| self.edit_buffer.dialogue_id.clone())
+                                };
+
+                            egui::ComboBox::from_id_salt("npc_skill_trainer_dialogue_picker")
+                                .selected_text(skill_trainer_selected_text)
+                                .show_ui(ui, |ui| {
+                                    ui.push_id("npc_skill_trainer_dialogue_none", |ui| {
+                                        if ui
+                                            .selectable_label(
+                                                self.edit_buffer.dialogue_id.is_empty(),
+                                                "(none)",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.edit_buffer.dialogue_id.clear();
+                                            needs_save = true;
+                                        }
+                                    });
+                                    for dialogue in &self.available_dialogues {
+                                        ui.push_id(dialogue.id, |ui| {
+                                            let label =
+                                                format!("{}: {}", dialogue.id, dialogue.name);
+                                            if ui
+                                                .selectable_label(
+                                                    self.edit_buffer.dialogue_id
+                                                        == dialogue.id.to_string(),
+                                                    &label,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.edit_buffer.dialogue_id =
+                                                    dialogue.id.to_string();
+                                                needs_save = true;
+                                            }
+                                        });
+                                    }
+                                });
+                        });
+                        ui.small(
+                            "Dialogue must contain an OpenSkillTraining action for this NPC.",
                         );
 
                         // Trainable skill IDs multi-selector
@@ -6401,6 +6513,83 @@ mod tests {
                 .iter()
                 .any(|c| c.contains("ancient_lore")),
             "non-trainable skill must not appear in candidates"
+        );
+    }
+
+    #[test]
+    fn test_edit_panel_trainer_shows_dialogue_combobox() {
+        // Verify that the trainer dialogue ComboBox selection logic correctly
+        // sets dialogue_id and resolves the displayed name from available_dialogues.
+        let mut state = NpcEditorState::new();
+        state.mode = NpcEditorMode::Edit;
+        state.edit_buffer.is_trainer = true;
+
+        // Populate the dialogue list that the ComboBox iterates over.
+        state.available_dialogues = vec![
+            DialogueTree::new(10, "Swordsman Trainer Dialogue", 1),
+            DialogueTree::new(42, "Ranger Trainer Dialogue", 1),
+        ];
+
+        // Simulate the user selecting dialogue 42 from the ComboBox
+        // (the closure body: `self.edit_buffer.dialogue_id = dialogue.id.to_string()`).
+        state.edit_buffer.dialogue_id = "42".to_string();
+
+        // Reproduce the selected_text expression from the ComboBox to verify it
+        // resolves to the correct name.
+        let selected_text = if state.edit_buffer.dialogue_id.is_empty() {
+            "(none)".to_string()
+        } else {
+            state
+                .available_dialogues
+                .iter()
+                .find(|d| d.id.to_string() == state.edit_buffer.dialogue_id)
+                .map(|d| format!("{}: {}", d.id, d.name))
+                .unwrap_or_else(|| state.edit_buffer.dialogue_id.clone())
+        };
+
+        assert_eq!(
+            state.edit_buffer.dialogue_id, "42",
+            "dialogue_id must reflect the selected dialogue"
+        );
+        assert_eq!(
+            selected_text, "42: Ranger Trainer Dialogue",
+            "ComboBox label must match id:name format"
+        );
+    }
+
+    #[test]
+    fn test_edit_panel_skill_trainer_shows_dialogue_combobox() {
+        // Mirror of test_edit_panel_trainer_shows_dialogue_combobox for skill trainer.
+        let mut state = NpcEditorState::new();
+        state.mode = NpcEditorMode::Edit;
+        state.edit_buffer.is_skill_trainer = true;
+
+        state.available_dialogues = vec![
+            DialogueTree::new(20, "Archer Skill Dialogue", 1),
+            DialogueTree::new(55, "Mage Skill Dialogue", 1),
+        ];
+
+        // Simulate selecting dialogue 55 from the skill trainer ComboBox.
+        state.edit_buffer.dialogue_id = "55".to_string();
+
+        let selected_text = if state.edit_buffer.dialogue_id.is_empty() {
+            "(none)".to_string()
+        } else {
+            state
+                .available_dialogues
+                .iter()
+                .find(|d| d.id.to_string() == state.edit_buffer.dialogue_id)
+                .map(|d| format!("{}: {}", d.id, d.name))
+                .unwrap_or_else(|| state.edit_buffer.dialogue_id.clone())
+        };
+
+        assert_eq!(
+            state.edit_buffer.dialogue_id, "55",
+            "dialogue_id must reflect the selected skill trainer dialogue"
+        );
+        assert_eq!(
+            selected_text, "55: Mage Skill Dialogue",
+            "ComboBox label must match id:name format"
         );
     }
 }

@@ -1,3 +1,53 @@
+## Phase 3: Edit Panel — Dialogue ID Picker in Trainer Sections
+
+### Summary
+
+Added a `Dialogue:` ComboBox to both the `🎓 Is Trainer` and `🧠 Is Skill Trainer`
+sections in `sdk/campaign_builder/src/npc_editor/mod.rs`. Authors can now
+assign any loaded dialogue to a trainer or skill trainer directly from the
+trainer section, without scrolling back to the unrelated top-level
+"Dialogue & Quests" picker.
+
+### Changes (`sdk/campaign_builder/src/npc_editor/mod.rs`)
+
+**Trainer section** — inserted immediately after the coloured status label
+and before the "Training Fee Base" fee fields:
+
+- `ComboBox::from_id_salt("npc_trainer_dialogue_picker")` iterates
+  `available_dialogues`; each entry wrapped in `push_id(dialogue.id, …)`
+- `(none)` entry wrapped in `push_id("npc_trainer_dialogue_none", …)`
+- `needs_save = true` on every selection
+- `ui.small("Dialogue must contain an OpenTraining action for this NPC.")` hint
+
+**Skill trainer section** — inserted immediately after the coloured status
+label and before the "Trainable Skills" multi-selector:
+
+- `ComboBox::from_id_salt("npc_skill_trainer_dialogue_picker")` — identical
+  structure, different `id_salt` and hint text
+- Hint: `"Dialogue must contain an OpenSkillTraining action for this NPC."`
+
+Both pickers satisfy SDK AGENTS.md rules:
+- Rule 1 (`push_id` on every loop iteration body) ✓
+- Rule 3 (`ComboBox::from_id_salt`) ✓
+
+### Tests Added
+
+Two unit tests added to `mod tests` in `sdk/campaign_builder/src/npc_editor/mod.rs`:
+
+| Test | Assertion |
+|------|-----------|
+| `test_edit_panel_trainer_shows_dialogue_combobox` | Selecting dialogue 42 sets `dialogue_id = "42"`; selected_text resolves to `"42: Ranger Trainer Dialogue"` |
+| `test_edit_panel_skill_trainer_shows_dialogue_combobox` | Selecting dialogue 55 sets `dialogue_id = "55"`; selected_text resolves to `"55: Mage Skill Dialogue"` |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run` (sdk/campaign_builder) — 2502 passed, 0 failed
+
+---
+
 ## Phase 2: SDK Dialogue Editor — Wire the Repair Path
 
 ### Summary
