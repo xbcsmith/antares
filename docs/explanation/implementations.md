@@ -1,3 +1,49 @@
+## Post-Refactor Audit: Missed Deliverables (All Phases)
+
+### Summary
+
+Comprehensive audit of all four phases against the implementation plan's
+deliverables checklist. Four gaps found and resolved:
+
+### Fixes Applied
+
+**`data/test_campaign/data/maps/map_1.ron`** (Phase 2.3 missed)
+
+- The Phase 2 migration only updated `campaigns/tutorial/data/maps/map_1.ron`.
+  The test campaign map at position `(17, 12)` still stored
+  `mesh_id: Some("barred_passage")` while the registry already used numeric ID
+  `12006` — a semantic inconsistency that would cause runtime mesh lookup to fail.
+- Fixed: `mesh_id: Some("barred_passage")` → `mesh_id: Some("12006")`.
+
+**`antares/tests/barred_passage_integration_test.rs`** (Phase 2.3 missed)
+
+- Updated all assertions and doc comments that referenced `"barred_passage"`
+  as the mesh ID to use `"12006"` (the numeric registry ID).
+- `test_barred_passage_event_has_mesh_id`: assertion updated to `Some("12006")`.
+
+**`sdk/campaign_builder/src/map_editor.rs`** (Phase 4.6 missed)
+
+- `test_event_editor_state_to_treasure_with_mesh_and_dialogue`:
+  `treasure_mesh_id: "barred_passage"` → `"12002"` (numeric id-string) per
+  the plan: *"Existing map event editor tests that assert
+  `treasure_mesh_id == "barred_passage"` must be updated to `"12002"`"*.
+
+**`sdk/campaign_builder/src/objects_editor.rs`** (Phase 4.7 missed)
+
+- Added `test_apply_edit_renames_name_and_updates_registry` (the specific test
+  name required by Phase 4.7 testing requirements). The previously-added
+  `test_apply_edit_allows_duplicate_names` covered the same concept but used a
+  different name; the plan-specified test is now also present.
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features`: 5511 passed, 8 skipped, 0 failed
+
+---
+
 ## Phase 4: Object Mesh Registry Refactor — SDK Objects Editor and Map Editor Mesh Picker
 
 ### Summary

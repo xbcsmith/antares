@@ -968,6 +968,29 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_edit_renames_name_and_updates_registry() {
+        // Phase 4.7: name uniqueness is no longer enforced — only IDs are unique.
+        // Renaming an entry's name to an already-used name must succeed and
+        // write the new name into the entry (registry sync is caller-side via
+        // sync_object_mesh_registry_entry, not tested here).
+        let mut entries = vec![
+            object_entry("chest_a", "Treasure Chest"),
+            object_entry("chest_b", "Treasure Chest"), // same name already exists
+        ];
+        let mut state = ObjectsEditorState::new();
+        state.enter_edit(0, &entries);
+        // Rename entry 0 to the same name as entry 1.
+        state.name_buffer = "Treasure Chest".to_string();
+
+        // Must succeed — duplicate names are allowed (IDs are the unique key).
+        assert!(state.apply_edit(&mut entries));
+        assert_eq!(entries[0].name, "Treasure Chest");
+        assert!(state.key_error.is_none());
+        assert!(state.edit_buffer.is_none());
+        assert!(state.edit_index.is_none());
+    }
+
+    #[test]
     fn test_apply_edit_accepts_rename_to_unique_key() {
         let mut entries = vec![
             object_entry("old_chest", "Old Chest"),

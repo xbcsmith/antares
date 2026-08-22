@@ -15533,7 +15533,7 @@ mod tests {
             event_type: EventType::Treasure,
             name: "Barred Passage".to_string(),
             description: "Iron bar".to_string(),
-            treasure_mesh_id: "barred_passage".to_string(),
+            treasure_mesh_id: "12002".to_string(),
             treasure_dialogue_id: Some(500),
             ..Default::default()
         };
@@ -15546,7 +15546,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(name, "Barred Passage");
-                assert_eq!(mesh_id, Some("barred_passage".to_string()));
+                assert_eq!(mesh_id, Some("12002".to_string()));
                 assert_eq!(dialogue_id, Some(500_u16));
             }
             _ => panic!("Expected MapEvent::Treasure"),

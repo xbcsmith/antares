@@ -4,10 +4,10 @@
 //! Phase 5 integration tests: Barred Passage campaign data.
 //!
 //! Verifies that:
-//! - Map 1 tile `(17, 12)` has a `Treasure` event with `mesh_id: Some("barred_passage")`
+//! - Map 1 tile `(17, 12)` has a `Treasure` event with `mesh_id: Some("12006")`
 //!   and `dialogue_id: Some(500)`.
 //! - Dialogue tree 500 ("Barred Passage") exists and has the expected content.
-//! - `"barred_passage"` is registered in the unified object mesh registry.
+//! - `"12006"` (Barred Passage) is registered in the unified object mesh registry.
 //! - The `barred_door.ron` asset parses as a valid `CreatureDefinition`.
 //!
 //! All tests load from `data/test_campaign` — never from `campaigns/tutorial`
@@ -57,7 +57,7 @@ fn test_barred_passage_tile_has_treasure_event() {
     );
 }
 
-/// P5-BP2: Treasure event at (17, 12) must carry `mesh_id = Some("barred_passage")`.
+/// P5-BP2: Treasure event at (17, 12) must carry `mesh_id = Some("12006")`.
 #[test]
 fn test_barred_passage_event_has_mesh_id() {
     let map = load_test_map_1();
@@ -70,8 +70,8 @@ fn test_barred_passage_event_has_mesh_id() {
         MapEvent::Treasure { mesh_id, .. } => {
             assert_eq!(
                 mesh_id.as_deref(),
-                Some("barred_passage"),
-                "Barred Passage Treasure at (17, 12) must have mesh_id 'barred_passage'"
+                Some("12006"),
+                "Barred Passage Treasure at (17, 12) must have mesh_id '12006' (numeric registry ID)"
             );
         }
         other => panic!("Expected Treasure at (17, 12); found {:?}", other),
