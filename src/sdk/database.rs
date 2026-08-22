@@ -4136,14 +4136,16 @@ mod tests {
         )
         .unwrap();
 
-        // Write object_mesh_registry.ron
+        // Write object_mesh_registry.ron using the new array-of-entries format
         let mut reg = std::fs::File::create(data_dir.join("object_mesh_registry.ron")).unwrap();
         reg.write_all(
-            br#"ObjectMeshRegistry(
-    meshes: {
-        "barrel": "assets/meshes/objects/test_barrel.ron",
-    }
-)"#,
+            br#"[
+    (
+        id: 12001,
+        name: "barrel",
+        filepath: "assets/meshes/objects/test_barrel.ron",
+    ),
+]"#,
         )
         .unwrap();
 
@@ -4151,8 +4153,8 @@ mod tests {
             .expect("campaign with object_mesh_registry.ron must load");
 
         assert!(
-            db.object_meshes.has_mesh("barrel"),
-            "object_meshes must contain 'barrel' key from primary registry"
+            db.object_meshes.has_mesh("12001"),
+            "object_meshes must contain '12001' key from primary registry"
         );
         assert_eq!(db.object_meshes.count(), 1);
     }

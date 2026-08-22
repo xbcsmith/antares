@@ -4346,9 +4346,10 @@ pub struct MapsEditorState {
     pub zoom_level: f32,
     /// Request to open the NPC editor for a given NPC ID (set when user clicks Edit NPC)
     pub requested_open_npc: Option<String>,
-    /// Mesh IDs from the campaign's object mesh registry.
+    /// `(id, name)` pairs from the campaign's object mesh registry.
+    /// Each pair is `(id_string, display_name)` e.g. `("12001", "Ironbound Treasure Chest")`.
     /// Rebuilt when `ctx.campaign_dir` changes or `mesh_cache_dirty` is set.
-    pub available_mesh_ids: Vec<String>,
+    pub available_mesh_ids: Vec<(String, String)>,
     /// Dialogue (id, title) pairs from the campaign dialogue database.
     /// Rebuilt when `ctx.campaign_dir` changes or `dialogue_cache_dirty` is set.
     /// Never call the loader inside the render loop.
@@ -5475,7 +5476,7 @@ impl MapsEditorState {
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
         data: &MapInspectorData<'_>,
-        available_mesh_ids: &[String],
+        available_mesh_ids: &[(String, String)],
         available_dialogue_ids: &[(u16, String)],
     ) -> Option<String> {
         let mut requested_open_npc: Option<String> = None;
@@ -6941,7 +6942,7 @@ impl MapsEditorState {
         conditions: &[antares::domain::conditions::ConditionDefinition],
         furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
         characters: &[antares::domain::character_definition::CharacterDefinition],
-        available_mesh_ids: &[String],
+        available_mesh_ids: &[(String, String)],
         available_dialogue_ids: &[(u16, String)],
     ) {
         if let Some(ref mut event_editor) = editor.event_editor {
@@ -15532,7 +15533,7 @@ mod tests {
             event_type: EventType::Treasure,
             name: "Barred Passage".to_string(),
             description: "Iron bar".to_string(),
-            treasure_mesh_id: "barred_passage".to_string(),
+            treasure_mesh_id: "12002".to_string(),
             treasure_dialogue_id: Some(500),
             ..Default::default()
         };
@@ -15545,7 +15546,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(name, "Barred Passage");
-                assert_eq!(mesh_id, Some("barred_passage".to_string()));
+                assert_eq!(mesh_id, Some("12002".to_string()));
                 assert_eq!(dialogue_id, Some(500_u16));
             }
             _ => panic!("Expected MapEvent::Treasure"),

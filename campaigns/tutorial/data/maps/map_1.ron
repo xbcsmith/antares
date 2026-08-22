@@ -8260,7 +8260,7 @@
             ],
             gold: 1000,
             gems: 100,
-            mesh_id: Some("ironbound_treasure_chest"),
+            mesh_id: Some("12003"),
         ),
         (
             x: 3,
@@ -8410,7 +8410,7 @@
             lock_id: "2000",
             key_item_id: Some(200),
             initial_trap_chance: 25,
-            mesh_id: Some("barred_passage"),
+            mesh_id: Some("12002"),
             dialogue_id: Some(9),
         ),
         (

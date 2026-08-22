@@ -3156,9 +3156,13 @@ pub fn autocomplete_spell_selector(
 
 /// Autocomplete selector for object mesh IDs.
 ///
-/// Presents a text autocomplete backed by mesh IDs from the unified object mesh registry.
-/// Shows a hover tooltip with `"Mesh: <id>"` for known IDs or `"⚠ Unknown mesh ID '<id>'"` for
-/// IDs not present in `available_mesh_ids`.
+/// Presents a text autocomplete backed by `(id, name)` pairs from the unified
+/// object mesh registry. The autocomplete candidates are displayed as
+/// `"12001 — Ironbound Treasure Chest"`.  Selecting a candidate stores only
+/// the numeric ID string (e.g. `"12001"`) in `selected_mesh_id`.
+///
+/// Shows a hover tooltip with `"Mesh: 12001 — Name"` for known IDs or
+/// `"⚠ Unknown mesh ID '<id>'"` for IDs not present in `available_mesh_ids`.
 ///
 /// # Arguments
 ///
@@ -3166,7 +3170,7 @@ pub fn autocomplete_spell_selector(
 /// * `id_salt` - Unique salt for the autocomplete widget ID
 /// * `label` - Label shown to the left of the field (pass `""` to omit)
 /// * `selected_mesh_id` - Mutable reference to the current mesh ID string
-/// * `available_mesh_ids` - Slice of valid mesh IDs from `browse_event_mesh_ids`
+/// * `available_mesh_ids` - Slice of `(id_string, name)` pairs from `browse_event_mesh_ids`
 ///
 /// # Returns
 ///
@@ -3185,7 +3189,7 @@ pub fn autocomplete_mesh_id_selector(
     id_salt: &str,
     label: &str,
     selected_mesh_id: &mut String,
-    available_mesh_ids: &[String],
+    available_mesh_ids: &[(String, String)],
 ) -> bool {
     let mut changed = false;
 
@@ -3196,33 +3200,54 @@ pub fn autocomplete_mesh_id_selector(
 
         let current_value = selected_mesh_id.clone();
         let buffer_id = make_autocomplete_id(ui, "mesh_id", id_salt);
-        let candidates: Vec<String> = available_mesh_ids.to_vec();
 
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
+        // Build display candidates: "12001 — Ironbound Treasure Chest"
+        let candidates: Vec<String> = available_mesh_ids
+            .iter()
+            .map(|(id, name)| format!("{} \u{2014} {}", id, name))
+            .collect();
+
+        // Initialise the text buffer from the currently-selected ID:
+        // look up the display string so the user sees "12001 — Name" not just "12001".
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || {
+            if current_value.is_empty() {
+                current_value.clone()
+            } else {
+                available_mesh_ids
+                    .iter()
+                    .find(|(id, _)| id == &current_value)
+                    .map(|(id, name)| format!("{} \u{2014} {}", id, name))
+                    .unwrap_or_else(|| current_value.clone())
+            }
+        });
 
         let mut response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing mesh ID...")
+            .with_placeholder("Start typing mesh ID or name...")
             .show(ui, &mut text_buffer);
 
         // Tooltip: known mesh or warning
         if !selected_mesh_id.is_empty() {
-            if available_mesh_ids.contains(selected_mesh_id) {
-                response = response.on_hover_text(format!("Mesh: {}", selected_mesh_id));
+            if let Some((_, name)) = available_mesh_ids
+                .iter()
+                .find(|(id, _)| id.as_str() == selected_mesh_id.as_str())
+            {
+                response =
+                    response.on_hover_text(format!("Mesh: {} \u{2014} {}", selected_mesh_id, name));
             } else {
                 response =
                     response.on_hover_text(format!("⚠ Unknown mesh ID '{}'", selected_mesh_id));
             }
         }
 
-        // Commit valid selections (only accept candidates that are in the list)
-        if response.changed()
-            && !text_buffer.is_empty()
-            && text_buffer != current_value
-            && available_mesh_ids.contains(&text_buffer)
-        {
-            *selected_mesh_id = text_buffer.clone();
-            changed = true;
+        // Commit: accept full "12001 — Name" candidate or bare id string.
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
+            if let Some(idx) = candidates.iter().position(|c| c == &text_buffer) {
+                *selected_mesh_id = available_mesh_ids[idx].0.clone();
+                changed = true;
+            } else if available_mesh_ids.iter().any(|(id, _)| id == &text_buffer) {
+                *selected_mesh_id = text_buffer.clone();
+                changed = true;
+            }
         }
 
         // Built-in Clear button
