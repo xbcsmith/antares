@@ -1,3 +1,52 @@
+## Phase 3: Object Mesh Registry Refactor — SDK Data Model
+
+### Summary
+
+Upgraded the SDK data model so `ObjectEntry` carries a numeric `id: u32` and
+`name: String` matching the `ObjectMeshEntry` domain type, replacing the old
+free-form `key: String`. Updated `load_objects` and `save_objects` in
+`campaign_io.rs` to read/write `id`+`name` throughout. All SDK tests and all
+editor logic updated to use `entry.name` and `entry.id` instead of `entry.key`.
+
+### Files Changed
+
+**`sdk/campaign_builder/src/objects_editor.rs`**
+
+- `ObjectEntry`: removed `pub key: String`; added `pub id: u32` and
+  `pub name: String`; updated struct doc comment and doctest.
+- `enter_edit`: `entry.key` → `entry.name` for `key_buffer` init.
+- `apply_edit`: collision predicate, assignment, and error messages updated
+  from "key" to "name".
+- `show_list`: `push_id(&entry.key, …)` → `push_id(entry.id, …)` (numeric ID
+  is now the stable egui identifier); badge shows `&entry.name`.
+- `show_edit` Save block: `old_key` and sync call use `entry.name`.
+- `filtered_rows`: searches `entry.name` instead of `entry.key`.
+- `show_object_preview`: replaced `"Key: {entry.key}"` with
+  `"ID: {entry.id}"` + `"Name: {entry.name}"`.
+- `load_object_entries_from_registry`: removed Phase 1 `key` workaround;
+  `ObjectEntry` constructed with `id: entry_ref.id, name: entry_ref.name`.
+- Tests: `object_entry` helper updated; all `entry.key` assertions updated to
+  `entry.name`; registry upserts use IDs 12001/12002 with descriptive names.
+
+**`sdk/campaign_builder/src/campaign_io.rs`**
+
+- `load_objects`: removed `entry_ref`/`key` intermediaries; constructs
+  `ObjectEntry { id: entry.id, name: entry.name.clone(), … }`.
+- `save_objects`: replaced `enumerate()` + `idx as u32` + `entry.key` with
+  `registry.upsert(entry.id, &entry.name, &entry.file_path)`.
+- All tests updated: `ObjectEntry` constructions use `id`+`name`; upsert
+  calls use real IDs (12001/12002); assertions check `entry.id` and
+  `entry.name` instead of `entry.key`.
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features`: 5508 passed, 8 skipped, 0 failed
+
+---
+
 ## Phase 2: Object Mesh Registry Refactor — Remove Legacy Fallback
 
 ### Summary
