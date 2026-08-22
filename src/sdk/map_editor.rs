@@ -574,13 +574,17 @@ pub fn browse_object_meshes(db: &ContentDatabase) -> Vec<(String, String)> {
     results
 }
 
-/// Returns a sorted list of all object mesh IDs from an [`ObjectMeshDatabase`].
+/// Returns a sorted list of `(id, name)` pairs for all object mesh IDs in an
+/// [`ObjectMeshDatabase`].
 ///
 /// Used to populate autocomplete dropdowns in the map editor for `mesh_id`
 /// fields on Treasure, Sign, Container, and similar events.
 /// Unlike [`browse_object_meshes`], this function takes a standalone
 /// `ObjectMeshDatabase` so it can be called after loading the registry
 /// outside of a full `ContentDatabase` load.
+///
+/// IDs are sorted numerically when they parse as `u32`, otherwise
+/// lexicographically. Numeric IDs always sort before non-numeric ones.
 ///
 /// # Arguments
 ///
@@ -593,15 +597,22 @@ pub fn browse_object_meshes(db: &ContentDatabase) -> Vec<(String, String)> {
 /// use antares::sdk::map_editor::browse_event_mesh_ids;
 ///
 /// let db = ObjectMeshDatabase::new();
-/// let ids = browse_event_mesh_ids(&db);
-/// assert!(ids.is_empty());
+/// let pairs = browse_event_mesh_ids(&db);
+/// assert!(pairs.is_empty());
 /// ```
 pub fn browse_event_mesh_ids(
     db: &crate::domain::world::object_mesh::ObjectMeshDatabase,
-) -> Vec<String> {
-    let mut ids = db.all_mesh_ids();
-    ids.sort();
-    ids
+) -> Vec<(String, String)> {
+    let mut pairs = db.all_mesh_ids_with_names();
+    pairs.sort_by(
+        |a, b| match (a.0.parse::<u32>().ok(), b.0.parse::<u32>().ok()) {
+            (Some(an), Some(bn)) => an.cmp(&bn),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.0.cmp(&b.0),
+        },
+    );
+    pairs
 }
 
 /// Returns `(id, name)` pairs for all dialogues in a [`DialogueDatabase`].
@@ -1554,8 +1565,55 @@ mod event_placement_tests {
     #[test]
     fn test_browse_event_mesh_ids_empty_db() {
         let db = ObjectMeshDatabase::new();
-        let ids = browse_event_mesh_ids(&db);
-        assert!(ids.is_empty());
+        let pairs = browse_event_mesh_ids(&db);
+        assert!(pairs.is_empty());
+    }
+
+    #[test]
+    fn test_browse_event_mesh_ids_returns_id_and_name_pairs() {
+        // Verify the return type is Vec<(String, String)> by destructuring.
+        let db = ObjectMeshDatabase::new();
+        let pairs: Vec<(String, String)> = browse_event_mesh_ids(&db);
+        assert!(pairs.is_empty());
+        // If we had entries, each element would be (id_string, name_string).
+        // Type is enforced by the explicit annotation above.
+    }
+
+    #[test]
+    fn test_browse_event_mesh_ids_sorts_numeric_ids_ascending() {
+        use std::io::Write;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset_dir = tmp.path().join("assets/meshes/objects");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+
+        // Write two minimal asset files.
+        for name in &["mesh_a", "mesh_b"] {
+            std::fs::File::create(asset_dir.join(format!("{name}.ron")))
+                .unwrap()
+                .write_all(
+                    format!("(id: 1, name: \"{name}\", meshes: [], mesh_transforms: [],)")
+                        .as_bytes(),
+                )
+                .unwrap();
+        }
+
+        let registry_path = tmp.path().join("data/object_mesh_registry.ron");
+        std::fs::create_dir_all(tmp.path().join("data")).unwrap();
+        let mut reg = crate::domain::world::object_mesh::ObjectMeshRegistryFile::default();
+        // Insert in reverse numeric order to verify sort.
+        reg.upsert(12002, "Mesh B", "assets/meshes/objects/mesh_b.ron");
+        reg.upsert(12001, "Mesh A", "assets/meshes/objects/mesh_a.ron");
+        reg.save(&registry_path).unwrap();
+
+        let db = ObjectMeshDatabase::load_from_registry(&registry_path, tmp.path()).unwrap();
+        let pairs = browse_event_mesh_ids(&db);
+
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0, "12001");
+        assert_eq!(pairs[0].1, "Mesh A");
+        assert_eq!(pairs[1].0, "12002");
+        assert_eq!(pairs[1].1, "Mesh B");
     }
 
     #[test]

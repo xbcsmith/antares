@@ -1,3 +1,78 @@
+## Phase 4: Object Mesh Registry Refactor — SDK Objects Editor and Map Editor Mesh Picker
+
+### Summary
+
+Completed the final phase of the object mesh registry refactor. The map editor's
+mesh picker now displays `(id, name)` pairs (e.g. `"12001 — Ironbound Treasure
+Chest"`) instead of raw ID strings, and duplicate registry names are permitted
+since the numeric ID is now the unique key.
+
+### Files Changed
+
+**`src/domain/world/object_mesh.rs`**
+
+- `ObjectMeshDatabase` struct: added `names: HashMap<String, String>` field
+  (maps ID string → human-readable display name from the registry entry).
+- `new()`: initialises `names: HashMap::new()`.
+- `load_from_registry`: inserts into `db.names` alongside `db.meshes`.
+- `merge_landscape` / `merge_furniture`: clone `key` before passing to
+  `meshes.entry(key)` (was a move); add `names.entry(key).or_insert_with(…)`
+  so landscape/furniture names are also available.
+- New public method `all_mesh_ids_with_names() -> Vec<(String, String)>`.
+- New test `test_all_mesh_ids_with_names_round_trip`.
+
+**`src/sdk/map_editor.rs`**
+
+- `browse_event_mesh_ids`: return type changed `Vec<String>` → `Vec<(String, String)>`;
+  implementation now calls `db.all_mesh_ids_with_names()` and sorts numerically
+  (numeric IDs first, then lexicographic).
+- Updated `test_browse_event_mesh_ids_empty_db`.
+- Added `test_browse_event_mesh_ids_returns_id_and_name_pairs`.
+- Added `test_browse_event_mesh_ids_sorts_numeric_ids_ascending`.
+
+**`sdk/campaign_builder/src/objects_editor.rs`**
+
+- `ObjectsEditorState`: renamed field `key_buffer` → `name_buffer` with updated
+  doc comment.
+- `reset_for_new_campaign`, `reset_selection`, `enter_edit`: references updated.
+- `apply_edit`: removed name-collision check (duplicate names are now allowed
+  since IDs are unique); renamed internal variable `new_key` → `new_name`.
+- `show_edit` grid: added read-only `"ID:"` row showing `entry.id`; renamed
+  `"Key:"` row to `"Name:"` editing `name_buffer`; renamed second `"Name:"` to
+  `"Mesh Name:"` (for the `CreatureDefinition.name` in the asset file).
+- `show_edit` Save button: captures `entry_id: u32` before `apply_edit`,
+  passes it to `sync_object_mesh_registry_entry`.
+- `sync_object_mesh_registry_entry`: signature simplified from
+  `(campaign_dir, old_key: Option<&str>, new_key: &str, file_path)` to
+  `(campaign_dir, id: u32, new_name: &str, file_path)`; body now just calls
+  `registry.upsert(id, new_name, file_path)` (no name-based lookup needed).
+- Tests: `key_buffer` → `name_buffer` in all assertions; `test_apply_edit_rejects_rename_to_existing_key`
+  flipped to expect success; `test_write_and_sync_round_trip` updated call;
+  added `test_objects_editor_enter_edit_populates_name_buffer_not_key_buffer`
+  and `test_apply_edit_allows_duplicate_names`.
+
+**`sdk/campaign_builder/src/ui_helpers/autocomplete.rs`**
+
+- `autocomplete_mesh_id_selector`: parameter `available_mesh_ids: &[String]` →
+  `&[(String, String)]`; candidates now formatted as `"12001 — Name"`; buffer
+  initialises to the full display string; commit accepts full display string or
+  bare ID and stores only the ID; tooltip shows `"Mesh: id — Name"`.
+
+**`sdk/campaign_builder/src/map_editor.rs`**
+
+- `MapsEditorState.available_mesh_ids`: type `Vec<String>` → `Vec<(String, String)>`.
+- `show_inspector_panel` and `show_event_editor`: parameter type
+  `available_mesh_ids: &[String]` → `&[(String, String)]`.
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features`: 5511 passed, 8 skipped, 0 failed
+
+---
+
 ## Phase 3: Object Mesh Registry Refactor — SDK Data Model
 
 ### Summary

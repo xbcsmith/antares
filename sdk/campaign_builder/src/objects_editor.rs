@@ -141,10 +141,10 @@ pub struct ObjectsEditorState {
     // Edit mode fields.
     mode: ObjectsEditorMode,
     edit_index: Option<usize>,
-    /// Key text being edited. This is the one field exempt from `sdk/AGENTS.md`
-    /// Rule 14 — it is the primary key being assigned, not a reference *to*
-    /// another registry.
-    key_buffer: String,
+    /// Name text being edited. This is the registry display name being assigned
+    /// to the entry (e.g. "Ironbound Treasure Chest"). The numeric ID (`entry.id`)
+    /// is immutable and shown read-only in the edit form.
+    name_buffer: String,
     edit_buffer: Option<CreatureDefinition>,
     /// Mirrors whether `edit_buffer.color_tint` is `Some`. Toggling this on
     /// initializes `color_tint` to opaque white; toggling it off clears it to
@@ -244,7 +244,7 @@ impl ObjectsEditorState {
         self.mode = ObjectsEditorMode::List;
         self.edit_index = None;
         self.edit_buffer = None;
-        self.key_buffer.clear();
+        self.name_buffer.clear();
         self.color_tint_enabled = false;
         self.key_error = None;
         self.needs_initial_load = true;
@@ -281,7 +281,7 @@ impl ObjectsEditorState {
         self.mode = ObjectsEditorMode::List;
         self.edit_index = None;
         self.edit_buffer = None;
-        self.key_buffer.clear();
+        self.name_buffer.clear();
         self.color_tint_enabled = false;
         self.key_error = None;
     }
@@ -405,7 +405,7 @@ impl ObjectsEditorState {
         }
         let entry = &entries[idx];
         self.edit_index = Some(idx);
-        self.key_buffer = entry.name.clone();
+        self.name_buffer = entry.name.clone();
         self.color_tint_enabled = entry.definition.color_tint.is_some();
         self.key_error = None;
         self.edit_buffer = Some(entry.definition.clone());
@@ -417,8 +417,7 @@ impl ObjectsEditorState {
     ///
     /// Returns `true` on success (and clears `edit_index`/`edit_buffer`).
     /// Returns `false` and sets `key_error` — leaving `entries` and the edit
-    /// buffer untouched — when the name is empty or collides with another
-    /// entry's name.
+    /// buffer untouched — when the name is empty.
     fn apply_edit(&mut self, entries: &mut [ObjectEntry]) -> bool {
         let Some(idx) = self.edit_index else {
             return false;
@@ -430,21 +429,13 @@ impl ObjectsEditorState {
             return false;
         }
 
-        let new_key = self.key_buffer.trim().to_string();
-        if new_key.is_empty() {
+        let new_name = self.name_buffer.trim().to_string();
+        if new_name.is_empty() {
             self.key_error = Some("Name cannot be empty.".to_string());
             return false;
         }
-        let collides = entries
-            .iter()
-            .enumerate()
-            .any(|(i, e)| i != idx && e.name == new_key);
-        if collides {
-            self.key_error = Some(format!("Name '{new_key}' is already in use."));
-            return false;
-        }
 
-        entries[idx].name = new_key;
+        entries[idx].name = new_name;
         entries[idx].definition = buf.clone();
         self.key_error = None;
         self.edit_index = None;
@@ -470,6 +461,13 @@ impl ObjectsEditorState {
 
         let footer_reserved = 44.0;
         let scroll_max_height = (ui.available_height() - footer_reserved).max(80.0);
+        // Capture the numeric ID before entering the scroll area — entries is &mut but
+        // we only read it here for display purposes.
+        let entry_id = self
+            .edit_index
+            .and_then(|i| entries.get(i))
+            .map(|e| e.id)
+            .unwrap_or(0);
         egui::ScrollArea::vertical()
             .id_salt("objects_editor_edit_scroll")
             .max_height(scroll_max_height)
@@ -478,11 +476,15 @@ impl ObjectsEditorState {
                     .num_columns(2)
                     .spacing([12.0, 6.0])
                     .show(ui, |ui| {
-                        ui.label("Key:");
-                        ui.text_edit_singleline(&mut self.key_buffer);
+                        ui.label("ID:");
+                        ui.label(format!("{}", entry_id));
                         ui.end_row();
 
                         ui.label("Name:");
+                        ui.text_edit_singleline(&mut self.name_buffer);
+                        ui.end_row();
+
+                        ui.label("Mesh Name:");
                         ui.text_edit_singleline(&mut buf.name);
                         ui.end_row();
 
@@ -627,25 +629,18 @@ impl ObjectsEditorState {
             }
             if ui.button("💾 Save").clicked() {
                 let idx_before = self.edit_index;
-                let old_key = idx_before
-                    .and_then(|i| entries.get(i))
-                    .map(|e| e.name.clone());
+                let entry_id = idx_before.and_then(|i| entries.get(i)).map(|e| e.id);
                 let file_path = idx_before
                     .and_then(|i| entries.get(i))
                     .map(|e| e.file_path.clone());
 
                 if self.apply_edit(entries) {
                     *unsaved_changes = true;
-                    if let (Some(dir), Some(idx), Some(path)) =
-                        (campaign_dir, idx_before, &file_path)
+                    if let (Some(dir), Some(idx), Some(path), Some(id)) =
+                        (campaign_dir, idx_before, &file_path, entry_id)
                     {
                         write_object_definition(dir, path, &entries[idx].definition);
-                        sync_object_mesh_registry_entry(
-                            dir,
-                            old_key.as_deref(),
-                            &entries[idx].name,
-                            path,
-                        );
+                        sync_object_mesh_registry_entry(dir, id, &entries[idx].name, path);
                     }
                     self.mode = ObjectsEditorMode::List;
                 }
@@ -796,12 +791,12 @@ fn write_object_definition(campaign_dir: &Path, file_path: &str, definition: &Cr
 /// registry wholesale from the in-memory `Vec<ObjectEntry>` on every campaign
 /// save, so a failure here is self-healing and must never block the in-memory
 /// edit or crash the editor.
-fn sync_object_mesh_registry_entry(
-    campaign_dir: &Path,
-    old_key: Option<&str>,
-    new_key: &str,
-    file_path: &str,
-) {
+/// Sync a single object mesh registry entry after an in-place edit.
+///
+/// Writes `upsert(id, new_name, file_path)` into the registry file.
+/// Load/save failures are intentionally swallowed: `save_objects` rewrites
+/// the registry wholesale on every campaign save, so this is self-healing.
+fn sync_object_mesh_registry_entry(campaign_dir: &Path, id: u32, new_name: &str, file_path: &str) {
     let registry_path = campaign_dir.join("data/object_mesh_registry.ron");
     let mut registry = if registry_path.exists() {
         match ObjectMeshRegistryFile::load(&registry_path) {
@@ -812,21 +807,7 @@ fn sync_object_mesh_registry_entry(
         ObjectMeshRegistryFile::default()
     };
 
-    // Find existing entry by old name (or new name if no rename), or assign next ID.
-    let lookup_key = old_key.unwrap_or(new_key);
-    let id = registry
-        .entries
-        .iter()
-        .find(|e| e.name == lookup_key)
-        .map(|e| e.id)
-        .unwrap_or_else(|| registry.entries.iter().map(|e| e.id).max().unwrap_or(0) + 1);
-
-    if let Some(old) = old_key {
-        if old != new_key {
-            registry.rename(id, new_key);
-        }
-    }
-    registry.upsert(id, new_key, file_path);
+    registry.upsert(id, new_name, file_path);
     // Registry save failure is self-healing: `save_objects` rewrites the whole
     // registry on the next campaign save, so this discard is intentional.
     #[allow(clippy::let_underscore_must_use)]
@@ -890,7 +871,7 @@ mod tests {
 
         assert_eq!(state.mode, ObjectsEditorMode::Edit);
         assert_eq!(state.edit_index, Some(0));
-        assert_eq!(state.key_buffer, "barred_door");
+        assert_eq!(state.name_buffer, "barred_door");
         assert!(state.edit_buffer.is_some());
         assert!(!state.color_tint_enabled);
         assert!(state.key_error.is_none());
@@ -908,12 +889,25 @@ mod tests {
     }
 
     #[test]
+    fn test_objects_editor_enter_edit_populates_name_buffer_not_key_buffer() {
+        let entries = vec![object_entry("barred_door", "Barred Door")];
+        let mut state = ObjectsEditorState::new();
+        state.enter_edit(0, &entries);
+
+        // name_buffer holds the registry name (ObjectEntry.name)
+        assert_eq!(state.name_buffer, "barred_door");
+        // The edit session is active
+        assert_eq!(state.edit_index, Some(0));
+        assert!(state.edit_buffer.is_some());
+    }
+
+    #[test]
     fn test_apply_edit_renames_key_and_updates_definition() {
         let mut entries = vec![object_entry("old_chest", "Old Chest")];
         let mut state = ObjectsEditorState::new();
         state.enter_edit(0, &entries);
 
-        state.key_buffer = "new_chest".to_string();
+        state.name_buffer = "new_chest".to_string();
         state.edit_buffer.as_mut().unwrap().name = "New Chest".to_string();
 
         assert!(state.apply_edit(&mut entries));
@@ -932,16 +926,15 @@ mod tests {
         ];
         let mut state = ObjectsEditorState::new();
         state.enter_edit(0, &entries);
-        state.key_buffer = "other_key".to_string();
+        state.name_buffer = "other_key".to_string();
 
-        assert!(!state.apply_edit(&mut entries));
-        assert!(state.key_error.is_some());
-        // Original entries must be unmodified.
-        assert_eq!(entries[0].name, "old_chest");
-        assert_eq!(entries[1].name, "other_key");
-        // Edit session must still be active (not silently dropped).
-        assert!(state.edit_buffer.is_some());
-        assert_eq!(state.edit_index, Some(0));
+        // After Phase 4, duplicate names are allowed (IDs are the unique key).
+        assert!(state.apply_edit(&mut entries));
+        assert!(state.key_error.is_none());
+        // After successful apply, entry 0 now has name "other_key" (duplicate is allowed).
+        assert_eq!(entries[0].name, "other_key");
+        // Edit session cleared on success.
+        assert!(state.edit_buffer.is_none());
     }
 
     #[test]
@@ -949,11 +942,29 @@ mod tests {
         let mut entries = vec![object_entry("old_chest", "Old Chest")];
         let mut state = ObjectsEditorState::new();
         state.enter_edit(0, &entries);
-        state.key_buffer = "   ".to_string();
+        state.name_buffer = "   ".to_string();
 
         assert!(!state.apply_edit(&mut entries));
         assert!(state.key_error.is_some());
         assert_eq!(entries[0].name, "old_chest");
+    }
+
+    #[test]
+    fn test_apply_edit_allows_duplicate_names() {
+        // After Phase 4, duplicate names are allowed (IDs are the unique key).
+        let mut entries = vec![
+            object_entry("old_chest", "Old Chest"),
+            object_entry("other_key", "Other"),
+        ];
+        let mut state = ObjectsEditorState::new();
+        state.enter_edit(0, &entries);
+        state.name_buffer = "other_key".to_string(); // same name as entries[1]
+
+        // Must succeed — duplicate names are now allowed
+        assert!(state.apply_edit(&mut entries));
+        assert_eq!(entries[0].name, "other_key");
+        assert!(state.key_error.is_none());
+        assert!(state.edit_buffer.is_none());
     }
 
     #[test]
@@ -964,7 +975,7 @@ mod tests {
         ];
         let mut state = ObjectsEditorState::new();
         state.enter_edit(0, &entries);
-        state.key_buffer = "brand_new_key".to_string();
+        state.name_buffer = "brand_new_key".to_string();
 
         assert!(state.apply_edit(&mut entries));
         assert_eq!(entries[0].name, "brand_new_key");
@@ -1239,7 +1250,7 @@ mod tests {
         );
         sync_object_mesh_registry_entry(
             tmp.path(),
-            Some("old_chest"),
+            12001,
             "new_chest",
             "assets/meshes/objects/old_chest.ron",
         );

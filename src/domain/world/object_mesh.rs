@@ -344,6 +344,12 @@ impl ObjectMeshRegistryFile {
 #[derive(Debug, Clone, Default)]
 pub struct ObjectMeshDatabase {
     meshes: HashMap<String, CreatureDefinition>,
+    /// Maps mesh ID string key to the human-readable registry name.
+    ///
+    /// Populated from `ObjectMeshEntry::name` during `load_from_registry`.
+    /// Also populated during `merge_landscape` and `merge_furniture` using
+    /// `CreatureDefinition::name` as a fallback.
+    names: HashMap<String, String>,
 }
 
 impl ObjectMeshDatabase {
@@ -360,6 +366,7 @@ impl ObjectMeshDatabase {
     pub fn new() -> Self {
         Self {
             meshes: HashMap::new(),
+            names: HashMap::new(),
         }
     }
 
@@ -422,6 +429,7 @@ impl ObjectMeshDatabase {
             let creature: CreatureDefinition = ron::from_str(&asset_content)
                 .map_err(|e| ObjectMeshError::ParseError(format!("'{}': {}", filepath, e)))?;
 
+            db.names.insert(key.clone(), entry.name.clone());
             db.meshes.insert(key, creature);
         }
 
@@ -449,7 +457,12 @@ impl ObjectMeshDatabase {
     pub fn merge_landscape(&mut self, landscape: &LandscapeMeshDatabase) {
         for creature in landscape.as_creature_database().all_creatures() {
             let key = creature.id.to_string();
-            self.meshes.entry(key).or_insert_with(|| creature.clone());
+            self.meshes
+                .entry(key.clone())
+                .or_insert_with(|| creature.clone());
+            self.names
+                .entry(key)
+                .or_insert_with(|| creature.name.clone());
         }
     }
 
@@ -473,7 +486,12 @@ impl ObjectMeshDatabase {
     pub fn merge_furniture(&mut self, furniture: &FurnitureMeshDatabase) {
         for creature in furniture.as_creature_database().all_creatures() {
             let key = creature.id.to_string();
-            self.meshes.entry(key).or_insert_with(|| creature.clone());
+            self.meshes
+                .entry(key.clone())
+                .or_insert_with(|| creature.clone());
+            self.names
+                .entry(key)
+                .or_insert_with(|| creature.name.clone());
         }
     }
 
@@ -521,6 +539,29 @@ impl ObjectMeshDatabase {
     /// ```
     pub fn all_mesh_ids(&self) -> Vec<String> {
         self.meshes.keys().cloned().collect()
+    }
+
+    /// Returns all registered mesh IDs paired with their human-readable names.
+    ///
+    /// Returns `(id_string, name)` tuples where `id_string` is the string key
+    /// (e.g. `"12001"`) and `name` is the display name from the registry
+    /// (e.g. `"Ironbound Treasure Chest"`).
+    ///
+    /// Order is unspecified; callers should sort as needed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::object_mesh::ObjectMeshDatabase;
+    ///
+    /// let db = ObjectMeshDatabase::new();
+    /// assert!(db.all_mesh_ids_with_names().is_empty());
+    /// ```
+    pub fn all_mesh_ids_with_names(&self) -> Vec<(String, String)> {
+        self.names
+            .iter()
+            .map(|(id, name)| (id.clone(), name.clone()))
+            .collect()
     }
 
     /// Returns `true` when no mesh entries are registered.
@@ -924,5 +965,43 @@ mod tests {
 
         let result = ObjectMeshRegistryFile::load(&registry_path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_all_mesh_ids_with_names_round_trip() {
+        use std::io::Write;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset_dir = tmp.path().join("assets/meshes/objects");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+        std::fs::File::create(asset_dir.join("chest.ron"))
+            .unwrap()
+            .write_all(
+                br#"(
+    id: 1,
+    name: "TestChest",
+    meshes: [],
+    mesh_transforms: [],
+)"#,
+            )
+            .unwrap();
+
+        let registry_path = tmp.path().join("data/object_mesh_registry.ron");
+        std::fs::create_dir_all(tmp.path().join("data")).unwrap();
+        let mut reg = ObjectMeshRegistryFile::default();
+        reg.upsert(
+            12001,
+            "Ironbound Treasure Chest",
+            "assets/meshes/objects/chest.ron",
+        );
+        reg.save(&registry_path).unwrap();
+
+        let db = ObjectMeshDatabase::load_from_registry(&registry_path, tmp.path()).unwrap();
+        let pairs = db.all_mesh_ids_with_names();
+
+        assert_eq!(pairs.len(), 1);
+        let (id, name) = &pairs[0];
+        assert_eq!(id, "12001");
+        assert_eq!(name, "Ironbound Treasure Chest");
     }
 }
