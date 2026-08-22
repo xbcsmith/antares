@@ -1,8 +1,30 @@
-(
-    meshes: {
-        "ancient_treasure_chest": "assets/furniture/seating/ancient_treasure_chest.ron",
-        "barred_passage": "assets/meshes/objects/barred_door.ron",
-        "ironbound_treasure_chest": "assets/furniture/storage/ironbound_treasure_chest.ron",
-        "weathered_wooden_hutch": "assets/furniture/storage/weathered_wooden_hutch.ron",
-    },
-)
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// Object mesh registry for the tutorial campaign.
+//
+// Array of ObjectMeshEntry records. Each `id` is unique within this file
+// and is used as the string lookup key in ObjectMeshDatabase
+// (e.g. mesh_id: Some("12001")).
+[
+    (
+        id: 12001,
+        name: "Ancient Treasure Chest",
+        filepath: "assets/furniture/seating/ancient_treasure_chest.ron",
+    ),
+    (
+        id: 12002,
+        name: "Barred Passage",
+        filepath: "assets/meshes/objects/barred_door.ron",
+    ),
+    (
+        id: 12003,
+        name: "Ironbound Treasure Chest",
+        filepath: "assets/furniture/storage/ironbound_treasure_chest.ron",
+    ),
+    (
+        id: 12004,
+        name: "Weathered Wooden Hutch",
+        filepath: "assets/furniture/storage/weathered_wooden_hutch.ron",
+    ),
+]

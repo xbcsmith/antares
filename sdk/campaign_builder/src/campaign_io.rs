@@ -2128,7 +2128,7 @@ impl CampaignBuilderApp {
 
     /// Load unified objects from the campaign object mesh registry.
     ///
-    /// Reads `data/object_mesh_registry.ron` (a key → relative-path map) and
+    /// Reads `data/object_mesh_registry.ron` (an id/name/filepath entry array) and
     /// resolves each referenced path to a full `CreatureDefinition` asset.
     /// Individual entries whose asset file is missing or fails to parse are
     /// skipped (logged as a warning) rather than aborting the whole load —
@@ -2158,7 +2158,8 @@ impl CampaignBuilderApp {
                 match ObjectMeshRegistryFile::load(&registry_path) {
                     Ok(registry) => {
                         let mut entries = Vec::new();
-                        for (key, path) in registry.meshes {
+                        for entry in registry.entries {
+                            let path = entry.filepath.clone();
                             let asset_path = dir.join(&path);
                             match fs::read_to_string(&asset_path) {
                                 Ok(contents) => {
@@ -2167,7 +2168,8 @@ impl CampaignBuilderApp {
                                     ) {
                                         Ok(definition) => {
                                             entries.push(objects_editor::ObjectEntry {
-                                                key,
+                                                id: entry.id,
+                                                name: entry.name.clone(),
                                                 file_path: path,
                                                 definition,
                                             });
@@ -2175,7 +2177,7 @@ impl CampaignBuilderApp {
                                         Err(e) => {
                                             self.logger.warn(
                                                 category::FILE_IO,
-                                                &format!("Skipping object '{}': {}", key, e),
+                                                &format!("Skipping object '{}': {}", entry.name, e),
                                             );
                                         }
                                     }
@@ -2183,7 +2185,7 @@ impl CampaignBuilderApp {
                                 Err(e) => {
                                     self.logger.warn(
                                         category::FILE_IO,
-                                        &format!("Skipping object '{}': {}", key, e),
+                                        &format!("Skipping object '{}': {}", entry.name, e),
                                     );
                                 }
                             }
@@ -2223,7 +2225,7 @@ impl CampaignBuilderApp {
     ///
     /// Writes each [`objects_editor::ObjectEntry::definition`] back to its
     /// `file_path`, then rewrites `data/object_mesh_registry.ron` wholesale
-    /// from the current `Vec<ObjectEntry>` keys/paths.
+    /// from the current `Vec<ObjectEntry>` ids, names, and paths.
     ///
     /// # Errors
     ///
@@ -2250,7 +2252,7 @@ impl CampaignBuilderApp {
         for entry in &self.campaign_data.objects {
             let full_path = dir.join(&entry.file_path);
             write_ron_to_path(&full_path, &entry.definition, "object")?;
-            registry.upsert(&entry.key, &entry.file_path);
+            registry.upsert(entry.id, &entry.name, &entry.file_path);
         }
 
         let registry_path = dir.join("data/object_mesh_registry.ron");
@@ -3884,8 +3886,8 @@ mod tests {
         write_test_object_asset(&good_asset_path, "GoodObject");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("good_key", "assets/meshes/objects/good.ron");
-        registry.upsert("missing_key", "assets/meshes/objects/missing.ron");
+        registry.upsert(12001, "Good Object", "assets/meshes/objects/good.ron");
+        registry.upsert(12002, "Missing Object", "assets/meshes/objects/missing.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();
@@ -3898,7 +3900,8 @@ mod tests {
         app.load_objects();
 
         assert_eq!(app.campaign_data.objects.len(), 1);
-        assert_eq!(app.campaign_data.objects[0].key, "good_key");
+        assert_eq!(app.campaign_data.objects[0].id, 12001);
+        assert_eq!(app.campaign_data.objects[0].name, "Good Object");
         assert_eq!(app.campaign_data.objects[0].definition.name, "GoodObject");
     }
 
@@ -3913,7 +3916,8 @@ mod tests {
         };
         app.campaign_data.objects = vec![
             objects_editor::ObjectEntry {
-                key: "alpha".to_string(),
+                id: 12001,
+                name: "Alpha".to_string(),
                 file_path: "assets/meshes/objects/alpha.ron".to_string(),
                 definition: antares::domain::visual::CreatureDefinition {
                     id: 1,
@@ -3922,7 +3926,8 @@ mod tests {
                 },
             },
             objects_editor::ObjectEntry {
-                key: "beta".to_string(),
+                id: 12002,
+                name: "Beta".to_string(),
                 file_path: "assets/meshes/objects/beta.ron".to_string(),
                 definition: antares::domain::visual::CreatureDefinition {
                     id: 2,
@@ -3938,29 +3943,32 @@ mod tests {
         app.load_objects();
 
         assert_eq!(app.campaign_data.objects.len(), 2);
-        let mut pairs: Vec<(String, String, String)> = app
+        let mut pairs: Vec<(u32, String, String, String)> = app
             .campaign_data
             .objects
             .iter()
             .map(|e| {
                 (
-                    e.key.clone(),
+                    e.id,
+                    e.name.clone(),
                     e.file_path.clone(),
                     e.definition.name.clone(),
                 )
             })
             .collect();
-        pairs.sort();
+        pairs.sort_by_key(|p| p.0);
         assert_eq!(
             pairs,
             vec![
                 (
-                    "alpha".to_string(),
+                    12001,
+                    "Alpha".to_string(),
                     "assets/meshes/objects/alpha.ron".to_string(),
                     "Alpha".to_string()
                 ),
                 (
-                    "beta".to_string(),
+                    12002,
+                    "Beta".to_string(),
                     "assets/meshes/objects/beta.ron".to_string(),
                     "Beta".to_string()
                 ),
@@ -3972,7 +3980,8 @@ mod tests {
     fn test_do_new_campaign_clears_objects_and_resets_for_new_campaign() {
         let mut app = CampaignBuilderApp::default();
         app.campaign_data.objects = vec![objects_editor::ObjectEntry {
-            key: "stale".to_string(),
+            id: 0,
+            name: "stale".to_string(),
             file_path: "assets/meshes/objects/stale.ron".to_string(),
             definition: antares::domain::visual::CreatureDefinition::default(),
         }];
@@ -3993,7 +4002,7 @@ mod tests {
         write_test_object_asset(&asset_path, "GoodObject");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("good_key", "assets/meshes/objects/good.ron");
+        registry.upsert(12001, "Good Object", "assets/meshes/objects/good.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();
@@ -4016,7 +4025,7 @@ mod tests {
         let asset_a_path = dir_a.join("assets/meshes/objects/a.ron");
         write_test_object_asset(&asset_a_path, "ObjectA");
         let mut registry_a = ObjectMeshRegistryFile::default();
-        registry_a.upsert("a_key", "assets/meshes/objects/a.ron");
+        registry_a.upsert(12001, "ObjectA", "assets/meshes/objects/a.ron");
         let registry_a_path = dir_a.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_a_path.parent().unwrap()).unwrap();
         registry_a.save(&registry_a_path).unwrap();
@@ -4026,7 +4035,7 @@ mod tests {
         let asset_b_path = dir_b.join("assets/meshes/objects/b.ron");
         write_test_object_asset(&asset_b_path, "ObjectB");
         let mut registry_b = ObjectMeshRegistryFile::default();
-        registry_b.upsert("b_key", "assets/meshes/objects/b.ron");
+        registry_b.upsert(12001, "ObjectB", "assets/meshes/objects/b.ron");
         let registry_b_path = dir_b.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_b_path.parent().unwrap()).unwrap();
         registry_b.save(&registry_b_path).unwrap();
@@ -4043,7 +4052,7 @@ mod tests {
         app.load_objects();
 
         assert_eq!(app.campaign_data.objects.len(), 1);
-        assert_eq!(app.campaign_data.objects[0].key, "a_key");
+        assert_eq!(app.campaign_data.objects[0].name, "ObjectA");
 
         app.campaign_dir = Some(dir_b.to_path_buf());
         app.editor_registry
@@ -4053,8 +4062,12 @@ mod tests {
         app.load_objects();
 
         assert_eq!(app.campaign_data.objects.len(), 1);
-        assert_eq!(app.campaign_data.objects[0].key, "b_key");
-        assert!(!app.campaign_data.objects.iter().any(|e| e.key == "a_key"));
+        assert_eq!(app.campaign_data.objects[0].name, "ObjectB");
+        assert!(!app
+            .campaign_data
+            .objects
+            .iter()
+            .any(|e| e.name == "ObjectA"));
     }
 
     #[test]
@@ -4069,7 +4082,7 @@ mod tests {
         write_test_object_asset(&asset_path, "NewChest");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("NewChest", "assets/meshes/objects/new_chest.ron");
+        registry.upsert(12001, "NewChest", "assets/meshes/objects/new_chest.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();
@@ -4084,7 +4097,7 @@ mod tests {
         app.load_objects();
 
         assert_eq!(app.campaign_data.objects.len(), 1);
-        assert_eq!(app.campaign_data.objects[0].key, "NewChest");
+        assert_eq!(app.campaign_data.objects[0].name, "NewChest");
     }
 
     #[test]
@@ -4096,7 +4109,7 @@ mod tests {
         write_test_object_asset(&asset_path, "NewChest");
 
         let mut registry = ObjectMeshRegistryFile::default();
-        registry.upsert("NewChest", "assets/meshes/objects/new_chest.ron");
+        registry.upsert(12001, "NewChest", "assets/meshes/objects/new_chest.ron");
         let registry_path = dir.join("data/object_mesh_registry.ron");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
         registry.save(&registry_path).unwrap();

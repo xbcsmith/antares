@@ -2310,7 +2310,15 @@ fn upsert_object_mesh_registry_entry(
         ObjectMeshRegistryFile::default()
     };
 
-    registry.upsert(mesh_key, relative_path);
+    // Preserve existing ID if an entry with this name already exists,
+    // otherwise assign the next available ID.
+    let id = registry
+        .entries
+        .iter()
+        .find(|e| e.name == mesh_key)
+        .map(|e| e.id)
+        .unwrap_or_else(|| registry.entries.iter().map(|e| e.id).max().unwrap_or(0) + 1);
+    registry.upsert(id, mesh_key, relative_path);
     registry.save(&registry_path)?;
     Ok(())
 }
@@ -4409,8 +4417,8 @@ mod tests {
         // the exact creature name, since ObjectMesh registry keys are the
         // raw name, not a numeric ID), and one that must survive untouched.
         let mut existing_registry = ObjectMeshRegistryFile::default();
-        existing_registry.upsert("Old Chest", "assets/meshes/objects/old_chest_v1.ron");
-        existing_registry.upsert("Other Key", "assets/meshes/objects/other_key.ron");
+        existing_registry.upsert(0, "Old Chest", "assets/meshes/objects/old_chest_v1.ron");
+        existing_registry.upsert(1, "Other Key", "assets/meshes/objects/other_key.ron");
         existing_registry
             .save(&campaign_dir.path().join("data/object_mesh_registry.ron"))
             .unwrap();
@@ -4428,13 +4436,21 @@ mod tests {
 
         // Re-exporting "Old Chest" must replace its path, not duplicate the
         // entry, and must not disturb the unrelated "Other Key" entry.
-        assert_eq!(registry.meshes.len(), 2);
+        assert_eq!(registry.entries.len(), 2);
         assert_eq!(
-            registry.meshes.get("Old Chest").map(String::as_str),
+            registry
+                .entries
+                .iter()
+                .find(|e| e.name == "Old Chest")
+                .map(|e| e.filepath.as_str()),
             Some("assets/meshes/objects/old_chest.ron")
         );
         assert_eq!(
-            registry.meshes.get("Other Key").map(String::as_str),
+            registry
+                .entries
+                .iter()
+                .find(|e| e.name == "Other Key")
+                .map(|e| e.filepath.as_str()),
             Some("assets/meshes/objects/other_key.ron")
         );
 
@@ -4445,12 +4461,13 @@ mod tests {
             &campaign_dir.path().join("data/object_mesh_registry.ron"),
         )
         .unwrap();
-        assert_eq!(registry_after_second_export.meshes.len(), 2);
+        assert_eq!(registry_after_second_export.entries.len(), 2);
         assert_eq!(
             registry_after_second_export
-                .meshes
-                .get("Old Chest")
-                .map(String::as_str),
+                .entries
+                .iter()
+                .find(|e| e.name == "Old Chest")
+                .map(|e| e.filepath.as_str()),
             Some("assets/meshes/objects/old_chest.ron")
         );
     }

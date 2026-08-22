@@ -8363,7 +8363,7 @@
             name: "Barred Passage",
             description: "A heavy iron bar blocks the passage.",
             loot: [],
-            mesh_id: Some("barred_passage"),
+            mesh_id: Some("12006"),
             dialogue_id: Some(500),
         ),
         (
