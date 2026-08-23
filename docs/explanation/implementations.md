@@ -72,9 +72,13 @@ Full lifecycle:
 - Dialogue 1004 "The Sovereign's Soliloquy" restructured from 4 nodes to 6:
   - Node 1: gains 4th choice "I will not bargain with a lich." (direct combat).
   - Nodes 2 & 3: converted from terminal to non-terminal; each leads to node 4.
-  - Node 4: converted from terminal to non-terminal; two new choices (peaceful
-    → node 6 with `SetFlag`/`StartQuest`/`CompleteQuestStage` actions; combat
-    → node 5 with `StartQuest`/`SetFlag` actions).
+  - Node 4: converted from terminal to non-terminal; two new choices:
+    - **Peaceful** → node 6 — fires `GiveItems([(210, 1)])` (awards the jade relic),
+      `SetFlag("eonir_relic_returned", true)`, `StartQuest(9)`,
+      `CompleteQuestStage(9, 1)`, `CompleteQuestStage(8, 1)` (force-advances
+      Quest 8 Stage 1 so Quest 8 Stage 2 "Return to Jyeshtha" activates for
+      both combat and peaceful paths — the Act V convergence point).
+    - **Combat** → node 5 — fires `StartQuest(9)`, `SetFlag("eonir_combat_triggered", true)`.
   - Node 5 (new): Eonir's combat declaration (terminal).
   - Node 6 (new): Eonir surrenders the relic (terminal).
 
@@ -84,6 +88,10 @@ Full lifecycle:
   - Stage 1: `KillMonsters(137, 1)` — satisfied automatically by combat path;
     peaceful path uses `CompleteQuestStage(9, 1)` dialogue action to bypass it.
   - Rewards: 2000 XP + 1000 gold.
+- Act V convergence: both paths activate Quest 8 Stage 2 ("Return the Relic to
+  Jyeshtha"). Combat path: monster 137 drops item 210 (80% loot) → Quest 8 Stage 1
+  auto-completes. Peaceful path: `GiveItems([(210,1)])` + `CompleteQuestStage(8, 1)`
+  force-advances Quest 8 Stage 1 directly. Both paths then share Quest 8 Stage 2.
 
 ### Verification
 
@@ -91,6 +99,8 @@ Full lifecycle:
 - `cargo check --all-targets --all-features`: 0 errors
 - `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
 - `cargo nextest run --all-features`: 5526 passed, 8 skipped, 0 failed
+- **Post-audit fix**: Added `GiveItems([(210,1)])` + `CompleteQuestStage(8,1)` to peaceful
+  dialogue choice — both paths now converge on Quest 8 Stage 2 (Act V).
 
 ---
 

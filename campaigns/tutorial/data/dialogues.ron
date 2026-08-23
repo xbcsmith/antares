@@ -3645,6 +3645,9 @@
                         target_node: Some(6),
                         conditions: [],
                         actions: [
+                            GiveItems(
+                                items: [(210, 1)],
+                            ),
                             SetFlag(
                                 flag_name: "eonir_relic_returned",
                                 value: true,
@@ -3654,6 +3657,10 @@
                             ),
                             CompleteQuestStage(
                                 quest_id: 9,
+                                stage_number: 1,
+                            ),
+                            CompleteQuestStage(
+                                quest_id: 8,
                                 stage_number: 1,
                             ),
                         ],
