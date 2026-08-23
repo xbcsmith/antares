@@ -3747,6 +3747,8 @@ mod map_npc_resolution_tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -3795,6 +3797,8 @@ mod map_npc_resolution_tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -3838,6 +3842,8 @@ mod map_npc_resolution_tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let placement = NpcPlacement {
@@ -3945,6 +3951,8 @@ mod map_npc_resolution_tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let placement = NpcPlacement {

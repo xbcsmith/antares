@@ -3017,6 +3017,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         db.add_npc(npc.clone()).expect("Failed to add NPC");
@@ -4103,6 +4105,35 @@ mod tests {
         assert!(
             priests.iter().any(|p| p.id == "temple_priest"),
             "NpcDatabase::priests() must include temple_priest"
+        );
+    }
+
+    /// Phase 4 verification: `test_combat_switch_npc` in `data/test_campaign/data/npcs.ron`
+    /// must exist and have `combat_switch.is_some()`.
+    #[test]
+    fn test_test_campaign_combat_switch_npc_deserialises() {
+        let db = NpcDatabase::load_from_file("data/test_campaign/data/npcs.ron")
+            .expect("Failed to load data/test_campaign/data/npcs.ron");
+
+        let npc = db
+            .get_npc("test_combat_switch_npc")
+            .expect("test_combat_switch_npc must exist in data/test_campaign/data/npcs.ron");
+
+        assert!(
+            npc.combat_switch.is_some(),
+            "test_combat_switch_npc must have combat_switch set"
+        );
+
+        let switch = npc.combat_switch.as_ref().unwrap();
+        assert_eq!(
+            switch.trigger_flag, "test_switch_trigger",
+            "trigger_flag must be 'test_switch_trigger'"
+        );
+        assert_eq!(switch.monster_id, 1, "monster_id must be 1 (Goblin)");
+        assert_eq!(
+            switch.defeat_flag,
+            Some("test_switch_defeated".to_string()),
+            "defeat_flag must be Some('test_switch_defeated')"
         );
     }
 

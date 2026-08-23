@@ -232,4 +232,16 @@
         is_merchant: false,
         is_innkeeper: false,
     ),
+    (
+        id: "test_combat_switch_npc",
+        name: "Test Switch NPC",
+        portrait_id: "placeholder",
+        creature_id: Some(51),
+        combat_switch: Some((
+            trigger_flag: "test_switch_trigger",
+            monster_id: 1,
+            defeat_flag: Some("test_switch_defeated"),
+            combat_type: Normal,
+        )),
+    ),
 ]
