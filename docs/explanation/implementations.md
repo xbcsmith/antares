@@ -1,3 +1,75 @@
+## Phase 1: Terrain Externalization — Domain Foundation
+
+### Summary
+
+Implemented the foundational `TerrainDefinition` / `TerrainDatabase` registry
+(Phase 1 of the terrain externalization plan). This is a purely additive change —
+no existing code is modified, no existing tests break. It establishes the
+numeric-ID open registry that future phases will use to replace the closed
+`TerrainType` enum.
+
+### Files Changed
+
+**`src/domain/types.rs`**
+
+- Added `pub type TerrainId = u32;` alongside `LandscapeId`.
+- Added `pub const TERRAIN_ID_MIN: TerrainId = 13_000;` alongside
+  `LANDSCAPE_ID_MIN`. Built-in terrain occupies `13000`–`13011`; campaign
+  custom terrain starts at `13100` by convention.
+- Both items carry full `///` doc-comments with `# Examples` doctests.
+
+**`src/domain/world/terrain.rs`** *(new file)*
+
+Contains the full domain foundation for data-driven terrain:
+
+- `TerrainDatabaseError` (`thiserror`): `ReadError`, `ParseError`,
+  `DuplicateId`, `NotFound`, `InvalidTerrainId { id, min }`.
+- `TerrainMeshStyle { Flat, Water, Mountain }` — closed enum selecting the
+  map-renderer mesh-spawn branch. `Flat` is `#[default]`. Includes `all()`
+  const accessor.
+- `TerrainVegetation { None, GrassCover, Forest }` — closed enum controlling
+  vegetation decoration. `None` is `#[default]`. Includes `all()` const
+  accessor.
+- `TerrainDefinition` — RON-deserializable struct: required fields `id`,
+  `name`, `texture_path`, `roughness`, `color`; optional (with `#[serde(default)]`)
+  fields `mesh_style`, `vegetation`, `blocked`, `height`.
+- `TerrainDatabase { items: HashMap<TerrainId, TerrainDefinition> }` — in-memory
+  index populated via `crate::impl_ron_database!` with `post_load` ID validation
+  (`id >= TERRAIN_ID_MIN`). Methods: `new`, `add`, `get_by_id`, `get_by_name`,
+  `all_definitions`, `len`, `is_empty`, `has_definition`.
+- All public items carry `///` doc-comments with `# Examples` doctests.
+- 13 unit tests covering: add-and-lookup, duplicate-ID rejection,
+  below-min rejection, full RON roundtrip, mesh-style / vegetation RON
+  roundtrip for all variants, minimal RON with default fields, full RON entry,
+  missing lookups, defaults, and error message content.
+
+**`src/domain/world/mod.rs`**
+
+- Declared `pub mod terrain;`.
+- Added re-exports: `TerrainDatabase, TerrainDatabaseError, TerrainDefinition,
+  TerrainMeshStyle, TerrainVegetation`.
+- Updated module-level doc comment to list the `terrain` sub-module.
+
+### Architecture Compliance
+
+- `TERRAIN_ID_MIN = 13_000` placed in `domain/types.rs` alongside
+  `LANDSCAPE_ID_MIN`, exactly per Section 4.6 of the plan.
+- Module placed in `src/domain/world/terrain.rs`, mirroring `landscape.rs`.
+- `impl_ron_database!` macro used unchanged, mirroring `LandscapeDatabase`.
+- All type aliases use `TerrainId = u32` (not raw `u32`).
+- No magic numbers; constants used throughout.
+
+### Quality Gates
+
+```
+cargo fmt --all            → clean
+cargo check --all-targets  → Finished, 0 errors
+cargo clippy -- -D warnings → Finished, 0 warnings
+cargo nextest run          → 5539 passed, 0 failed
+```
+
+---
+
 ## Phase 4: Tutorial — Eonir the Still Boss Fight
 
 ### Summary
