@@ -445,4 +445,35 @@
             y: 10,
         )),
     ),
+    (
+        id: 9,
+        name: "Confront the Lich King",
+        description: "Eonir the Still, Sovereign of Stillness, holds the jade icosahedron. Confront him in his domain and recover the relic — by negotiation or by force.",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Deal with Eonir",
+                description: "Find Eonir the Still and recover the jade relic. You may negotiate or fight — both paths lead to the same end.",
+                objectives: [
+                    KillMonsters(
+                        monster_id: 137,
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(2000),
+            Gold(1000),
+        ],
+        min_level: Some(8),
+        max_level: Some(255),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: true,
+        quest_giver_npc: None,
+        quest_giver_map: None,
+        quest_giver_position: None,
+    ),
 ]

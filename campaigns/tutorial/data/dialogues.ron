@@ -3525,7 +3525,7 @@
     ),
     (
         id: 1004,
-        name: "The Sovereign's Soliloquy",
+        name: "The Sovereign\'s Soliloquy",
         root_node: 1,
         nodes: {
             1: (
@@ -3558,7 +3558,25 @@
                         target_node: Some(4),
                         conditions: [],
                         actions: [],
-                        ends_dialogue: true,
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "I will not bargain with a lich.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [
+                            StartQuest(
+                                quest_id: 9,
+                            ),
+                            SetFlag(
+                                flag_name: "eonir_combat_triggered",
+                                value: true,
+                            ),
+                        ],
+                        ends_dialogue: false,
                         sdk_metadata: (
                             managed_content: [],
                         ),
@@ -3575,10 +3593,21 @@
                 id: 2,
                 text: "Then your life is a sprint across a field of seconds. A noble, if frantic, pursuit. But remember... even the fastest runner eventually finds the end of the path.",
                 speaker_override: None,
-                choices: [],
+                choices: [
+                    (
+                        text: "Indeed. Time grows short — return the relic, Eonir.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
                 conditions: [],
                 actions: [],
-                is_terminal: true,
+                is_terminal: false,
                 sdk_metadata: (
                     managed_content: [],
                 ),
@@ -3586,6 +3615,82 @@
             3: (
                 id: 3,
                 text: "The drift is where true observation lies. To see the world as it unfolds, rather than what it demands of you. You have a patient soul.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We drift toward a single purpose: reclaiming the relic.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "*a faint, weary smile touches his skeletal lips* Survival is the most fundamental geometry of existence. Let us ensure yours lasts long enough to find the Relic I hold.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Return the relic to Jyeshtha. We have no further quarrel.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [
+                            SetFlag(
+                                flag_name: "eonir_relic_returned",
+                                value: true,
+                            ),
+                            StartQuest(
+                                quest_id: 9,
+                            ),
+                            CompleteQuestStage(
+                                quest_id: 9,
+                                stage_number: 1,
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "There is no negotiation. This ends in combat.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [
+                            StartQuest(
+                                quest_id: 9,
+                            ),
+                            SetFlag(
+                                flag_name: "eonir_combat_triggered",
+                                value: true,
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "*the cold deepens around you and Eonir\'s form ripples with shadow energy* You choose violence over reason. So be it. Let stillness decide between us.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -3595,9 +3700,9 @@
                     managed_content: [],
                 ),
             ),
-            4: (
-                id: 4,
-                text: "*a faint, weary smile touches his skeletal lips* Survival is the most fundamental geometry of existence. Let us ensure yours lasts long enough to find the Relic I hold.",
+            6: (
+                id: 6,
+                text: "*a long silence, then the jade icosahedron drifts slowly toward you* The Weave called this necessary. I called it inevitable. Take it — and tell Jyeshtha the Sovereign of Stillness steps aside. For now.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],

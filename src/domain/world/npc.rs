@@ -42,6 +42,7 @@
 //!     skill_training_fee_multiplier: None,
 //!     skill_training_max_rank: None,
 //!     combat_switch: None,
+//!     suppress_flag: None,
 //! };
 //! ```
 //!
@@ -153,6 +154,7 @@ pub struct NpcCombatSwitch {
 ///     skill_training_fee_multiplier: None,
 ///     skill_training_max_rank: None,
 ///     combat_switch: None,
+///     suppress_flag: None,
 /// };
 ///
 /// assert_eq!(merchant.id, "merchant_tom");
@@ -216,6 +218,7 @@ pub struct NpcDefinition {
     ///     skill_training_fee_multiplier: None,
     ///     skill_training_max_rank: None,
     ///     combat_switch: None,
+    ///     suppress_flag: None,
     /// };
     /// ```
     #[serde(default)]
@@ -260,6 +263,7 @@ pub struct NpcDefinition {
     ///     skill_training_fee_multiplier: None,
     ///     skill_training_max_rank: None,
     ///     combat_switch: None,
+    ///     suppress_flag: None,
     /// };
     /// ```
     #[serde(default)]
@@ -381,6 +385,18 @@ pub struct NpcDefinition {
     /// continue to deserialize correctly.
     #[serde(default)]
     pub combat_switch: Option<NpcCombatSwitch>,
+
+    /// Optional flag that suppresses NPC spawn without triggering combat.
+    ///
+    /// When `global_flags.get(suppress_flag)` is `true`, the NPC spawn guard
+    /// skips spawning entirely. Use this for NPCs that should not reappear after
+    /// a peaceful resolution (e.g., `"eonir_relic_returned"` prevents Eonir from
+    /// respawning after the party negotiates the return of the relic).
+    ///
+    /// `#[serde(default)]` ensures all existing RON files without this field
+    /// continue to deserialize correctly.
+    #[serde(default)]
+    pub suppress_flag: Option<String>,
 }
 
 impl NpcDefinition {
@@ -437,6 +453,7 @@ impl NpcDefinition {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -487,6 +504,7 @@ impl NpcDefinition {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -541,6 +559,7 @@ impl NpcDefinition {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -591,6 +610,7 @@ impl NpcDefinition {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -650,6 +670,7 @@ impl NpcDefinition {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -1027,6 +1048,7 @@ mod tests {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1177,6 +1199,7 @@ NpcDefinition(
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         };
 
         assert_eq!(npc.id, "complete_npc");
@@ -1236,6 +1259,7 @@ NpcDefinition(
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1449,6 +1473,7 @@ NpcDefinition(
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&priest).expect("Failed to serialize");
@@ -1491,6 +1516,7 @@ NpcDefinition(
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1705,5 +1731,62 @@ NpcCombatSwitch(
         assert_eq!(switch.trigger_flag, "gate_keeper_triggered");
         assert_eq!(switch.monster_id, 7);
         assert!(switch.defeat_flag.is_none());
+    }
+
+    // ── Phase 4: suppress_flag tests ──────────────────────────────────────────
+
+    /// A minimal `NpcDefinition` without `suppress_flag` field deserialises with
+    /// `suppress_flag == None` (backward compat with all existing RON files).
+    #[test]
+    fn test_npc_definition_suppress_flag_defaults_to_none() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "legacy_npc",
+    name: "Legacy NPC",
+    portrait_id: "portrait.png",
+)
+"#;
+        let npc: NpcDefinition =
+            ron::from_str(ron_str).expect("Failed to deserialize legacy format");
+        assert!(
+            npc.suppress_flag.is_none(),
+            "suppress_flag should default to None for RON files without the field"
+        );
+    }
+
+    /// A `NpcDefinition` with `suppress_flag: Some("eonir_relic_returned")` round-trips through RON.
+    #[test]
+    fn test_npc_definition_suppress_flag_round_trip() {
+        use crate::application::GlobalFlags;
+
+        let ron_str = r#"
+NpcDefinition(
+    id: "eonir",
+    name: "Eonir the Still",
+    portrait_id: "eonir",
+    suppress_flag: Some("eonir_relic_returned"),
+)
+"#;
+        let npc: NpcDefinition =
+            ron::from_str(ron_str).expect("Failed to deserialize NPC with suppress_flag");
+        assert_eq!(
+            npc.suppress_flag,
+            Some("eonir_relic_returned".to_string()),
+            "suppress_flag must deserialize correctly"
+        );
+
+        // Validate the spawn-guard predicate: flag set → suppress, flag absent → allow.
+        let mut flags_set = GlobalFlags::new();
+        flags_set.set("eonir_relic_returned", true);
+        assert!(
+            flags_set.get(npc.suppress_flag.as_ref().unwrap()),
+            "Spawn guard must suppress when suppress_flag is true"
+        );
+
+        let flags_absent = GlobalFlags::new();
+        assert!(
+            !flags_absent.get(npc.suppress_flag.as_ref().unwrap()),
+            "Spawn guard must allow spawn when suppress_flag is false/unset"
+        );
     }
 }
