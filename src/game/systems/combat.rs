@@ -453,6 +453,11 @@ pub struct CombatResource {
     /// Later phases read this to apply ambush, ranged, magic, and boss
     /// mechanics.
     pub combat_event_type: CombatEventType,
+    /// Optional global flag name to set when this combat is won.
+    ///
+    /// Populated by `start_npc_combat_system` for NPC combat-switch encounters.
+    /// `None` for ordinary map encounters.  Cleared by `CombatResource::clear()`.
+    pub defeat_flag: Option<String>,
 }
 
 impl CombatResource {
@@ -467,6 +472,7 @@ impl CombatResource {
             last_timed_round: 0,
             last_timed_turn: 0,
             combat_event_type: CombatEventType::Normal,
+            defeat_flag: None,
         }
     }
 
@@ -480,6 +486,7 @@ impl CombatResource {
         self.last_timed_round = 0;
         self.last_timed_turn = 0;
         self.combat_event_type = CombatEventType::Normal;
+        self.defeat_flag = None;
     }
 }
 
@@ -7540,6 +7547,13 @@ fn handle_combat_victory(
             }
         }
 
+        // Set the defeat flag for NPC combat-switch encounters (if any).
+        if let Some(ref flag) = combat_res.defeat_flag {
+            global_state.0.global_flags.set(flag, true);
+            tracing::info!("NPC combat switch: defeat flag '{}' set", flag);
+        }
+        combat_res.defeat_flag = None;
+
         // Exit combat (will trigger sync back to party on next frame)
         global_state.0.exit_combat();
     }
@@ -14153,6 +14167,136 @@ mod tests {
                 .iter()
                 .map(|m| (m.map_id, m.position))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    // ── Phase 3: defeat_flag tests ────────────────────────────────────────────
+
+    /// `CombatResource::clear()` must reset `defeat_flag` to `None`.
+    #[test]
+    fn test_combat_resource_clear_resets_defeat_flag() {
+        let mut cr = CombatResource::new();
+        cr.defeat_flag = Some("eonir_defeated".to_string());
+        cr.clear();
+        assert!(
+            cr.defeat_flag.is_none(),
+            "clear() must reset defeat_flag to None"
+        );
+    }
+
+    /// When `combat_res.defeat_flag` is `Some`, `handle_combat_victory` must
+    /// set the named flag in `GlobalFlags` and then clear `defeat_flag`.
+    #[test]
+    fn test_handle_combat_victory_sets_defeat_flag_when_present() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::combat::engine::CombatState;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Enter combat so exit_combat() has a valid state to exit.
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+            cr.defeat_flag = Some("eonir_defeated".to_string());
+        }
+
+        // Send CombatVictory.
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatVictory>>();
+            writer.write(CombatVictory {});
+        }
+        app.update();
+
+        // The defeat flag must be set in GlobalFlags.
+        let gs = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert!(
+            gs.0.global_flags.get("eonir_defeated"),
+            "handle_combat_victory must set the defeat flag in GlobalFlags"
+        );
+
+        // CombatResource.defeat_flag must be cleared.
+        let cr = app.world().resource::<CombatResource>();
+        assert!(
+            cr.defeat_flag.is_none(),
+            "handle_combat_victory must clear defeat_flag after setting it"
+        );
+    }
+
+    /// Victory without a `defeat_flag` must not panic and must not set any
+    /// unexpected global flags.
+    #[test]
+    fn test_handle_combat_victory_no_defeat_flag_does_not_panic() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::combat::engine::CombatState;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+            // defeat_flag is None by default — no change needed.
+        }
+
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatVictory>>();
+            writer.write(CombatVictory {});
+        }
+        app.update();
+
+        // No panic means success. Also verify the resource is still sane.
+        let cr = app.world().resource::<CombatResource>();
+        assert!(
+            cr.defeat_flag.is_none(),
+            "defeat_flag must remain None when no defeat flag was configured"
+        );
+
+        // Verify no accidental global flags were set.
+        let gs = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert!(
+            gs.0.global_flags.flags.is_empty(),
+            "No global flags should be set when defeat_flag is None"
         );
     }
 

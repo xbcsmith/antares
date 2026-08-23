@@ -1,3 +1,49 @@
+## Phase 3: Post-Combat Hook — Defeat Flag
+
+### Summary
+
+Wired the `defeat_flag` from `PendingNpcCombat` all the way through to
+`GlobalFlags` after a victory. When an NPC combat-switch encounter is won,
+`handle_combat_victory` now reads `CombatResource::defeat_flag` and sets the
+corresponding flag in `GlobalFlags`, completing the full lifecycle:
+dialogue sets trigger flag → NPC despawns → combat starts → party wins
+→ defeat flag set.
+
+### Files Changed
+
+**`src/game/systems/combat.rs`**
+
+- Added `pub defeat_flag: Option<String>` field to `CombatResource` with doc
+  comment explaining its lifecycle.
+- `CombatResource::new()` initialises `defeat_flag: None`.
+- `CombatResource::clear()` resets `defeat_flag = None`.
+- `handle_combat_victory` — just before `global_state.0.exit_combat()`, checks
+  `combat_res.defeat_flag` and calls `global_flags.set(flag, true)` if set,
+  then clears `defeat_flag = None` to prevent double-setting.
+- Three new tests (all pass):
+  - `test_combat_resource_clear_resets_defeat_flag`
+  - `test_handle_combat_victory_sets_defeat_flag_when_present`
+  - `test_handle_combat_victory_no_defeat_flag_does_not_panic`
+
+**`src/game/systems/npc_combat_switch.rs`**
+
+- `start_npc_combat_system` — added
+  `mut combat_res: Option<ResMut<crate::game::systems::combat::CombatResource>>`
+  as last parameter (optional so test apps without `CombatPlugin` still work).
+- Replaced the Phase 2 `// TODO Phase 3:` comment with:
+  `if let Some(ref mut cr) = combat_res { cr.defeat_flag = combat.defeat_flag.clone(); }`
+- New test (passes):
+  - `test_combat_resource_defeat_flag_set_on_npc_combat_start`
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features`: 5523 passed, 8 skipped, 0 failed
+
+---
+
 ## Phase 2: Exploration Engine — NPC Spawn Guard + Combat Switch System
 
 ### Summary

@@ -184,11 +184,15 @@ pub fn npc_combat_switch_system(
 /// * `content`               – Content database supplying monster data.
 /// * `combat_started_writer` – Optional [`CombatStarted`] message bus
 ///   (absent in test apps without `CombatPlugin`).
+/// * `combat_res`            – Optional [`CombatResource`] (absent in test
+///   apps without `CombatPlugin`); receives `defeat_flag` from the pending
+///   combat so `handle_combat_victory` can write it to `GlobalFlags`.
 pub fn start_npc_combat_system(
     mut pending: ResMut<PendingNpcCombatResource>,
     mut global_state: ResMut<GlobalState>,
     content: Res<GameContent>,
     mut combat_started_writer: Option<MessageWriter<crate::game::systems::combat::CombatStarted>>,
+    mut combat_res: Option<ResMut<crate::game::systems::combat::CombatResource>>,
 ) {
     let Some(combat) = pending.0.take() else {
         return;
@@ -206,7 +210,11 @@ pub fn start_npc_combat_system(
         combat.combat_type,
     ) {
         Ok(()) => {
-            // TODO Phase 3: set CombatResource::defeat_flag = combat.defeat_flag
+            // Phase 3: propagate the defeat flag so handle_combat_victory can
+            // set it in GlobalFlags after the party wins.
+            if let Some(ref mut cr) = combat_res {
+                cr.defeat_flag = combat.defeat_flag.clone();
+            }
 
             // Notify CombatPlugin that combat has started.
             if let Some(ref mut writer) = combat_started_writer {
@@ -536,6 +544,59 @@ mod tests {
         assert!(
             !flags_absent.get(&switch.trigger_flag),
             "Spawn guard must allow spawn when trigger flag is false/unset"
+        );
+    }
+
+    // ── Phase 3: defeat_flag wiring ───────────────────────────────────────────
+
+    /// When `start_npc_combat_system` runs with a `PendingNpcCombat` that has a
+    /// `defeat_flag`, the flag must be forwarded into `CombatResource`.
+    #[test]
+    fn test_combat_resource_defeat_flag_set_on_npc_combat_start() {
+        use crate::domain::types::MonsterId;
+        use crate::sdk::database::ContentDatabase;
+
+        const MONSTER_ID: MonsterId = 3;
+
+        let mut db = ContentDatabase::new();
+        db.monsters
+            .add_monster(make_minimal_monster(MONSTER_ID))
+            .expect("add_monster should not fail");
+
+        let state = make_exploration_state();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+        // Manually register CombatResource so the system can write defeat_flag.
+        app.insert_resource(crate::game::systems::combat::CombatResource::new());
+        app.insert_resource(PendingNpcCombatResource(Some(PendingNpcCombat {
+            monster_id: MONSTER_ID,
+            position: Position::new(4, 4),
+            map_id: 0,
+            defeat_flag: Some("eonir_defeated".to_string()),
+            combat_type: CombatEventType::Boss,
+        })));
+        app.add_systems(Update, start_npc_combat_system);
+
+        app.update();
+
+        // PendingNpcCombatResource must be cleared.
+        let pending = app.world().resource::<PendingNpcCombatResource>();
+        assert!(
+            pending.0.is_none(),
+            "pending must be None after start_npc_combat_system"
+        );
+
+        // CombatResource.defeat_flag must be set.
+        let cr = app
+            .world()
+            .resource::<crate::game::systems::combat::CombatResource>();
+        assert_eq!(
+            cr.defeat_flag,
+            Some("eonir_defeated".to_string()),
+            "defeat_flag must be forwarded from PendingNpcCombat to CombatResource"
         );
     }
 }
