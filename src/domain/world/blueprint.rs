@@ -402,6 +402,7 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
         };
 
         let guard = crate::domain::world::npc::NpcDefinition {
@@ -428,6 +429,7 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
         };
 
         npc_db.add_npc(merchant).unwrap();

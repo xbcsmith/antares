@@ -3017,6 +3017,7 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
         };
 
         db.add_npc(npc.clone()).expect("Failed to add NPC");

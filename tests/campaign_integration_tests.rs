@@ -348,6 +348,7 @@ fn test_fallback_mechanism_for_missing_creature_id() {
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
     };
 
     // Assert: NPC exists but has no creature_id

@@ -1,4 +1,63 @@
-## Post-Refactor Audit: Missed Deliverables (All Phases)
+## Phase 1: Domain — `NpcCombatSwitch` Data Structure
+
+### Summary
+
+Added the `NpcCombatSwitch` struct and `combat_switch` field to `NpcDefinition`
+as the foundational domain layer for the generic NPC → monster-encounter swap
+feature described in `npc_combat_trigger_implementation_plan.md`.
+
+### Files Changed
+
+**`src/domain/world/npc.rs`**
+
+- Added `use crate::domain::types::MonsterId` to the existing type-alias import.
+- Added `pub struct NpcCombatSwitch` immediately before `NpcDefinition`:
+  - `trigger_flag: String` — `GlobalFlags` key that activates the swap
+  - `monster_id: MonsterId` — monster entry to fight
+  - `defeat_flag: Option<String>` — flag set after party victory (`#[serde(default)]`)
+  - `combat_type: CombatEventType` — encounter type, defaults to `Normal` via `#[serde(default)]`
+  - Derives: `Debug, Clone, Serialize, Deserialize, PartialEq`
+- Added `pub combat_switch: Option<NpcCombatSwitch>` field at the end of
+  `NpcDefinition` with `#[serde(default)]`; existing RON files deserialize
+  without change.
+- Updated all five `NpcDefinition` constructors (`new`, `merchant`, `priest`,
+  `innkeeper`, `trainer`) to initialise `combat_switch: None`.
+- Updated all `NpcDefinition { ... }` struct-literal doctests in the file to
+  include `combat_switch: None`.
+- Added three required tests:
+  - `test_npc_definition_combat_switch_defaults_to_none` — minimal RON without
+    the field deserialises to `None`
+  - `test_npc_combat_switch_round_trip` — full struct serialises and
+    deserialises to an equal value
+  - `test_npc_combat_switch_defaults_combat_type_to_normal` — RON block with
+    only `trigger_flag` and `monster_id` deserialises with
+    `combat_type == Normal`
+
+**Other files (struct-literal updates only)**
+
+`combat_switch: None` added to every `NpcDefinition { ... }` struct literal
+across the codebase (no logic changes):
+
+- `src/game/systems/events.rs` — 5 literals
+- `src/domain/world/types.rs` — 4 literals
+- `src/domain/world/blueprint.rs` — 2 literals
+- `src/domain/world/creature_binding.rs` — 1 literal
+- `src/sdk/database.rs` — 1 literal
+- `sdk/campaign_builder/src/asset_manager.rs` — 5 literals
+- `sdk/campaign_builder/tests/campaign_io_tests.rs` — 9 literals
+- `tests/campaign_integration_tests.rs` — 1 literal
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features`: 5514 passed, 8 skipped, 0 failed
+  - `test_npc_definition_combat_switch_defaults_to_none`: PASS
+  - `test_npc_combat_switch_round_trip`: PASS
+  - `test_npc_combat_switch_defaults_combat_type_to_normal`: PASS
+
+---
 
 ### Summary
 
