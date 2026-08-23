@@ -2236,6 +2236,21 @@ fn spawn_map(
                 continue;
             }
 
+            // Spawn guard: suppress this NPC if its combat-switch trigger flag has
+            // already fired. This prevents a "defeated" NPC from re-appearing after
+            // a save/reload because GlobalFlags persists the trigger state.
+            if let Some(npc_def) = content.0.npcs.get_npc(&resolved_npc.npc_id) {
+                if let Some(ref switch) = npc_def.combat_switch {
+                    if game_state.global_flags.get(&switch.trigger_flag) {
+                        debug!(
+                            "Suppressing NPC spawn for '{}': combat trigger flag '{}' is set",
+                            resolved_npc.npc_id, switch.trigger_flag
+                        );
+                        continue;
+                    }
+                }
+            }
+
             let x = resolved_npc.position.x as f32;
             let y = resolved_npc.position.y as f32;
 

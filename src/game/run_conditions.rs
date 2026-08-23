@@ -77,3 +77,24 @@ pub fn in_character_sheet_mode(state: Res<GlobalState>) -> bool {
 pub fn in_automap_mode(state: Res<GlobalState>) -> bool {
     matches!(state.0.mode, GameMode::Automap)
 }
+
+/// Returns `true` while the game is in [`GameMode::Exploration`] mode.
+///
+/// Use this to gate systems that should only run during exploration (party
+/// movement, NPC interactions, combat-switch monitoring, etc.).
+///
+/// # Examples
+///
+/// ```
+/// use bevy::prelude::World;
+/// use antares::game::resources::GlobalState;
+/// use antares::application::GameState;
+///
+/// let mut world = World::new();
+/// world.insert_resource(GlobalState(GameState::new()));
+/// // GameState::new() starts in Exploration mode.
+/// assert!(world.run_system_cached(antares::game::run_conditions::in_exploration_mode).unwrap());
+/// ```
+pub fn in_exploration_mode(state: Res<GlobalState>) -> bool {
+    matches!(state.0.mode, GameMode::Exploration)
+}

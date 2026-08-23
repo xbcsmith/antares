@@ -1,3 +1,63 @@
+## Phase 2: Exploration Engine — NPC Spawn Guard + Combat Switch System
+
+### Summary
+
+Added the `PendingNpcCombatResource`, `npc_combat_switch_system`, and
+`start_npc_combat_system` that together provide the generic flag-triggered
+NPC → monster-encounter swap at runtime.  Also added an NPC spawn guard in
+`spawn_map` so a "defeated" NPC never re-spawns after save/reload.
+
+### Files Changed
+
+**`src/game/systems/npc_combat_switch.rs`** (new file)
+
+- `PendingNpcCombat` — data struct holding monster ID, tile position, map ID,
+  defeat flag, and combat type.
+- `PendingNpcCombatResource(pub Option<PendingNpcCombat>)` — Bevy `Resource`
+  newtype wrapper; follows the `PendingRecruitConfirm` pattern from `events.rs`.
+- `npc_combat_switch_system` — scans live `NpcMarker` entities each exploration
+  frame; when `combat_switch.trigger_flag` is `true` in `GlobalFlags`, despawns
+  the entity and writes `PendingNpcCombatResource`.
+- `start_npc_combat_system` — consumes `PendingNpcCombatResource`, calls
+  `start_encounter(&[monster_id])`, and emits `CombatStarted`.
+- `NpcCombatSwitchPlugin` — registers the resource and both systems gated to
+  `in_exploration_mode`, with `start_npc_combat_system` ordered after
+  `npc_combat_switch_system`.
+- Phase 2 tests (all pass):
+  - `test_npc_combat_switch_system_skips_npc_without_combat_switch`
+  - `test_npc_combat_switch_system_skips_when_trigger_flag_not_set`
+  - `test_npc_combat_switch_system_despawns_npc_when_flag_set`
+  - `test_start_npc_combat_system_clears_pending_and_enters_combat`
+  - `test_npc_spawn_guard_suppresses_npc_when_trigger_flag_already_set`
+
+**`src/game/run_conditions.rs`**
+
+- Added `in_exploration_mode` run condition (mirrors `in_combat_mode`).
+
+**`src/game/systems/mod.rs`**
+
+- Added `pub mod npc_combat_switch;`.
+
+**`src/game/systems/map.rs`** — `spawn_map` function
+
+- NPC spawn guard inserted immediately after the `encountered_characters` check
+  in the resolved-NPC loop. If the NPC's `combat_switch.trigger_flag` is already
+  `true` in `GlobalFlags`, the NPC is skipped with a `debug!` log — preventing
+  re-appearance after a save/reload.
+
+**`src/bin/antares.rs`**
+
+- Registered `NpcCombatSwitchPlugin` after `CombatPlugin`.
+
+### Verification
+
+- `cargo fmt --all`: clean
+- `cargo check --all-targets --all-features`: 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings`: 0 warnings
+- `cargo nextest run --all-features`: 5519 passed, 8 skipped, 0 failed
+
+---
+
 ## Phase 1: Domain — `NpcCombatSwitch` Data Structure
 
 ### Summary
