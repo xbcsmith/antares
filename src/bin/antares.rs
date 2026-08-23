@@ -453,6 +453,9 @@ impl Plugin for AntaresPlugin {
         // Core combat plugin
         app.add_plugins(antares::game::systems::combat::CombatPlugin);
 
+        // NPC combat-switch system (flag-triggered NPC → monster encounter)
+        app.add_plugins(antares::game::systems::npc_combat_switch::NpcCombatSwitchPlugin);
+
         // Time-of-Day ambient lighting
         app.add_plugins(antares::game::systems::time::TimeOfDayPlugin);
 

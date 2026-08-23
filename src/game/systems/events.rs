@@ -1935,6 +1935,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -1943,7 +1945,8 @@ mod tests {
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
-        app.update(); // Second update: handle_events processes MapEventTriggered
+        app.update(); // Second update: handle_events processes MapEventTriggered and should write StartDialogue
+        app.update(); // Third update: UiPlugin consumes GameLogEvent into GameLog
 
         // Assert - StartDialogue message should be sent
         let dialogue_messages = app.world().resource::<Messages<StartDialogue>>();
@@ -2013,6 +2016,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -2463,6 +2468,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -2552,6 +2559,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -2641,6 +2650,8 @@ mod tests {
                 skill_training_fee_base: None,
                 skill_training_fee_multiplier: None,
                 skill_training_max_rank: None,
+                combat_switch: None,
+                suppress_flag: None,
             })
             .unwrap();
 

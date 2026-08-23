@@ -1701,4 +1701,99 @@
         active_conditions: [],
         has_acted: false,
     ),
+    (
+        id: 137,
+        name: "Lich King Eonir",
+        stats: (
+            might: (
+                base: 12,
+                current: 12,
+            ),
+            intellect: (
+                base: 30,
+                current: 30,
+            ),
+            personality: (
+                base: 25,
+                current: 25,
+            ),
+            endurance: (
+                base: 20,
+                current: 20,
+            ),
+            speed: (
+                base: 4,
+                current: 4,
+            ),
+            accuracy: (
+                base: 18,
+                current: 18,
+            ),
+            luck: (
+                base: 15,
+                current: 15,
+            ),
+        ),
+        hp: (
+            base: 400,
+            current: 400,
+        ),
+        ac: (
+            base: 25,
+            current: 25,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 3,
+                    sides: 8,
+                    bonus: 5,
+                ),
+                attack_type: Physical,
+                special_effect: Some(Drain),
+                is_ranged: false,
+            ),
+            (
+                damage: (
+                    count: 4,
+                    sides: 10,
+                    bonus: 3,
+                ),
+                attack_type: Energy,
+                special_effect: Some(Paralysis),
+                is_ranged: true,
+            ),
+        ],
+        flee_threshold: 0,
+        special_attack_threshold: 60,
+        resistances: (
+            physical: false,
+            fire: true,
+            cold: true,
+            electricity: true,
+            energy: true,
+            paralysis: true,
+            fear: true,
+            sleep: true,
+        ),
+        can_regenerate: true,
+        can_advance: false,
+        is_undead: true,
+        magic_resistance: 95,
+        loot: (
+            gold_min: 2000,
+            gold_max: 5000,
+            gems_min: 20,
+            gems_max: 50,
+            items: [
+                (0.8, 210),
+                (0.5, 12),
+            ],
+            experience: 5000,
+        ),
+        creature_id: Some(1021),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
 ]

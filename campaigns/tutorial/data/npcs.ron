@@ -154,6 +154,13 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: Some((
+            trigger_flag: "eonir_combat_triggered",
+            monster_id: 137,
+            defeat_flag: Some("eonir_defeated"),
+            combat_type: Boss,
+        )),
+        suppress_flag: Some("eonir_relic_returned"),
     ),
     (
         id: "tutorial_merchant_town",

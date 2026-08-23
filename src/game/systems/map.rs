@@ -2236,6 +2236,33 @@ fn spawn_map(
                 continue;
             }
 
+            // Spawn guards: suppress this NPC if its combat-switch trigger flag has
+            // already fired (NPC defeated / fight pending) OR if its suppress_flag
+            // is set (peaceful-exit path).  Both persist via GlobalFlags across
+            // save/reload cycles.
+            if let Some(npc_def) = content.0.npcs.get_npc(&resolved_npc.npc_id) {
+                // Combat-switch guard: NPC was defeated or the fight is already pending.
+                if let Some(ref switch) = npc_def.combat_switch {
+                    if game_state.global_flags.get(&switch.trigger_flag) {
+                        debug!(
+                            "Suppressing NPC spawn for '{}': combat trigger flag '{}' is set",
+                            resolved_npc.npc_id, switch.trigger_flag
+                        );
+                        continue;
+                    }
+                }
+                // Peaceful-exit guard: NPC departed without combat.
+                if let Some(ref flag) = npc_def.suppress_flag {
+                    if game_state.global_flags.get(flag) {
+                        debug!(
+                            "Suppressing NPC spawn for '{}': suppress flag '{}' is set",
+                            resolved_npc.npc_id, flag
+                        );
+                        continue;
+                    }
+                }
+            }
+
             let x = resolved_npc.position.x as f32;
             let y = resolved_npc.position.y as f32;
 

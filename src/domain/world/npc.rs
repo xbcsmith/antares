@@ -41,6 +41,8 @@
 //!     skill_training_fee_base: None,
 //!     skill_training_fee_multiplier: None,
 //!     skill_training_max_rank: None,
+//!     combat_switch: None,
+//!     suppress_flag: None,
 //! };
 //! ```
 //!
@@ -57,7 +59,7 @@ use crate::domain::dialogue::DialogueId;
 use crate::domain::inventory::{NpcEconomySettings, ServiceCatalog};
 use crate::domain::quest::QuestId;
 use crate::domain::skills::{SkillId, SkillRank};
-use crate::domain::types::{CreatureId, Direction, Position};
+use crate::domain::types::{CreatureId, Direction, MonsterId, Position};
 use crate::domain::world::SpriteReference;
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +68,55 @@ use serde::{Deserialize, Serialize};
 /// Uses human-readable string IDs for better debugging and editor UX.
 /// Examples: "village_elder", "merchant_tom", "high_priestess"
 pub type NpcId = String;
+
+/// Combat-trigger configuration for an NPC.
+///
+/// When present on an [`NpcDefinition`], the exploration engine monitors
+/// `trigger_flag` in `GlobalFlags`. Once that flag becomes `true`, the NPC
+/// entity is despawned and the configured monster encounter starts at the
+/// same tile position. After the party wins, `defeat_flag` (if set) is
+/// written back to `GlobalFlags`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::npc::NpcCombatSwitch;
+/// use antares::domain::combat::types::CombatEventType;
+///
+/// let switch = NpcCombatSwitch {
+///     trigger_flag: "eonir_combat_triggered".to_string(),
+///     monster_id: 42,
+///     defeat_flag: Some("eonir_defeated".to_string()),
+///     combat_type: CombatEventType::Boss,
+/// };
+///
+/// assert_eq!(switch.trigger_flag, "eonir_combat_triggered");
+/// assert_eq!(switch.monster_id, 42);
+/// assert_eq!(switch.defeat_flag, Some("eonir_defeated".to_string()));
+/// assert_eq!(switch.combat_type, CombatEventType::Boss);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NpcCombatSwitch {
+    /// Name of the `GlobalFlags` key that activates the monster swap.
+    ///
+    /// When this flag becomes `true`, the NPC is despawned and the encounter
+    /// specified by `monster_id` is started.
+    pub trigger_flag: String,
+
+    /// ID of the monster entry to fight, looked up in `MonsterDatabase` at swap time.
+    pub monster_id: MonsterId,
+
+    /// If `Some`, the engine sets this global flag automatically when the
+    /// party wins the encounter. `None` means no post-combat flag is set.
+    #[serde(default)]
+    pub defeat_flag: Option<String>,
+
+    /// Combat event type governing how the encounter begins.
+    ///
+    /// Defaults to `CombatEventType::Normal` via `#[serde(default)]`.
+    #[serde(default)]
+    pub combat_type: crate::domain::combat::types::CombatEventType,
+}
 
 /// NPC definition containing all reusable NPC data
 ///
@@ -102,6 +153,8 @@ pub type NpcId = String;
 ///     skill_training_fee_base: None,
 ///     skill_training_fee_multiplier: None,
 ///     skill_training_max_rank: None,
+///     combat_switch: None,
+///     suppress_flag: None,
 /// };
 ///
 /// assert_eq!(merchant.id, "merchant_tom");
@@ -164,6 +217,8 @@ pub struct NpcDefinition {
     ///     skill_training_fee_base: None,
     ///     skill_training_fee_multiplier: None,
     ///     skill_training_max_rank: None,
+    ///     combat_switch: None,
+    ///     suppress_flag: None,
     /// };
     /// ```
     #[serde(default)]
@@ -207,6 +262,8 @@ pub struct NpcDefinition {
     ///     skill_training_fee_base: None,
     ///     skill_training_fee_multiplier: None,
     ///     skill_training_max_rank: None,
+    ///     combat_switch: None,
+    ///     suppress_flag: None,
     /// };
     /// ```
     #[serde(default)]
@@ -315,6 +372,31 @@ pub struct NpcDefinition {
     /// When `None`, the skill definition's `max_rank` is used.
     #[serde(default)]
     pub skill_training_max_rank: Option<SkillRank>,
+
+    /// Optional combat-trigger configuration.
+    ///
+    /// When set, the exploration system monitors `combat_switch.trigger_flag` in
+    /// `GlobalFlags`. When the flag becomes true, this NPC entity is despawned
+    /// and the configured monster encounter is started at the same tile position.
+    /// After party victory, `combat_switch.defeat_flag` (if set) is written back
+    /// to `GlobalFlags`.
+    ///
+    /// `#[serde(default)]` ensures all existing RON files without this field
+    /// continue to deserialize correctly.
+    #[serde(default)]
+    pub combat_switch: Option<NpcCombatSwitch>,
+
+    /// Optional flag that suppresses NPC spawn without triggering combat.
+    ///
+    /// When `global_flags.get(suppress_flag)` is `true`, the NPC spawn guard
+    /// skips spawning entirely. Use this for NPCs that should not reappear after
+    /// a peaceful resolution (e.g., `"eonir_relic_returned"` prevents Eonir from
+    /// respawning after the party negotiates the return of the relic).
+    ///
+    /// `#[serde(default)]` ensures all existing RON files without this field
+    /// continue to deserialize correctly.
+    #[serde(default)]
+    pub suppress_flag: Option<String>,
 }
 
 impl NpcDefinition {
@@ -370,6 +452,8 @@ impl NpcDefinition {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -419,6 +503,8 @@ impl NpcDefinition {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -472,6 +558,8 @@ impl NpcDefinition {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -521,6 +609,8 @@ impl NpcDefinition {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -579,6 +669,8 @@ impl NpcDefinition {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         }
     }
 
@@ -955,6 +1047,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1104,6 +1198,8 @@ NpcDefinition(
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         assert_eq!(npc.id, "complete_npc");
@@ -1162,6 +1258,8 @@ NpcDefinition(
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1374,6 +1472,8 @@ NpcDefinition(
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&priest).expect("Failed to serialize");
@@ -1415,6 +1515,8 @@ NpcDefinition(
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1564,5 +1666,127 @@ NpcDefinition(
         );
         assert_eq!(deserialized.skill_training_fee_base, Some(150));
         assert_eq!(deserialized.skill_training_max_rank, Some(20));
+    }
+
+    // ===== NpcCombatSwitch tests =====
+
+    #[test]
+    fn test_npc_definition_combat_switch_defaults_to_none() {
+        // A minimal NpcDefinition without combat_switch deserialises with combat_switch == None.
+        let ron_str = r#"
+NpcDefinition(
+    id: "old_npc",
+    name: "Old NPC",
+    portrait_id: "portrait.png",
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(
+            npc.combat_switch.is_none(),
+            "combat_switch should default to None for RON files without the field"
+        );
+    }
+
+    #[test]
+    fn test_npc_combat_switch_round_trip() {
+        use crate::domain::combat::types::CombatEventType;
+
+        let switch = NpcCombatSwitch {
+            trigger_flag: "eonir_combat_triggered".to_string(),
+            monster_id: 42,
+            defeat_flag: Some("eonir_defeated".to_string()),
+            combat_type: CombatEventType::Boss,
+        };
+
+        let serialized = ron::to_string(&switch).expect("Failed to serialize NpcCombatSwitch");
+        let deserialized: NpcCombatSwitch =
+            ron::from_str(&serialized).expect("Failed to deserialize NpcCombatSwitch");
+
+        assert_eq!(switch, deserialized);
+        assert_eq!(deserialized.trigger_flag, "eonir_combat_triggered");
+        assert_eq!(deserialized.monster_id, 42);
+        assert_eq!(deserialized.defeat_flag, Some("eonir_defeated".to_string()));
+        assert_eq!(deserialized.combat_type, CombatEventType::Boss);
+    }
+
+    #[test]
+    fn test_npc_combat_switch_defaults_combat_type_to_normal() {
+        use crate::domain::combat::types::CombatEventType;
+
+        // A RON block with only trigger_flag and monster_id; combat_type should
+        // default to CombatEventType::Normal via #[serde(default)].
+        let ron_str = r#"
+NpcCombatSwitch(
+    trigger_flag: "gate_keeper_triggered",
+    monster_id: 7,
+)
+"#;
+        let switch: NpcCombatSwitch = ron::from_str(ron_str)
+            .expect("Failed to deserialize NpcCombatSwitch without combat_type");
+        assert_eq!(
+            switch.combat_type,
+            CombatEventType::Normal,
+            "combat_type must default to Normal when omitted from RON"
+        );
+        assert_eq!(switch.trigger_flag, "gate_keeper_triggered");
+        assert_eq!(switch.monster_id, 7);
+        assert!(switch.defeat_flag.is_none());
+    }
+
+    // ── Phase 4: suppress_flag tests ──────────────────────────────────────────
+
+    /// A minimal `NpcDefinition` without `suppress_flag` field deserialises with
+    /// `suppress_flag == None` (backward compat with all existing RON files).
+    #[test]
+    fn test_npc_definition_suppress_flag_defaults_to_none() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "legacy_npc",
+    name: "Legacy NPC",
+    portrait_id: "portrait.png",
+)
+"#;
+        let npc: NpcDefinition =
+            ron::from_str(ron_str).expect("Failed to deserialize legacy format");
+        assert!(
+            npc.suppress_flag.is_none(),
+            "suppress_flag should default to None for RON files without the field"
+        );
+    }
+
+    /// A `NpcDefinition` with `suppress_flag: Some("eonir_relic_returned")` round-trips through RON.
+    #[test]
+    fn test_npc_definition_suppress_flag_round_trip() {
+        use crate::application::GlobalFlags;
+
+        let ron_str = r#"
+NpcDefinition(
+    id: "eonir",
+    name: "Eonir the Still",
+    portrait_id: "eonir",
+    suppress_flag: Some("eonir_relic_returned"),
+)
+"#;
+        let npc: NpcDefinition =
+            ron::from_str(ron_str).expect("Failed to deserialize NPC with suppress_flag");
+        assert_eq!(
+            npc.suppress_flag,
+            Some("eonir_relic_returned".to_string()),
+            "suppress_flag must deserialize correctly"
+        );
+
+        // Validate the spawn-guard predicate: flag set → suppress, flag absent → allow.
+        let mut flags_set = GlobalFlags::new();
+        flags_set.set("eonir_relic_returned", true);
+        assert!(
+            flags_set.get(npc.suppress_flag.as_ref().unwrap()),
+            "Spawn guard must suppress when suppress_flag is true"
+        );
+
+        let flags_absent = GlobalFlags::new();
+        assert!(
+            !flags_absent.get(npc.suppress_flag.as_ref().unwrap()),
+            "Spawn guard must allow spawn when suppress_flag is false/unset"
+        );
     }
 }
