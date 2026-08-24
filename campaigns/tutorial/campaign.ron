@@ -4,7 +4,7 @@ CampaignMetadata(
     version: "1.0.0",
     author: "Brett Smith",
     description: "Tutorial Campaign",
-    engine_version: "0.1.0",
+    engine_version: "1.0.0",
     starting_map: "1",
     starting_position: (9, 17),
     starting_direction: "North",

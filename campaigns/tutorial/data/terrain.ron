@@ -1,0 +1,150 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+// Tutorial campaign terrain definitions.
+//
+// The engine provides twelve built-in terrain types (IDs 13000–13011) from
+// data/terrain.ron. This campaign overrides the nine built-in terrains it
+// actually uses (13000–13008) to confirm they are backed by local copies of
+// each texture found in assets/textures/terrain/.  The three built-in terrains
+// not used by any tutorial map (Sand 13009, Snow 13010, Ice 13011) are left
+// to the engine defaults and have no local texture assets.
+//
+// Campaign-specific terrain starts at ID 13100 by convention.
+//
+// TerrainMeshStyle variants: Flat, Water, Mountain
+// TerrainVegetation variants: None, GrassCover, Forest
+
+[
+    // ── Ground (13000) ────────────────────────────────────────────────────────
+    (
+        id: 13000,
+        name: "Ground",
+        texture_path: "assets/textures/terrain/ground.png",
+        roughness: 0.95,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.6, 0.5, 0.4),
+    ),
+
+    // ── Grass (13001) ─────────────────────────────────────────────────────────
+    (
+        id: 13001,
+        name: "Grass",
+        texture_path: "assets/textures/terrain/grass.png",
+        roughness: 0.9,
+        mesh_style: Flat,
+        vegetation: GrassCover,
+        blocked: false,
+        height: 0.0,
+        color: (0.3, 0.6, 0.2),
+    ),
+
+    // ── Water (13002) ─────────────────────────────────────────────────────────
+    (
+        id: 13002,
+        name: "Water",
+        texture_path: "assets/textures/terrain/water.png",
+        roughness: 0.1,
+        mesh_style: Water,
+        vegetation: None,
+        blocked: true,
+        height: 0.0,
+        color: (0.1, 0.3, 0.8),
+    ),
+
+    // ── Lava (13003) ──────────────────────────────────────────────────────────
+    (
+        id: 13003,
+        name: "Lava",
+        texture_path: "assets/textures/terrain/lava.png",
+        roughness: 0.6,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.8, 0.3, 0.2),
+    ),
+
+    // ── Swamp (13004) ─────────────────────────────────────────────────────────
+    (
+        id: 13004,
+        name: "Swamp",
+        texture_path: "assets/textures/terrain/swamp.png",
+        roughness: 0.88,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.35, 0.3, 0.2),
+    ),
+
+    // ── Stone (13005) ─────────────────────────────────────────────────────────
+    (
+        id: 13005,
+        name: "Stone",
+        texture_path: "assets/textures/terrain/stone.png",
+        roughness: 0.75,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.5, 0.5, 0.5),
+    ),
+
+    // ── Dirt (13006) ──────────────────────────────────────────────────────────
+    (
+        id: 13006,
+        name: "Dirt",
+        texture_path: "assets/textures/terrain/dirt.png",
+        roughness: 0.92,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.55, 0.4, 0.25),
+    ),
+
+    // ── Forest (13007) ────────────────────────────────────────────────────────
+    (
+        id: 13007,
+        name: "Forest",
+        texture_path: "assets/textures/terrain/forest_floor.png",
+        roughness: 0.9,
+        mesh_style: Flat,
+        vegetation: Forest,
+        blocked: false,
+        height: 2.2,
+        color: (0.1, 0.4, 0.1),
+    ),
+
+    // ── Mountain (13008) ──────────────────────────────────────────────────────
+    (
+        id: 13008,
+        name: "Mountain",
+        texture_path: "assets/textures/terrain/mountain.png",
+        roughness: 0.85,
+        mesh_style: Mountain,
+        vegetation: None,
+        blocked: true,
+        height: 3.0,
+        color: (0.4, 0.4, 0.4),
+    ),
+
+    // ── Ashvale Stone (13100) ─────────────────────────────────────────────────
+    // Campaign-specific terrain: a darker, weathered stone unique to Ashvale.
+    // Uses the same stone.png texture as 13005 but with a warmer, darker tint.
+    (
+        id: 13100,
+        name: "Ashvale Stone",
+        texture_path: "assets/textures/terrain/stone.png",
+        roughness: 0.82,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.35, 0.30, 0.28),
+    ),
+]
