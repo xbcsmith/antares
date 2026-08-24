@@ -1,3 +1,300 @@
+## Phase 2: Terrain Externalization — Replace `TerrainType` with `TerrainId` in Domain Types
+
+### Summary
+
+Removed the closed `TerrainType` enum entirely and replaced it with the open numeric `TerrainId = u32` system across all layers of the codebase — domain, game resources, game systems, and SDK. This is a breaking, non-backwards-compatible migration. All 15 map RON files (7 test-campaign + 8 tutorial) were migrated to use numeric terrain IDs. All 5552 tests pass.
+
+### Deliverables
+
+- [x] `TerrainId`, `TERRAIN_ID_MIN` already present from Phase 1
+- [x] `TerrainType` enum **deleted** from `src/domain/world/types.rs`
+- [x] `Tile.terrain: TerrainId` (was `TerrainType`)
+- [x] `Tile.blocked` remains a stored, mutable `bool` field; seeding logic in `Tile::new` changed
+- [x] `Tile::new` takes `&TerrainDatabase`; all call sites updated
+- [x] `TileVisualMetadata::effective_height` takes `terrain_height: f32` instead of `TerrainType`
+- [x] `TileVisualMetadata::mesh_dimensions` and `mesh_y_position` updated to match
+- [x] `check_tile_blocked` / `Tile::is_blocked()` unchanged (no `db` parameter)
+- [x] `TileCode` → built-in `TerrainId` mapping in `blueprint.rs`
+- [x] `EncounterTable.terrain_modifiers: BTreeMap<TerrainId, f32>`
+- [x] `TerrainType` removed from `mod.rs` re-exports
+- [x] All domain-layer, game-layer, and SDK-layer tests pass
+- [x] Map RON files migrated (Phase 6.1 inlined)
+
+### Files Changed
+
+**`src/domain/world/terrain.rs`**
+- Added 12 built-in `TerrainId` constants (`TERRAIN_GROUND` = 13000 through `TERRAIN_ICE` = 13011).
+- Added `builtin_terrain_db() -> TerrainDatabase` returning all 12 definitions pre-loaded (Water and Mountain have `blocked: true`).
+- Added `builtin_terrain_definitions() -> Vec<TerrainDefinition>` helper.
+- Added tests: `test_builtin_terrain_db_has_all_twelve_entries`, `test_builtin_terrain_db_water_and_mountain_are_blocked`, `test_terrain_new_seeds_blocked_from_db`.
+
+**`src/domain/world/types.rs`**
+- Deleted `TerrainType` enum entirely.
+- `Tile.terrain` changed from `TerrainType` to `TerrainId`.
+- `Tile::new` signature changed to `(x, y, terrain: TerrainId, wall_type: WallType, db: &TerrainDatabase) -> Self`; seeds `blocked` from `db.get_by_id(terrain).is_some_and(|d| d.blocked) || wall_type == WallType::Normal`.
+- `Map::new()` and `Map::resize()` API unchanged; internally create tiles via struct literals using `TERRAIN_GROUND` (avoids requiring `&TerrainDatabase` at the API level).
+- `TileVisualMetadata::effective_height(&self, wall_type: WallType, terrain_height: f32) -> f32`.
+- `TileVisualMetadata::mesh_dimensions(&self, wall_type: WallType, terrain_height: f32) -> (f32, f32, f32)`.
+- `TileVisualMetadata::mesh_y_position(&self, wall_type: WallType, terrain_height: f32) -> f32`.
+- `EncounterTable.terrain_modifiers: BTreeMap<TerrainId, f32>`.
+- All unit tests updated; added `test_tile_new_seeds_blocked_from_terrain_database` and `test_effective_height_uses_supplied_terrain_height`.
+
+**`src/domain/world/blueprint.rs`**
+- Removed `impl From<MapBlueprint> for Map`; replaced with `impl MapBlueprint { pub fn into_map(self, db: &TerrainDatabase) -> Map }`.
+- `TileCode` mapping now emits built-in `TerrainId` constants (TERRAIN_GROUND through TERRAIN_MOUNTAIN).
+- Module doc notes custom terrain requires full-map RON, not `TileCode`.
+- Added `test_tile_code_maps_to_builtin_terrain_ids` test.
+- Blueprint tests updated to use `bp.into_map(&builtin_terrain_db())`.
+
+**`src/domain/world/mod.rs`**
+- Removed `TerrainType` from `pub use types::{...}`.
+- Extended `pub use terrain::{...}` to include all 12 `TERRAIN_*` constants, `builtin_terrain_db`, and `builtin_terrain_definitions`.
+
+**`src/domain/world/movement.rs`**
+- Updated doc comment and test to use `TERRAIN_WATER` constant instead of `TerrainType::Water`.
+
+**`src/game/resources/terrain_material_cache.rs`** (Phase 4.1 inlined)
+- Rewrote `TerrainMaterialCache` struct from nine named fields to `items: HashMap<TerrainId, Handle<StandardMaterial>>`.
+- `get(terrain: TerrainId)` and `set(terrain: TerrainId, handle)` methods.
+- `is_fully_loaded()` checks the nine built-in IDs 13000–13008.
+- All tests updated to use `TERRAIN_*` constants.
+
+**`src/game/systems/terrain_materials.rs`** (Phase 4.2 inlined)
+- `texture_path_for(terrain: TerrainId) -> &'static str` — uses constant match with `_ => TEXTURE_GROUND` fallback.
+- `roughness_for(terrain: TerrainId) -> f32` — uses constant match with `_ => 0.80` fallback.
+- Startup and debug systems updated to use `TerrainId` arrays.
+
+**`src/game/systems/map.rs`** (Phase 4.3/4.4 inlined)
+- `should_spawn_grass_cover(terrain: TerrainId)` — matches on `TERRAIN_FOREST | TERRAIN_GRASS`.
+- Added `terrain_height_for_id(terrain: TerrainId) -> f32` helper (Mountain=3.0, Forest=2.2, others=0.0).
+- `terrain_material_with_optional_tint` takes `TerrainId`.
+- All `TerrainType::*` match arms replaced with `TERRAIN_*` constants in `spawn_map`.
+- All `mesh_dimensions` / `mesh_y_position` calls updated to pass `terrain_height_for_id(tile.terrain)`.
+- Wall-tint color match gains `_ => floor_rgb` wildcard for campaign-defined terrain.
+- All tests updated.
+
+**`src/game/systems/hud.rs`**
+- `automap_tile_color` uses `TERRAIN_WATER`, `TERRAIN_GRASS`, `TERRAIN_FOREST` constants.
+
+**`src/game/systems/item_world_events.rs`**
+- Terrain check in `spawn_dropped_item_system` uses `TERRAIN_GRASS | TERRAIN_FOREST`.
+
+**`src/game/systems/vegetation_placement.rs`**
+- All `TerrainType` references replaced with `TERRAIN_FOREST`, `TERRAIN_GRASS` constants.
+- `should_plan_understory_shrubs(terrain: TerrainId, ...)`.
+- Test helper `forest_tile()` uses `builtin_terrain_db()`.
+
+**`src/game/systems/input/exploration_movement.rs`**
+- Walk on Water check uses `t.terrain == TERRAIN_WATER`.
+
+**`src/game/systems/exploration_spells.rs`**
+- Test helper uses `Tile::new(3, 3, TERRAIN_MOUNTAIN, WallType::None, &db)`.
+
+**`src/sdk/cli/map_builder.rs`** (Phase 5.1 inlined)
+- `MapBuilder` struct gains `terrain_db: TerrainDatabase` field (initialized with `builtin_terrain_db()`).
+- `set_tile` / `fill_tiles` take `TerrainId`; pass `&self.terrain_db` to `Tile::new`.
+- `bulk_set_for_terrains` uses `Vec<TerrainId>`.
+- `show_map` match uses `TERRAIN_*` constants with `_ => '?'` fallback.
+- `parse_terrain(s: &str) -> TerrainId` accepts both names and numeric IDs; adds Sand/Snow arms.
+
+**`src/sdk/cli/map_validator.rs`**
+- Test helpers use `builtin_terrain_db()` and `TERRAIN_GRASS`.
+
+**`src/sdk/templates.rs`** (Phase 5.3 inlined)
+- `town_map`, `dungeon_map`, `forest_map` use `builtin_terrain_db()` and `TERRAIN_*` constants.
+
+**Map RON files** (Phase 6.1 inlined)
+- 7 test-campaign maps + 8 tutorial maps migrated: `terrain: Grass` → `terrain: 13001`, etc.
+
+### Architecture Compliance
+
+- `TerrainType` deleted; zero references remain in `src/`.
+- `Tile.blocked` remains a stored, mutable field; `Tile::new` seeds it from `TerrainDatabase`.
+- `check_tile_blocked` / `Tile::is_blocked()` take no `db` parameter (unchanged).
+- `Map::new()` API unchanged (creates tiles directly to avoid requiring a database).
+- `MapBlueprint::into_map` properly uses `&TerrainDatabase` for blocked seeding.
+- All constant IDs are within the reserved 13000–13011 range.
+
+### Quality Gates
+
+```
+cargo fmt --all             → clean
+cargo check --all-targets   → 0 errors
+cargo clippy -- -D warnings → 0 warnings
+cargo nextest run           → 5552 passed, 0 failed
+```
+
+---
+
+(`u32`) and `TERRAIN_*` constants in place of the removed `TerrainType` enum.
+The cache is now a `HashMap<TerrainId, Handle<StandardMaterial>>` instead of a
+struct with nine named `Option<Handle<StandardMaterial>>` fields, which allows
+campaign-defined terrain IDs to be cached without engine changes.
+
+### Files Changed
+
+**`src/game/resources/terrain_material_cache.rs`**
+
+- Replaced `use crate::domain::world::TerrainType` with `crate::domain::types::TerrainId`
+  and the nine `TERRAIN_*` constants from `crate::domain::world::terrain`.
+- Replaced nine named `Option<Handle<StandardMaterial>>` fields with a single
+  `items: HashMap<TerrainId, Handle<StandardMaterial>>` field.
+- `get(terrain: TerrainType)` → `get(terrain: TerrainId)`: now calls `HashMap::get`.
+- `set(terrain: TerrainType, handle)` → `set(terrain: TerrainId, handle)`: now calls
+  `HashMap::insert`.
+- `is_fully_loaded()`: iterates over nine built-in `TERRAIN_*` IDs (Ground–Forest,
+  13000–13007) using `HashMap::contains_key`.
+- Tests: replaced `all_terrain_types()` helper returning `[TerrainType; 9]` with
+  `all_terrain_ids()` returning `[TerrainId; 9]`; updated all assertions to use
+  `TERRAIN_*` constants instead of `TerrainType::*` variants.
+
+**`src/game/systems/terrain_materials.rs`**
+
+- Replaced `use crate::domain::world::TerrainType` with `TerrainId` and the nine
+  `TERRAIN_*` constants.
+- `texture_path_for(terrain: TerrainType)` → `texture_path_for(terrain: TerrainId)`:
+  match arms now use `TERRAIN_*` constants; added `_ => TEXTURE_GROUND` fallback
+  for campaign-defined terrain.
+- `roughness_for(terrain: TerrainType)` → `roughness_for(terrain: TerrainId)`:
+  match arms use `TERRAIN_*` constants; added `_ => 0.80` fallback.
+- `load_terrain_materials_system`: `terrain_types` array renamed to `terrain_ids`
+  with type annotation `[TerrainId; 9]`.
+- `all_terrain_types()` helper renamed to `all_terrain_ids()` and returns
+  `[TerrainId; 9]`.
+- `debug_terrain_texture_bindings_system`: `terrain_types` array renamed to
+  `terrain_ids: [TerrainId; 9]`; log format strings updated from `{:?}` to `{}`.
+- Tests: all `texture_path_for(TerrainType::*)` calls updated to `TERRAIN_*`
+  constants; `roughness_for` tests updated similarly; loop helpers use
+  `all_terrain_ids()`.
+
+---
+
+## Phase 2: Terrain Externalization — Game System Migration
+
+### Summary
+
+Updated 6 game-system files to use `TerrainId` (a `u32` type alias) and built-in
+`TERRAIN_*` constants in place of the removed `TerrainType` enum. Added the
+`terrain_height_for_id` helper to `map.rs` as a temporary bridge until the
+`TerrainDatabase` is available as a Bevy resource (Phase 3).
+
+### Files Changed
+
+**`src/game/systems/map.rs`**
+
+- Added `use crate::domain::world::terrain::{TERRAIN_*}` import at module level.
+- Changed `should_spawn_grass_cover` parameter from `world::TerrainType` to
+  `crate::domain::types::TerrainId`; body now uses `TERRAIN_FOREST | TERRAIN_GRASS`.
+- Added `terrain_height_for_id(terrain: TerrainId) -> f32` helper (Mountain → 3.0,
+  Forest → 2.2, others → 0.0).
+- Changed `terrain_material_with_optional_tint` first parameter to `TerrainId`.
+- Replaced all `terrain_cache.get(world::TerrainType::*)` calls with `TERRAIN_*`
+  constants in `spawn_map`.
+- Replaced exhaustive `TerrainType` match arms in the terrain and wall-tint
+  dispatches with `TERRAIN_*` constants; added `_ => floor_rgb` fallback arm.
+- Changed `tile.visual.mesh_dimensions(tile.terrain, tile.wall_type)` →
+  `tile.visual.mesh_dimensions(tile.wall_type, terrain_height_for_id(tile.terrain))`
+  in Mountain branch and both wall branches (Normal, Torch).
+- Changed `tile.visual.mesh_y_position` calls analogously.
+- Updated all test cases: added terrain constant imports to the test module;
+  updated `Tile::new` calls to use `TERRAIN_*` constants and `builtin_terrain_db()`;
+  updated `cache.set`/`get` and `terrain_material_with_optional_tint` calls.
+
+**`src/game/systems/hud.rs`**
+
+- `automap_tile_color`: replaced `use crate::domain::world::{TerrainType, WallType}`
+  with `use crate::domain::world::terrain::{TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_WATER}`
+  and `use crate::domain::world::WallType`; updated match arms.
+- `automap_tests` module: replaced `use crate::domain::world::{Map, TerrainType}`
+  with separate `Map` and `TERRAIN_GROUND` imports; changed
+  `tile.terrain = TerrainType::Ground` to `tile.terrain = TERRAIN_GROUND`.
+
+**`src/game/systems/item_world_events.rs`**
+
+- Replaced `use crate::domain::world::{MapEvent, TerrainType}` with separate
+  `MapEvent` import and new `use crate::domain::world::terrain::{TERRAIN_FOREST,
+  TERRAIN_GRASS, TERRAIN_GROUND}`.
+- Updated `spawn_dropped_item_system`: `.unwrap_or(TerrainType::Ground)` →
+  `.unwrap_or(TERRAIN_GROUND)`; match arms updated to `TERRAIN_GRASS | TERRAIN_FOREST`.
+
+**`src/game/systems/vegetation_placement.rs`**
+
+- Updated imports: replaced `TerrainType` with `TerrainId` and terrain constants.
+- Updated `tile_vegetation_plan`: `tile.terrain == TerrainType::Forest` →
+  `tile.terrain == TERRAIN_FOREST`.
+- Updated `supports_vegetation_cover`: `matches!(... TerrainType::Forest | TerrainType::Grass)`
+  → `matches!(... TERRAIN_FOREST | TERRAIN_GRASS)`.
+- Updated `should_plan_understory_shrubs` parameter from `TerrainType` to `TerrainId`;
+  body uses `TERRAIN_FOREST`.
+- Updated doc-comment examples to use `builtin_terrain_db()` and `TERRAIN_*` constants.
+- Test module: updated `forest_tile()` to call `builtin_terrain_db()` and pass `&db`
+  to `Tile::new`.
+
+**`src/game/systems/input/exploration_movement.rs`**
+
+- Replaced `TerrainType` import with `crate::domain::world::terrain::TERRAIN_WATER`.
+- `should_override_water`: changed `matches!(t.terrain, TerrainType::Water)` →
+  `t.terrain == TERRAIN_WATER`.
+- Test `make_world_with_water_tile`: replaced `TerrainType::Water` with `TERRAIN_WATER`.
+
+**`src/game/systems/exploration_spells.rs`**
+
+- Test `test_jump_target_invalid_for_blocked_tile`: replaced `TerrainType::Mountain`
+  with `TERRAIN_MOUNTAIN`; added `builtin_terrain_db()` call; updated `Tile::new`
+  signature to include `&db`.
+
+---
+
+## Phase 2: Terrain Externalization — SDK Migration
+
+### Summary
+
+Updated SDK files to use `TerrainId` (a `u32` type alias) and built-in
+`TERRAIN_*` constants instead of the deleted `TerrainType` enum. All
+`Tile::new` calls now pass a `&TerrainDatabase` so the constructor can
+seed the tile's `blocked` flag from the data-driven terrain registry.
+
+### Files Changed
+
+**`src/sdk/cli/map_builder.rs`**
+
+- Replaced `use crate::domain::world::TerrainType` import with
+  `TerrainId` from `crate::domain::types` and terrain constants/helpers
+  from `crate::domain::world::terrain`.
+- Added `terrain_db: TerrainDatabase` field to `MapBuilder`; initialised
+  via `builtin_terrain_db()` in `MapBuilder::new()`.
+- Updated `set_tile` and `fill_tiles` signatures: `terrain: TerrainType`
+  → `terrain: TerrainId`; `Tile::new` calls now forward `&self.terrain_db`.
+- Updated `bulk_set_for_terrains`: `Vec<TerrainType>` → `Vec<TerrainId>`.
+- Updated `show_map` terrain match from `TerrainType` enum arms to
+  `TERRAIN_*` constant arms; added `TERRAIN_SAND`, `TERRAIN_SNOW`, and a
+  wildcard `_ => '?'` arm for campaign-defined terrain.
+- Replaced `parse_terrain` with a new version that accepts numeric ID
+  strings (e.g. `"13001"`) for custom campaign terrain, and adds
+  `"sand"` and `"snow"` arms.
+- Updated all test assertions to use `TERRAIN_*` constants; added
+  explicit terrain imports to the test module.
+
+**`src/sdk/cli/map_validator.rs`**
+
+- Updated three test helpers (`test_validate_structure_oversized_map`,
+  `make_minimal_map`, `make_map_with_all_event_variants`):
+  - Replaced local `use crate::domain::world::TerrainType` with
+    `use crate::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS}`.
+  - Created a single `db = builtin_terrain_db()` per helper function and
+    passed `&db` to all `Tile::new` calls.
+
+**`src/sdk/templates.rs`**
+
+- Replaced `use crate::domain::world::TerrainType` with
+  `crate::domain::world::terrain::{builtin_terrain_db, TERRAIN_FOREST,
+  TERRAIN_GRASS, TERRAIN_STONE}`.
+- Updated `town_map`, `dungeon_map`, and `forest_map`: each now creates
+  `db = builtin_terrain_db()` once before the tile iterator and passes
+  `&db` to `Tile::new`.
+
+---
+
 ## Phase 1: Terrain Externalization — Domain Foundation
 
 ### Summary

@@ -6,12 +6,16 @@
 //! Tests RON serialization/deserialization, backward compatibility,
 //! and example map loading.
 
-use antares::domain::world::{Map, TerrainType, Tile, TileVisualMetadata, WallType};
+use antares::domain::world::terrain::{
+    builtin_terrain_db, TERRAIN_FOREST, TERRAIN_GROUND, TERRAIN_MOUNTAIN,
+};
+use antares::domain::world::{Map, Tile, TileVisualMetadata, WallType};
 
 #[test]
 fn test_ron_round_trip_with_visual() {
     // Create a tile with visual metadata
-    let mut tile = Tile::new(5, 10, TerrainType::Ground, WallType::Normal);
+    let db = builtin_terrain_db();
+    let mut tile = Tile::new(5, 10, TERRAIN_GROUND, WallType::Normal, &db);
     tile.visual = TileVisualMetadata {
         height: Some(1.5),
         width_x: None,
@@ -41,7 +45,7 @@ fn test_ron_round_trip_with_visual() {
     // Verify all fields match
     assert_eq!(deserialized.x, 5);
     assert_eq!(deserialized.y, 10);
-    assert_eq!(deserialized.terrain, TerrainType::Ground);
+    assert_eq!(deserialized.terrain, TERRAIN_GROUND);
     assert_eq!(deserialized.wall_type, WallType::Normal);
     assert_eq!(deserialized.visual.height, Some(1.5));
     assert_eq!(deserialized.visual.width_x, None);
@@ -55,7 +59,7 @@ fn test_ron_round_trip_with_visual() {
 fn test_ron_backward_compat_without_visual() {
     // Old-style RON without visual field
     let old_ron = r#"(
-        terrain: Ground,
+        terrain: 13000,
         wall_type: Normal,
         blocked: false,
         is_special: false,
@@ -71,7 +75,7 @@ fn test_ron_backward_compat_without_visual() {
 
     assert_eq!(tile.x, 3);
     assert_eq!(tile.y, 7);
-    assert_eq!(tile.terrain, TerrainType::Ground);
+    assert_eq!(tile.terrain, TERRAIN_GROUND);
     assert_eq!(tile.wall_type, WallType::Normal);
 
     // Visual metadata should be default (all None)
@@ -87,7 +91,7 @@ fn test_ron_backward_compat_without_visual() {
 fn test_ron_partial_visual_metadata() {
     // RON with some visual fields set, others None
     let partial_ron = r#"(
-        terrain: Mountain,
+        terrain: 13008,
         wall_type: None,
         blocked: true,
         is_special: false,
@@ -108,7 +112,7 @@ fn test_ron_partial_visual_metadata() {
 
     let tile: Tile = ron::from_str(partial_ron).expect("Failed to deserialize partial visual");
 
-    assert_eq!(tile.terrain, TerrainType::Mountain);
+    assert_eq!(tile.terrain, TERRAIN_MOUNTAIN);
     assert_eq!(tile.visual.height, Some(4.0));
     assert_eq!(tile.visual.width_x, None);
     assert_eq!(tile.visual.width_z, None);
@@ -157,7 +161,7 @@ fn test_example_map_loads() {
         .iter()
         .find(|t| t.x == 5 && t.y == 4)
         .expect("Small hill not found");
-    assert_eq!(small_hill.terrain, TerrainType::Mountain);
+    assert_eq!(small_hill.terrain, TERRAIN_MOUNTAIN);
     assert_eq!(small_hill.visual.height, Some(2.0));
 
     let tall_mountain = map
@@ -188,7 +192,7 @@ fn test_example_map_loads() {
         .iter()
         .find(|t| t.x == 15 && t.y == 4)
         .expect("Small tree not found");
-    assert_eq!(small_tree.terrain, TerrainType::Forest);
+    assert_eq!(small_tree.terrain, TERRAIN_FOREST);
     assert_eq!(small_tree.visual.scale, Some(0.5));
 
     let large_tree = map
@@ -284,14 +288,15 @@ fn test_visual_metadata_default_values() {
 
 #[test]
 fn test_tile_builder_with_visual_metadata() {
-    let tile = Tile::new(10, 15, TerrainType::Mountain, WallType::None)
+    let db = builtin_terrain_db();
+    let tile = Tile::new(10, 15, TERRAIN_MOUNTAIN, WallType::None, &db)
         .with_height(5.0)
         .with_color_tint(0.4, 0.35, 0.3)
         .with_scale(1.5);
 
     assert_eq!(tile.x, 10);
     assert_eq!(tile.y, 15);
-    assert_eq!(tile.terrain, TerrainType::Mountain);
+    assert_eq!(tile.terrain, TERRAIN_MOUNTAIN);
     assert_eq!(tile.visual.height, Some(5.0));
     assert_eq!(tile.visual.color_tint, Some((0.4, 0.35, 0.3)));
     assert_eq!(tile.visual.scale, Some(1.5));
@@ -302,29 +307,14 @@ fn test_visual_metadata_effective_values() {
     let mut metadata = TileVisualMetadata::default();
 
     // Test effective height with defaults
-    assert_eq!(
-        metadata.effective_height(TerrainType::Ground, WallType::Normal),
-        2.5
-    );
-    assert_eq!(
-        metadata.effective_height(TerrainType::Mountain, WallType::None),
-        3.0
-    );
-    assert_eq!(
-        metadata.effective_height(TerrainType::Forest, WallType::None),
-        2.2
-    );
+    assert_eq!(metadata.effective_height(WallType::Normal, 0.0), 2.5);
+    assert_eq!(metadata.effective_height(WallType::None, 3.0), 3.0);
+    assert_eq!(metadata.effective_height(WallType::None, 2.2), 2.2);
 
     // Test with custom height
     metadata.height = Some(4.5);
-    assert_eq!(
-        metadata.effective_height(TerrainType::Ground, WallType::Normal),
-        4.5
-    );
-    assert_eq!(
-        metadata.effective_height(TerrainType::Mountain, WallType::None),
-        4.5
-    );
+    assert_eq!(metadata.effective_height(WallType::Normal, 0.0), 4.5);
+    assert_eq!(metadata.effective_height(WallType::None, 3.0), 4.5);
 
     // Test effective dimensions
     assert_eq!(metadata.effective_width_x(), 1.0);
@@ -349,8 +339,7 @@ fn test_mesh_dimensions_calculation() {
     let mut metadata = TileVisualMetadata::default();
 
     // Test default dimensions for normal wall
-    let (width_x, height, width_z) =
-        metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+    let (width_x, height, width_z) = metadata.mesh_dimensions(WallType::Normal, 0.0);
     assert_eq!(width_x, 1.0);
     assert_eq!(height, 2.5);
     assert_eq!(width_z, 1.0);
@@ -361,8 +350,7 @@ fn test_mesh_dimensions_calculation() {
     metadata.width_z = Some(0.6);
     metadata.scale = Some(1.5);
 
-    let (width_x, height, width_z) =
-        metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+    let (width_x, height, width_z) = metadata.mesh_dimensions(WallType::Normal, 0.0);
     assert_eq!(width_x, 0.8 * 1.5);
     assert_eq!(height, 3.0 * 1.5);
     assert_eq!(width_z, 0.6 * 1.5);
@@ -373,14 +361,14 @@ fn test_mesh_y_position_calculation() {
     let mut metadata = TileVisualMetadata::default();
 
     // Test default Y position (half height, no offset)
-    let y_pos = metadata.mesh_y_position(TerrainType::Ground, WallType::Normal);
+    let y_pos = metadata.mesh_y_position(WallType::Normal, 0.0);
     assert_eq!(y_pos, 2.5 / 2.0); // height / 2
 
     // Test with custom height and offset
     metadata.height = Some(4.0);
     metadata.y_offset = Some(0.5);
 
-    let y_pos = metadata.mesh_y_position(TerrainType::Ground, WallType::Normal);
+    let y_pos = metadata.mesh_y_position(WallType::Normal, 0.0);
     assert_eq!(y_pos, 4.0 / 2.0 + 0.5); // (height / 2) + offset
 }
 

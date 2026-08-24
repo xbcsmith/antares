@@ -9,10 +9,9 @@
 
 use bevy::prelude::Vec2;
 
-use crate::domain::types::{MapId, Position};
-use crate::domain::world::{
-    GrassDensity, TerrainType, Tile, TileVisualMetadata, TreeType, WallType,
-};
+use crate::domain::types::{MapId, Position, TerrainId};
+use crate::domain::world::terrain::{TERRAIN_FOREST, TERRAIN_GRASS};
+use crate::domain::world::{GrassDensity, Tile, TileVisualMetadata, TreeType, WallType};
 
 /// Offset from integer tile coordinates to the visual tile center.
 pub const TILE_CENTER_OFFSET: f32 = 0.5;
@@ -197,10 +196,12 @@ impl VegetationExclusionZone {
 ///
 /// ```
 /// use antares::domain::types::Position;
-/// use antares::domain::world::{Tile, TerrainType, WallType};
+/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_FOREST};
+/// use antares::domain::world::{Tile, WallType};
 /// use antares::game::systems::vegetation_placement::tile_vegetation_plan;
 ///
-/// let tile = Tile::new(0, 0, TerrainType::Forest, WallType::None);
+/// let db = builtin_terrain_db();
+/// let tile = Tile::new(0, 0, TERRAIN_FOREST, WallType::None, &db);
 /// let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
 /// assert!(plan.tree_anchor.is_some());
 /// ```
@@ -408,10 +409,12 @@ pub fn grass_exclusion_zones(vegetation: &[VegetationAnchor]) -> Vec<VegetationE
 ///
 /// ```
 /// use antares::domain::types::Position;
-/// use antares::domain::world::{Tile, TerrainType, WallType};
+/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS};
+/// use antares::domain::world::{Tile, WallType};
 /// use antares::game::systems::vegetation_placement::tile_vegetation_plan;
 ///
-/// let tile = Tile::new(0, 0, TerrainType::Grass, WallType::None);
+/// let db = builtin_terrain_db();
+/// let tile = Tile::new(0, 0, TERRAIN_GRASS, WallType::None, &db);
 /// let first = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
 /// let second = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
 /// assert_eq!(first, second);
@@ -422,7 +425,7 @@ pub fn tile_vegetation_plan(tile: &Tile, map_id: MapId, position: Position) -> T
     let explicit_tree_type = metadata.tree_type;
     let supports_cover = supports_vegetation_cover(tile);
     let uses_default_forest_tree =
-        explicit_tree_type.is_none() && supports_cover && tile.terrain == TerrainType::Forest;
+        explicit_tree_type.is_none() && supports_cover && tile.terrain == TERRAIN_FOREST;
 
     let tree_anchor = match explicit_tree_type {
         Some(TreeType::Shrub) => None,
@@ -469,11 +472,11 @@ pub fn tile_vegetation_plan(tile: &Tile, map_id: MapId, position: Position) -> T
 fn supports_vegetation_cover(tile: &Tile) -> bool {
     !tile.blocked
         && tile.wall_type == WallType::None
-        && matches!(tile.terrain, TerrainType::Forest | TerrainType::Grass)
+        && matches!(tile.terrain, TERRAIN_FOREST | TERRAIN_GRASS)
 }
 
-fn should_plan_understory_shrubs(terrain: TerrainType, metadata: &TileVisualMetadata) -> bool {
-    terrain == TerrainType::Forest && metadata.foliage_density().clamp(0.0, 2.0) > 0.0
+fn should_plan_understory_shrubs(terrain: TerrainId, metadata: &TileVisualMetadata) -> bool {
+    terrain == TERRAIN_FOREST && metadata.foliage_density().clamp(0.0, 2.0) > 0.0
 }
 
 fn shrub_count_for_metadata(metadata: &TileVisualMetadata) -> usize {
@@ -560,10 +563,12 @@ fn mix_u64(mut value: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::world::terrain::builtin_terrain_db;
     use crate::domain::world::WallType;
 
     fn forest_tile() -> Tile {
-        Tile::new(0, 0, TerrainType::Forest, WallType::None)
+        let db = builtin_terrain_db();
+        Tile::new(0, 0, TERRAIN_FOREST, WallType::None, &db)
     }
 
     #[test]

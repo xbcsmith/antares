@@ -4,8 +4,7 @@
 //! Terrain definition and database support.
 //!
 //! Terrain data represents the fundamental ground type of each map tile.
-//! Unlike the closed [`TerrainType`](crate::domain::world::TerrainType) enum,
-//! terrain definitions are loaded from `data/terrain.ron` into a
+//! Terrain definitions are loaded from `data/terrain.ron` into a
 //! [`TerrainDatabase`] registry, allowing campaign authors to introduce
 //! arbitrary terrain types — including Sand, Snow, and Ice — without engine
 //! code changes.
@@ -475,6 +474,200 @@ impl TerrainDatabase {
     }
 }
 
+// ===== Built-in terrain ID constants =====
+
+/// Built-in terrain ID for Ground (flat, walkable).
+pub const TERRAIN_GROUND: TerrainId = 13_000;
+/// Built-in terrain ID for Grass (flat, walkable, supports grass cover vegetation).
+pub const TERRAIN_GRASS: TerrainId = 13_001;
+/// Built-in terrain ID for Water (water mesh, blocks movement by default).
+pub const TERRAIN_WATER: TerrainId = 13_002;
+/// Built-in terrain ID for Lava (flat, walkable, damages party).
+pub const TERRAIN_LAVA: TerrainId = 13_003;
+/// Built-in terrain ID for Swamp (flat, walkable, slows movement).
+pub const TERRAIN_SWAMP: TerrainId = 13_004;
+/// Built-in terrain ID for Stone (flat, walkable stone floor).
+pub const TERRAIN_STONE: TerrainId = 13_005;
+/// Built-in terrain ID for Dirt (flat, walkable dirt path).
+pub const TERRAIN_DIRT: TerrainId = 13_006;
+/// Built-in terrain ID for Forest (flat, walkable, supports full forest vegetation).
+pub const TERRAIN_FOREST: TerrainId = 13_007;
+/// Built-in terrain ID for Mountain (mountain mesh, blocks movement by default).
+pub const TERRAIN_MOUNTAIN: TerrainId = 13_008;
+/// Built-in terrain ID for Sand (flat, walkable).
+pub const TERRAIN_SAND: TerrainId = 13_009;
+/// Built-in terrain ID for Snow (flat, walkable).
+pub const TERRAIN_SNOW: TerrainId = 13_010;
+/// Built-in terrain ID for Ice (flat, walkable).
+pub const TERRAIN_ICE: TerrainId = 13_011;
+
+/// Returns a [`TerrainDatabase`] pre-populated with all twelve built-in terrain
+/// definitions (Ground through Ice, IDs 13000–13011).
+///
+/// Use this in tests and SDK tooling that need a database but have not yet
+/// loaded a campaign's `terrain.ron`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND, TERRAIN_WATER};
+///
+/// let db = builtin_terrain_db();
+/// assert!(db.has_definition(TERRAIN_GROUND));
+/// assert!(db.get_by_id(TERRAIN_WATER).unwrap().blocked);
+/// ```
+// SAFETY: Built-in terrain definitions carry hardcoded IDs >= TERRAIN_ID_MIN that are
+// guaranteed unique by construction. `add` cannot fail for these entries.
+#[allow(clippy::expect_used)]
+pub fn builtin_terrain_db() -> TerrainDatabase {
+    let mut db = TerrainDatabase::new();
+    for def in builtin_terrain_definitions() {
+        db.add(def)
+            .expect("built-in terrain IDs are unique and valid");
+    }
+    db
+}
+
+/// Returns all twelve built-in [`TerrainDefinition`] entries as a `Vec`.
+///
+/// Prefer [`builtin_terrain_db`] when you need a ready-to-query database.
+pub fn builtin_terrain_definitions() -> Vec<TerrainDefinition> {
+    vec![
+        TerrainDefinition {
+            id: TERRAIN_GROUND,
+            name: "Ground".to_string(),
+            texture_path: "assets/textures/terrain/ground.png".to_string(),
+            roughness: 0.95,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.6_f32, 0.5, 0.4],
+        },
+        TerrainDefinition {
+            id: TERRAIN_GRASS,
+            name: "Grass".to_string(),
+            texture_path: "assets/textures/terrain/grass.png".to_string(),
+            roughness: 0.90,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::GrassCover,
+            blocked: false,
+            height: 0.0,
+            color: [0.3_f32, 0.6, 0.2],
+        },
+        TerrainDefinition {
+            id: TERRAIN_WATER,
+            name: "Water".to_string(),
+            texture_path: "assets/textures/terrain/water.png".to_string(),
+            roughness: 0.10,
+            mesh_style: TerrainMeshStyle::Water,
+            vegetation: TerrainVegetation::None,
+            blocked: true,
+            height: 0.0,
+            color: [0.1_f32, 0.3, 0.8],
+        },
+        TerrainDefinition {
+            id: TERRAIN_LAVA,
+            name: "Lava".to_string(),
+            texture_path: "assets/textures/terrain/lava.png".to_string(),
+            roughness: 0.60,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.8_f32, 0.3, 0.2],
+        },
+        TerrainDefinition {
+            id: TERRAIN_SWAMP,
+            name: "Swamp".to_string(),
+            texture_path: "assets/textures/terrain/swamp.png".to_string(),
+            roughness: 0.88,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.35_f32, 0.3, 0.2],
+        },
+        TerrainDefinition {
+            id: TERRAIN_STONE,
+            name: "Stone".to_string(),
+            texture_path: "assets/textures/terrain/stone.png".to_string(),
+            roughness: 0.75,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.5_f32, 0.5, 0.5],
+        },
+        TerrainDefinition {
+            id: TERRAIN_DIRT,
+            name: "Dirt".to_string(),
+            texture_path: "assets/textures/terrain/dirt.png".to_string(),
+            roughness: 0.92,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.55_f32, 0.4, 0.25],
+        },
+        TerrainDefinition {
+            id: TERRAIN_FOREST,
+            name: "Forest".to_string(),
+            texture_path: "assets/textures/terrain/forest_floor.png".to_string(),
+            roughness: 0.90,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::Forest,
+            blocked: false,
+            height: 2.2,
+            color: [0.1_f32, 0.4, 0.1],
+        },
+        TerrainDefinition {
+            id: TERRAIN_MOUNTAIN,
+            name: "Mountain".to_string(),
+            texture_path: "assets/textures/terrain/mountain.png".to_string(),
+            roughness: 0.85,
+            mesh_style: TerrainMeshStyle::Mountain,
+            vegetation: TerrainVegetation::None,
+            blocked: true,
+            height: 3.0,
+            color: [0.4_f32, 0.4, 0.4],
+        },
+        TerrainDefinition {
+            id: TERRAIN_SAND,
+            name: "Sand".to_string(),
+            texture_path: "assets/textures/terrain/sand.png".to_string(),
+            roughness: 0.95,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.9_f32, 0.85, 0.6],
+        },
+        TerrainDefinition {
+            id: TERRAIN_SNOW,
+            name: "Snow".to_string(),
+            texture_path: "assets/textures/terrain/snow.png".to_string(),
+            roughness: 0.95,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.95_f32, 0.95, 1.0],
+        },
+        TerrainDefinition {
+            id: TERRAIN_ICE,
+            name: "Ice".to_string(),
+            texture_path: "assets/textures/terrain/ice.png".to_string(),
+            roughness: 0.05,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.8_f32, 0.9, 1.0],
+        },
+    ]
+}
+
 // ===== Tests =====
 
 #[cfg(test)]
@@ -674,5 +867,52 @@ mod tests {
     fn test_terrain_database_not_found_error_message() {
         let err = TerrainDatabaseError::NotFound(13042);
         assert!(err.to_string().contains("13042"));
+    }
+
+    #[test]
+    fn test_builtin_terrain_db_has_all_twelve_entries() {
+        let db = builtin_terrain_db();
+        assert_eq!(db.len(), 12);
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_GRASS,
+            TERRAIN_WATER,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_FOREST,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            assert!(db.has_definition(id), "missing built-in terrain ID {id}");
+        }
+    }
+
+    #[test]
+    fn test_builtin_terrain_db_water_and_mountain_are_blocked() {
+        let db = builtin_terrain_db();
+        assert!(db.get_by_id(TERRAIN_WATER).unwrap().blocked);
+        assert!(db.get_by_id(TERRAIN_MOUNTAIN).unwrap().blocked);
+        assert!(!db.get_by_id(TERRAIN_GROUND).unwrap().blocked);
+        assert!(!db.get_by_id(TERRAIN_GRASS).unwrap().blocked);
+    }
+
+    #[test]
+    fn test_terrain_new_seeds_blocked_from_db() {
+        use crate::domain::world::{Tile, WallType};
+        let db = builtin_terrain_db();
+        let water = Tile::new(0, 0, TERRAIN_WATER, WallType::None, &db);
+        assert!(water.blocked);
+        let mountain = Tile::new(0, 0, TERRAIN_MOUNTAIN, WallType::None, &db);
+        assert!(mountain.blocked);
+        let grass = Tile::new(0, 0, TERRAIN_GRASS, WallType::None, &db);
+        assert!(!grass.blocked);
+        // blocked is still mutable
+        let mut tile = Tile::new(0, 0, TERRAIN_WATER, WallType::None, &db);
+        tile.blocked = false;
+        assert!(!tile.blocked);
     }
 }

@@ -6,7 +6,7 @@
     description: "The market square of a small Ashvale settlement where Kira has assembled her company. Quests, merchants, and trouble all converge here.",
     tiles: [
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26,7 +26,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -47,7 +47,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -68,7 +68,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -89,7 +89,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -110,7 +110,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -138,7 +138,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -166,7 +166,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -194,7 +194,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -214,7 +214,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -234,7 +234,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -254,7 +254,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -274,7 +274,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -294,7 +294,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -315,7 +315,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -336,7 +336,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -357,7 +357,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -378,7 +378,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -399,7 +399,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -420,7 +420,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -441,7 +441,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -462,7 +462,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -482,7 +482,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -502,7 +502,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -522,7 +522,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -543,7 +543,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -564,7 +564,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -585,7 +585,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -606,7 +606,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -626,7 +626,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -646,7 +646,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -666,7 +666,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -686,7 +686,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -706,7 +706,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -728,7 +728,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -749,7 +749,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -769,7 +769,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -789,7 +789,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -809,7 +809,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -829,7 +829,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -850,7 +850,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -871,7 +871,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -891,7 +891,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -911,7 +911,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -931,7 +931,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -952,7 +952,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -973,7 +973,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -994,7 +994,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1015,7 +1015,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1035,7 +1035,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1055,7 +1055,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1075,7 +1075,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1095,7 +1095,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1115,7 +1115,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1137,7 +1137,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1158,7 +1158,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1178,7 +1178,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1198,7 +1198,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1218,7 +1218,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1238,7 +1238,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1259,7 +1259,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1280,7 +1280,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1300,7 +1300,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1320,7 +1320,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1340,7 +1340,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1360,7 +1360,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1380,7 +1380,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1400,7 +1400,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1420,7 +1420,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1440,7 +1440,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1460,7 +1460,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1480,7 +1480,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1500,7 +1500,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1520,7 +1520,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1542,7 +1542,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1563,7 +1563,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1583,7 +1583,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1603,7 +1603,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1623,7 +1623,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1643,7 +1643,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1664,7 +1664,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1685,7 +1685,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1705,7 +1705,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1725,7 +1725,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1745,7 +1745,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1766,7 +1766,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1788,7 +1788,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1808,7 +1808,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1828,7 +1828,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1848,7 +1848,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1868,7 +1868,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1888,7 +1888,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1908,7 +1908,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1928,7 +1928,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1948,7 +1948,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1968,7 +1968,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1988,7 +1988,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2008,7 +2008,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2028,7 +2028,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2048,7 +2048,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2069,7 +2069,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2090,7 +2090,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2110,7 +2110,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2130,7 +2130,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2150,7 +2150,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2171,7 +2171,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2193,7 +2193,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2213,7 +2213,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2233,7 +2233,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2253,7 +2253,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2273,7 +2273,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2293,7 +2293,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2313,7 +2313,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2333,7 +2333,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2353,7 +2353,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2374,7 +2374,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2394,7 +2394,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2414,7 +2414,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2434,7 +2434,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2454,7 +2454,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2475,7 +2475,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2496,7 +2496,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2517,7 +2517,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2538,7 +2538,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2559,7 +2559,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2580,7 +2580,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2602,7 +2602,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2622,7 +2622,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2642,7 +2642,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2662,7 +2662,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2682,7 +2682,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2702,7 +2702,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2722,7 +2722,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2742,7 +2742,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2762,7 +2762,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2783,7 +2783,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2803,7 +2803,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2823,7 +2823,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2843,7 +2843,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2863,7 +2863,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2884,7 +2884,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2905,7 +2905,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2925,7 +2925,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2945,7 +2945,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2965,7 +2965,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2986,7 +2986,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3006,7 +3006,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3026,7 +3026,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3046,7 +3046,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3066,7 +3066,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3086,7 +3086,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3106,7 +3106,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3126,7 +3126,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3146,7 +3146,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3166,7 +3166,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3187,7 +3187,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3207,7 +3207,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3227,7 +3227,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3247,7 +3247,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3267,7 +3267,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3288,7 +3288,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3309,7 +3309,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3329,7 +3329,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3349,7 +3349,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3369,7 +3369,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3390,7 +3390,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3412,7 +3412,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3432,7 +3432,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3453,7 +3453,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3473,7 +3473,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3493,7 +3493,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3513,7 +3513,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3533,7 +3533,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3553,7 +3553,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3573,7 +3573,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3594,7 +3594,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3615,7 +3615,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3635,7 +3635,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3655,7 +3655,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3675,7 +3675,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3696,7 +3696,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3717,7 +3717,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3737,7 +3737,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3757,7 +3757,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3777,7 +3777,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3797,7 +3797,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3817,7 +3817,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3837,7 +3837,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3857,7 +3857,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3877,7 +3877,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3897,7 +3897,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3917,7 +3917,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3937,7 +3937,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3957,7 +3957,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3977,7 +3977,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4006,7 +4006,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4028,7 +4028,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4050,7 +4050,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4072,7 +4072,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4094,7 +4094,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4116,7 +4116,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4137,7 +4137,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4157,7 +4157,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4177,7 +4177,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4197,7 +4197,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4218,7 +4218,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4240,7 +4240,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4260,7 +4260,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4280,7 +4280,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -4300,7 +4300,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -4320,7 +4320,7 @@
             ),
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -4340,7 +4340,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4360,7 +4360,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4380,7 +4380,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4400,7 +4400,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4420,7 +4420,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4440,7 +4440,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4460,7 +4460,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4480,7 +4480,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4500,7 +4500,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4520,7 +4520,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4541,7 +4541,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4561,7 +4561,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4581,7 +4581,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4601,7 +4601,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4622,7 +4622,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4644,7 +4644,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4664,7 +4664,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4684,7 +4684,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4704,7 +4704,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4724,7 +4724,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4744,7 +4744,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4764,7 +4764,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4784,7 +4784,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4804,7 +4804,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4824,7 +4824,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4844,7 +4844,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4864,7 +4864,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4884,7 +4884,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4904,7 +4904,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4924,7 +4924,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4945,7 +4945,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4966,7 +4966,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4987,7 +4987,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5008,7 +5008,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5029,7 +5029,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5049,7 +5049,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5069,7 +5069,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5089,7 +5089,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5109,7 +5109,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5129,7 +5129,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5149,7 +5149,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5169,7 +5169,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5189,7 +5189,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5209,7 +5209,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5229,7 +5229,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5249,7 +5249,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5269,7 +5269,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5289,7 +5289,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5309,7 +5309,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5329,7 +5329,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5350,7 +5350,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5370,7 +5370,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5390,7 +5390,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5410,7 +5410,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5431,7 +5431,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5453,7 +5453,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5473,7 +5473,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5493,7 +5493,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5513,7 +5513,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5533,7 +5533,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5553,7 +5553,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5573,7 +5573,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5593,7 +5593,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5613,7 +5613,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5635,7 +5635,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5657,7 +5657,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5679,7 +5679,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5701,7 +5701,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5723,7 +5723,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5745,7 +5745,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5766,7 +5766,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5786,7 +5786,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5806,7 +5806,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5826,7 +5826,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5847,7 +5847,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5869,7 +5869,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5889,7 +5889,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5909,7 +5909,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5929,7 +5929,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5949,7 +5949,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5969,7 +5969,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5989,7 +5989,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6009,7 +6009,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6029,7 +6029,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6049,7 +6049,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6071,7 +6071,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6091,7 +6091,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6113,7 +6113,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6135,7 +6135,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6157,7 +6157,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6178,7 +6178,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6198,7 +6198,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6218,7 +6218,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6238,7 +6238,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6259,7 +6259,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6288,7 +6288,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6308,7 +6308,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6328,7 +6328,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6348,7 +6348,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6368,7 +6368,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6388,7 +6388,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6408,7 +6408,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6428,7 +6428,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6448,7 +6448,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6470,7 +6470,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6492,7 +6492,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6512,7 +6512,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6532,7 +6532,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6552,7 +6552,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6572,7 +6572,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6593,7 +6593,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6613,7 +6613,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6633,7 +6633,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6653,7 +6653,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6673,7 +6673,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6693,7 +6693,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6713,7 +6713,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6733,7 +6733,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6753,7 +6753,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6773,7 +6773,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6793,7 +6793,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6813,7 +6813,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6833,7 +6833,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6853,7 +6853,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6873,7 +6873,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6893,7 +6893,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6913,7 +6913,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6933,7 +6933,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6953,7 +6953,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6973,7 +6973,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6994,7 +6994,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7014,7 +7014,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7034,7 +7034,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7054,7 +7054,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7075,7 +7075,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7097,7 +7097,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7117,7 +7117,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7137,7 +7137,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7157,7 +7157,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7177,7 +7177,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7197,7 +7197,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7217,7 +7217,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7237,7 +7237,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7257,7 +7257,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7277,7 +7277,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7297,7 +7297,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7317,7 +7317,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7337,7 +7337,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7357,7 +7357,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7377,7 +7377,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7398,7 +7398,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7418,7 +7418,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7438,7 +7438,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7458,7 +7458,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7479,7 +7479,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7501,7 +7501,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7521,7 +7521,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7541,7 +7541,7 @@
             ),
         ),
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -7563,7 +7563,7 @@
             ),
         ),
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -7585,7 +7585,7 @@
             ),
         ),
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -7607,7 +7607,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7627,7 +7627,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7647,7 +7647,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7669,7 +7669,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7691,7 +7691,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7711,7 +7711,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7731,7 +7731,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7751,7 +7751,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7771,7 +7771,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7791,7 +7791,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7812,7 +7812,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7833,7 +7833,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7854,7 +7854,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7875,7 +7875,7 @@
             ),
         ),
         (
-            terrain: Stone,
+            terrain: 13005,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7896,7 +7896,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7918,7 +7918,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7940,7 +7940,7 @@
             ),
         ),
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -7962,7 +7962,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7982,7 +7982,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8002,7 +8002,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8022,7 +8022,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8042,7 +8042,7 @@
             ),
         ),
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -8064,7 +8064,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8086,7 +8086,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8106,7 +8106,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8126,7 +8126,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8146,7 +8146,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8166,7 +8166,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8186,7 +8186,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,

@@ -1,5 +1,6 @@
 use antares::domain::types::Position;
-use antares::domain::world::{Map, TerrainType, WallType};
+use antares::domain::world::terrain::TERRAIN_GROUND;
+use antares::domain::world::{Map, WallType};
 use std::fs;
 
 /// Helper function to load a map from RON file
@@ -25,11 +26,11 @@ fn test_load_start_area() {
     // Verify specific tiles
     // (0, 0) should be Stone wall
     let tile_0_0 = map.get_tile(Position::new(0, 0)).unwrap();
-    assert_eq!(tile_0_0.terrain, TerrainType::Ground);
+    assert_eq!(tile_0_0.terrain, TERRAIN_GROUND);
     assert_eq!(tile_0_0.wall_type, WallType::Normal);
 
     // Verify we have some ground tiles
-    let has_ground = map.tiles.iter().any(|t| t.terrain == TerrainType::Ground);
+    let has_ground = map.tiles.iter().any(|t| t.terrain == TERRAIN_GROUND);
     assert!(has_ground, "Map should have some ground tiles");
 
     // Verify NPC placements (map may or may not have NPCs)

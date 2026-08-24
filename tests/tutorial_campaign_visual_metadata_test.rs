@@ -95,7 +95,7 @@ fn test_all_maps_have_visual_metadata() {
 fn test_map1_has_grass_tiles() {
     let content = load_map_content(1);
     assert!(
-        content.contains("terrain: Grass"),
+        content.contains("terrain: 13001"),
         "Map 1 should have Grass tiles"
     );
 }
@@ -104,7 +104,7 @@ fn test_map1_has_grass_tiles() {
 fn test_map1_has_forest_tiles() {
     let content = load_map_content(1);
     assert!(
-        content.contains("terrain: Forest"),
+        content.contains("terrain: 13007"),
         "Map 1 should have Forest tiles"
     );
 }
@@ -112,7 +112,7 @@ fn test_map1_has_forest_tiles() {
 #[test]
 fn test_map2_has_forest_tiles() {
     let content = load_map_content(2);
-    let forest_count = count_occurrences(&content, "terrain: Forest");
+    let forest_count = count_occurrences(&content, "terrain: 13007");
     assert!(forest_count > 0, "Map 2 should have Forest tiles");
 }
 
@@ -120,7 +120,7 @@ fn test_map2_has_forest_tiles() {
 fn test_map3_has_ground_tiles() {
     let content = load_map_content(3);
     assert!(
-        content.contains("terrain: Ground") || content.contains("terrain: Stone"),
+        content.contains("terrain: 13000") || content.contains("terrain: 13005"),
         "Map 3 should have various terrain types"
     );
 }
@@ -129,7 +129,7 @@ fn test_map3_has_ground_tiles() {
 fn test_map4_has_forest_tiles() {
     let content = load_map_content(4);
     assert!(
-        content.contains("terrain: Forest"),
+        content.contains("terrain: 13007"),
         "Map 4 should have Forest tiles"
     );
 }
@@ -138,7 +138,7 @@ fn test_map4_has_forest_tiles() {
 fn test_map5_has_grass_tiles() {
     let content = load_map_content(5);
     assert!(
-        content.contains("terrain: Grass"),
+        content.contains("terrain: 13001"),
         "Map 5 should have Grass tiles"
     );
 }
@@ -186,30 +186,36 @@ fn test_visual_metadata_structure_valid() {
 
 #[test]
 fn test_no_invalid_terrain_types() {
-    // Verify that terrain types are valid (one of the allowed types)
-    let valid_terrains = vec![
-        "Ground", "Grass", "Water", "Lava", "Swamp", "Stone", "Dirt", "Forest", "Mountain",
+    // Verify that terrain IDs are valid numeric IDs (13000–13011 range)
+    let valid_terrain_ids = vec![
+        "terrain: 13000", // Ground
+        "terrain: 13001", // Grass
+        "terrain: 13002", // Water
+        "terrain: 13003", // Lava
+        "terrain: 13004", // Swamp
+        "terrain: 13005", // Stone
+        "terrain: 13006", // Dirt
+        "terrain: 13007", // Forest
+        "terrain: 13008", // Mountain
     ];
 
     for map_id in 1..=5 {
         let content = load_map_content(map_id);
 
-        // Should not have lowercase or invalid types
+        // Should not have old-style enum terrain types
         assert!(
-            !content.contains("terrain: ground"),
-            "Map {} should not have lowercase terrain types",
+            !content.contains("terrain: Ground"),
+            "Map {} should not have old-style enum terrain types",
             map_id
         );
         assert!(
-            !content.contains("terrain: grass"),
-            "Map {} should not have lowercase terrain types",
+            !content.contains("terrain: Forest"),
+            "Map {} should not have old-style enum terrain types",
             map_id
         );
 
-        // Verify at least one valid terrain exists
-        let has_valid = valid_terrains
-            .iter()
-            .any(|t| content.contains(&format!("terrain: {}", t)));
+        // Verify at least one valid numeric terrain ID exists
+        let has_valid = valid_terrain_ids.iter().any(|t| content.contains(*t));
         assert!(has_valid, "Map {} should have valid terrain types", map_id);
     }
 }

@@ -2569,7 +2569,8 @@ pub fn fill_mini_map_poi_dot(
 ///
 /// * `tile` - Tile to classify for automap rendering
 pub fn automap_tile_color(tile: &crate::domain::world::Tile) -> [u8; 4] {
-    use crate::domain::world::{TerrainType, WallType};
+    use crate::domain::world::terrain::{TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_WATER};
+    use crate::domain::world::WallType;
 
     if !tile.visited {
         return AUTOMAP_UNVISITED;
@@ -2579,8 +2580,8 @@ pub fn automap_tile_color(tile: &crate::domain::world::Tile) -> [u8; 4] {
         WallType::Door => AUTOMAP_VISITED_DOOR,
         WallType::Normal | WallType::Torch => AUTOMAP_VISITED_WALL,
         WallType::None => match tile.terrain {
-            TerrainType::Water => AUTOMAP_VISITED_WATER,
-            TerrainType::Grass | TerrainType::Forest => AUTOMAP_VISITED_FOREST,
+            TERRAIN_WATER => AUTOMAP_VISITED_WATER,
+            TERRAIN_GRASS | TERRAIN_FOREST => AUTOMAP_VISITED_FOREST,
             _ => AUTOMAP_VISITED_FLOOR,
         },
     }
@@ -4720,7 +4721,8 @@ mod automap_tests {
     use super::*;
     use crate::application::GameState;
     use crate::domain::types::Position;
-    use crate::domain::world::{Map, TerrainType};
+    use crate::domain::world::terrain::TERRAIN_GROUND;
+    use crate::domain::world::Map;
 
     fn setup_automap_test_app() -> App {
         let mut app = App::new();
@@ -4814,7 +4816,7 @@ mod automap_tests {
         let mut map = Map::new(1, "Automap".to_string(), "Test".to_string(), 8, 8);
         let floor_pos = Position::new(1, 1);
         if let Some(tile) = map.get_tile_mut(floor_pos) {
-            tile.terrain = TerrainType::Ground;
+            tile.terrain = TERRAIN_GROUND;
             tile.mark_visited();
         }
         state.world.add_map(map);

@@ -228,7 +228,7 @@ pub fn is_locked_door_tile(map: &Map, position: Position) -> Result<bool, Moveme
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::{Map, check_tile_blocked, TerrainType, WallType, Tile};
+/// use antares::domain::world::{Map, check_tile_blocked, WallType, Tile};
 /// use antares::domain::types::Position;
 ///
 /// let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
@@ -265,7 +265,8 @@ pub fn check_tile_blocked(map: &Map, position: Position) -> Result<bool, Movemen
 mod tests {
     use super::*;
     use crate::application::save_game::SaveGame;
-    use crate::domain::world::{TerrainType, WallType};
+    use crate::domain::world::terrain::TERRAIN_WATER;
+    use crate::domain::world::WallType;
 
     #[test]
     fn test_mark_visible_area_marks_radius() {
@@ -453,7 +454,7 @@ mod tests {
         // Place water to the east
         let water_pos = Position::new(11, 10);
         if let Some(tile) = map.get_tile_mut(water_pos) {
-            tile.terrain = TerrainType::Water;
+            tile.terrain = TERRAIN_WATER;
             tile.blocked = true;
         }
 

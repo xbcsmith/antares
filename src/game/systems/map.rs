@@ -24,6 +24,10 @@ use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use crate::game::systems::{advanced_trees, procedural_meshes, vegetation_placement};
 
 const DEFAULT_NPC_SPRITE_PATH: &str = "sprites/placeholders/npc_placeholder.png";
+use crate::domain::world::terrain::{
+    TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_LAVA, TERRAIN_MOUNTAIN,
+    TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
+};
 use bevy::prelude::*;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
@@ -48,11 +52,19 @@ fn should_spawn_extra_forest_shrub(is_forest: bool, spawned_center_vegetation: b
 }
 
 /// Returns whether a terrain tile should receive procedural grass ground cover.
-fn should_spawn_grass_cover(terrain: world::TerrainType) -> bool {
-    matches!(
-        terrain,
-        world::TerrainType::Forest | world::TerrainType::Grass
-    )
+fn should_spawn_grass_cover(terrain: crate::domain::types::TerrainId) -> bool {
+    matches!(terrain, TERRAIN_FOREST | TERRAIN_GRASS)
+}
+
+/// Returns the mesh height for a terrain ID based on built-in terrain heights.
+///
+/// Used until the `TerrainDatabase` is available as a Bevy resource (Phase 3).
+fn terrain_height_for_id(terrain: crate::domain::types::TerrainId) -> f32 {
+    match terrain {
+        TERRAIN_MOUNTAIN => 3.0,
+        TERRAIN_FOREST => 2.2,
+        _ => 0.0,
+    }
 }
 
 fn should_spawn_procedural_vegetation(tile: &world::Tile) -> bool {
@@ -1052,7 +1064,7 @@ fn get_or_create_mesh(
 /// they are part of the dynamic despawn/spawn lifecycle.
 #[allow(clippy::too_many_arguments)]
 fn terrain_material_with_optional_tint(
-    terrain: world::TerrainType,
+    terrain: crate::domain::types::TerrainId,
     tint: Option<(f32, f32, f32)>,
     terrain_cache: &TerrainMaterialCache,
     source_material: Option<StandardMaterial>,
@@ -1659,7 +1671,7 @@ fn spawn_map(
         // materials if the cache is not yet populated (e.g. in tests that do
         // not run the terrain-materials startup system).
         let floor_material = terrain_cache
-            .get(world::TerrainType::Ground)
+            .get(TERRAIN_GROUND)
             .cloned()
             .unwrap_or_else(|| {
                 materials.add(StandardMaterial {
@@ -1670,7 +1682,7 @@ fn spawn_map(
             });
 
         let water_material = terrain_cache
-            .get(world::TerrainType::Water)
+            .get(TERRAIN_WATER)
             .cloned()
             .unwrap_or_else(|| {
                 materials.add(StandardMaterial {
@@ -1681,7 +1693,7 @@ fn spawn_map(
             });
 
         let grass_material = terrain_cache
-            .get(world::TerrainType::Grass)
+            .get(TERRAIN_GRASS)
             .cloned()
             .unwrap_or_else(|| {
                 materials.add(StandardMaterial {
@@ -1702,7 +1714,7 @@ fn spawn_map(
                 if let Some(tile) = map.get_tile(pos) {
                     // Render based on terrain type
                     match tile.terrain {
-                        world::TerrainType::Water => {
+                        TERRAIN_WATER => {
                             // Render water slightly below at y = -0.1
                             commands.spawn((
                                 Mesh3d(water_mesh.clone()),
@@ -1718,10 +1730,11 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
                         }
-                        world::TerrainType::Mountain => {
+                        TERRAIN_MOUNTAIN => {
                             // Use per-tile visual metadata for dimensions
+                            let terrain_h = terrain_height_for_id(tile.terrain);
                             let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                                tile.visual.mesh_dimensions(tile.wall_type, terrain_h);
                             let mesh = get_or_create_mesh(
                                 &mut meshes,
                                 &mut mesh_cache,
@@ -1729,18 +1742,18 @@ fn spawn_map(
                                 height,
                                 width_z,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+                            let y_pos = tile.visual.mesh_y_position(tile.wall_type, terrain_h);
 
                             // Apply color tint if specified while preserving
                             // the cached textured source material when
                             // available. Cached material assets are never
                             // mutated in place.
                             let source_material = terrain_cache
-                                .get(world::TerrainType::Mountain)
+                                .get(TERRAIN_MOUNTAIN)
                                 .and_then(|handle| materials.get(handle))
                                 .cloned();
                             let material = terrain_material_with_optional_tint(
-                                world::TerrainType::Mountain,
+                                TERRAIN_MOUNTAIN,
                                 tile.visual.color_tint,
                                 terrain_cache,
                                 source_material,
@@ -1771,7 +1784,7 @@ fn spawn_map(
                             ));
                         }
                         terrain if should_spawn_grass_cover(terrain) => {
-                            let is_forest = tile.terrain == world::TerrainType::Forest;
+                            let is_forest = tile.terrain == TERRAIN_FOREST;
                             let vegetation_plan =
                                 vegetation_placement::tile_vegetation_plan(tile, map.id, pos);
                             let should_spawn_procedural_vegetation =
@@ -2000,22 +2013,25 @@ fn spawn_map(
                             // Tint/darken the wall material to match the underlying terrain color
                             // so a Forest Normal wall appears greenish while a Stone Normal wall remains grey.
                             let (tr, tg, tb) = match tile.terrain {
-                                world::TerrainType::Ground => floor_rgb,
-                                world::TerrainType::Grass => grass_rgb,
-                                world::TerrainType::Water => water_rgb,
-                                world::TerrainType::Lava => (0.8_f32, 0.3_f32, 0.2_f32),
-                                world::TerrainType::Swamp => (0.35_f32, 0.3_f32, 0.2_f32),
-                                world::TerrainType::Stone => stone_rgb,
-                                world::TerrainType::Dirt => dirt_rgb,
-                                world::TerrainType::Forest => forest_rgb,
-                                world::TerrainType::Mountain => mountain_rgb,
+                                TERRAIN_GROUND => floor_rgb,
+                                TERRAIN_GRASS => grass_rgb,
+                                TERRAIN_WATER => water_rgb,
+                                TERRAIN_LAVA => (0.8_f32, 0.3_f32, 0.2_f32),
+                                TERRAIN_SWAMP => (0.35_f32, 0.3_f32, 0.2_f32),
+                                TERRAIN_STONE => stone_rgb,
+                                TERRAIN_DIRT => dirt_rgb,
+                                TERRAIN_FOREST => forest_rgb,
+                                TERRAIN_MOUNTAIN => mountain_rgb,
+                                _ => floor_rgb, // campaign-defined terrain defaults to floor color
                             };
                             // Darken a bit to make the wall distinct from the floor
                             let darken = 0.6_f32;
 
                             // Use per-tile visual metadata for dimensions
-                            let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                            let (width_x, height, width_z) = tile.visual.mesh_dimensions(
+                                tile.wall_type,
+                                terrain_height_for_id(tile.terrain),
+                            );
                             let mesh = get_or_create_mesh(
                                 &mut meshes,
                                 &mut mesh_cache,
@@ -2023,9 +2039,10 @@ fn spawn_map(
                                 height,
                                 width_z,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
-
-                            // Apply base terrain tint, then per-tile color tint if specified.
+                            let y_pos = tile.visual.mesh_y_position(
+                                tile.wall_type,
+                                terrain_height_for_id(tile.terrain),
+                            );
                             // In Bevy's PBR, base_color is a multiplier on top of
                             // base_color_texture, so setting it to a darkened value
                             // darkens the texture without replacing it.
@@ -2083,8 +2100,10 @@ fn spawn_map(
 
                         world::WallType::Torch => {
                             // Use per-tile visual metadata for dimensions
-                            let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                            let (width_x, height, width_z) = tile.visual.mesh_dimensions(
+                                tile.wall_type,
+                                terrain_height_for_id(tile.terrain),
+                            );
                             let mesh = get_or_create_mesh(
                                 &mut meshes,
                                 &mut mesh_cache,
@@ -2092,7 +2111,10 @@ fn spawn_map(
                                 height,
                                 width_z,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+                            let y_pos = tile.visual.mesh_y_position(
+                                tile.wall_type,
+                                terrain_height_for_id(tile.terrain),
+                            );
 
                             // Apply color tint if specified
                             let mut base_color = wall_base_color;
@@ -2912,6 +2934,10 @@ pub fn spawn_event_marker(
 mod tests {
     use super::*;
     use crate::domain::types::Position;
+    use crate::domain::world::terrain::{
+        builtin_terrain_db, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND,
+        TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
+    };
     use crate::domain::world::SpriteAnimation;
     use crate::game::components::dialogue::NpcDialogue;
     use crate::game::resources::GlobalState;
@@ -3005,35 +3031,36 @@ mod tests {
 
     #[test]
     fn test_should_spawn_grass_cover_for_grass_terrain() {
-        assert!(should_spawn_grass_cover(world::TerrainType::Grass));
+        assert!(should_spawn_grass_cover(TERRAIN_GRASS));
     }
 
     #[test]
     fn test_should_spawn_grass_cover_for_forest_terrain() {
-        assert!(should_spawn_grass_cover(world::TerrainType::Forest));
+        assert!(should_spawn_grass_cover(TERRAIN_FOREST));
     }
 
     #[test]
     fn test_should_not_spawn_grass_cover_for_non_vegetated_terrain() {
         for terrain in [
-            world::TerrainType::Ground,
-            world::TerrainType::Water,
-            world::TerrainType::Lava,
-            world::TerrainType::Swamp,
-            world::TerrainType::Stone,
-            world::TerrainType::Dirt,
-            world::TerrainType::Mountain,
+            TERRAIN_GROUND,
+            TERRAIN_WATER,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_MOUNTAIN,
         ] {
             assert!(
                 !should_spawn_grass_cover(terrain),
-                "terrain {terrain:?} should not spawn procedural grass cover"
+                "Expected no grass cover for terrain {terrain}"
             );
         }
     }
 
     #[test]
     fn test_forest_vegetation_plan_same_tile_is_deterministic() {
-        let tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let db = builtin_terrain_db();
+        let tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
         let position = Position::new(4, 5);
 
         let first = vegetation_placement::tile_vegetation_plan(&tile, 1, position);
@@ -3044,7 +3071,8 @@ mod tests {
 
     #[test]
     fn test_forest_default_tree_and_extra_shrubs_have_non_overlapping_positions() {
-        let mut tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let db = builtin_terrain_db();
+        let mut tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
         tile.visual.foliage_density = Some(1.0);
 
         let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
@@ -3072,7 +3100,8 @@ mod tests {
 
     #[test]
     fn test_explicit_shrub_tile_does_not_plan_full_size_default_tree() {
-        let mut tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let db = builtin_terrain_db();
+        let mut tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
         tile.visual.tree_type = Some(world::TreeType::Shrub);
 
         let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
@@ -3085,7 +3114,8 @@ mod tests {
 
     #[test]
     fn test_grass_cover_avoids_planned_tree_trunk_exclusion_zone() {
-        let tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let db = builtin_terrain_db();
+        let tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
         let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
         let tree = plan
             .tree_anchor
@@ -3288,10 +3318,10 @@ mod tests {
             perceptual_roughness: 0.85,
             ..default()
         });
-        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+        cache.set(TERRAIN_MOUNTAIN, cached_handle.clone());
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             None,
             &cache,
             None,
@@ -3318,10 +3348,10 @@ mod tests {
             .get(&cached_handle)
             .expect("cached material should exist")
             .clone();
-        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+        cache.set(TERRAIN_MOUNTAIN, cached_handle.clone());
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             Some(source_material),
@@ -3348,10 +3378,10 @@ mod tests {
             .get(&cached_handle)
             .expect("cached material should exist")
             .clone();
-        cache.set(world::TerrainType::Mountain, cached_handle);
+        cache.set(TERRAIN_MOUNTAIN, cached_handle);
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             Some(source_material),
@@ -3372,7 +3402,7 @@ mod tests {
         let mut materials = Assets::<StandardMaterial>::default();
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             None,
@@ -3404,10 +3434,10 @@ mod tests {
             .expect("cached material should exist")
             .clone();
         let source_material = original_cached_material.clone();
-        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+        cache.set(TERRAIN_MOUNTAIN, cached_handle.clone());
 
         let _ = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             Some(source_material),
@@ -6494,7 +6524,7 @@ mod tests {
             ..default()
         });
         let mut cache = TerrainMaterialCache::default();
-        cache.set(world::TerrainType::Stone, stone_cached.clone());
+        cache.set(TERRAIN_STONE, stone_cached.clone());
 
         // Simulate the wall material creation logic from spawn_map.
         let stone_rgb = (0.55_f32, 0.55_f32, 0.55_f32);
@@ -6505,7 +6535,7 @@ mod tests {
             stone_rgb.2 * darken,
         );
         let source_material = cache
-            .get(world::TerrainType::Stone)
+            .get(TERRAIN_STONE)
             .and_then(|handle| materials.get(handle))
             .cloned();
         let tile_wall_material = if let Some(mut src) = source_material {
@@ -6556,7 +6586,7 @@ mod tests {
 
         let wall_color = Color::srgb(0.33, 0.33, 0.33);
         let source_material = cache
-            .get(world::TerrainType::Stone)
+            .get(TERRAIN_STONE)
             .and_then(|handle| materials.get(handle))
             .cloned();
         let tile_wall_material = if let Some(mut src) = source_material {
@@ -6621,7 +6651,7 @@ mod tests {
             .expect("tile (1,1) must exist in a 4×4 map");
         {
             let tile = &mut map.tiles[oak_tile_idx];
-            tile.terrain = world::TerrainType::Forest;
+            tile.terrain = TERRAIN_FOREST;
             tile.wall_type = world::WallType::None;
             tile.blocked = false;
             tile.visual.tree_type = Some(world::TreeType::Oak);

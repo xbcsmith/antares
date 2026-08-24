@@ -12,7 +12,8 @@
 use crate::application::resources::GameContent;
 use crate::application::{GameMode, GameState, MoveHandleError};
 use crate::domain::types::Position;
-use crate::domain::world::{self, MovementError, TerrainType, VISIBILITY_RADIUS};
+use crate::domain::world::terrain::TERRAIN_WATER;
+use crate::domain::world::{self, MovementError, VISIBILITY_RADIUS};
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::systems::combat::VictorySummaryRoot;
@@ -183,7 +184,7 @@ fn should_override_water(game_state: &GameState, target: Position) -> bool {
             .world
             .get_current_map()
             .and_then(|m| m.get_tile(target))
-            .is_some_and(|t| matches!(t.terrain, TerrainType::Water))
+            .is_some_and(|t| t.terrain == TERRAIN_WATER)
 }
 
 /// Temporarily unblocks the tile at `target` so the movement pipeline allows
@@ -459,7 +460,7 @@ mod tests {
     fn make_world_with_water_tile() -> (crate::domain::world::World, crate::domain::types::Position)
     {
         use crate::domain::types::{Direction, Position};
-        use crate::domain::world::{Map, TerrainType};
+        use crate::domain::world::{terrain::TERRAIN_WATER, Map};
 
         let mut map = Map::new(1, "Test".to_string(), "desc".to_string(), 5, 5);
         // Place a water tile at (2, 1) — directly north of (2, 2)
@@ -467,7 +468,7 @@ mod tests {
         // Mutate the existing tile in-place: set terrain to Water and blocked to
         // true (Water tiles auto-block, so this mirrors the in-game behaviour).
         if let Some(tile) = map.get_tile_mut(water_pos) {
-            tile.terrain = TerrainType::Water;
+            tile.terrain = TERRAIN_WATER;
             tile.blocked = true;
         }
 

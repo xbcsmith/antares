@@ -19,7 +19,7 @@
 //! - `dropped_items`: Domain record for items lying on the ground ([`DroppedItem`])
 //! - `furniture`: Data-driven furniture definitions ([`FurnitureDefinition`], [`FurnitureDatabase`])
 //! - `landscape`: Data-driven landscape definitions and map placements
-//! - `terrain`: Data-driven terrain definitions ([`TerrainDefinition`], [`TerrainDatabase`])
+//! - `terrain`: Data-driven terrain definitions and built-in ID constants ([`TerrainDefinition`], [`TerrainDatabase`])
 //! - `object_mesh`: Unified object mesh registry ([`ObjectMeshDatabase`])
 //! - `lock`: Lock state domain types and unlock functions ([`LockState`], [`try_unlock`], etc.)
 
@@ -63,7 +63,10 @@ pub use npc_runtime::{
 };
 pub use object_mesh::{ObjectMeshDatabase, ObjectMeshError};
 pub use terrain::{
-    TerrainDatabase, TerrainDatabaseError, TerrainDefinition, TerrainMeshStyle, TerrainVegetation,
+    builtin_terrain_db, builtin_terrain_definitions, TerrainDatabase, TerrainDatabaseError,
+    TerrainDefinition, TerrainMeshStyle, TerrainVegetation, TERRAIN_DIRT, TERRAIN_FOREST,
+    TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_ICE, TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_SAND,
+    TERRAIN_SNOW, TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
 };
 pub use types::{
     ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
@@ -71,7 +74,7 @@ pub use types::{
     FurnitureFlags, FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData,
     LayeredSprite, Map, MapEvent, PointOfInterest, RailingConfig, ResolvedNpc, RockVariant,
     SkyConfig, SpriteAnimation, SpriteLayer, SpriteMaterialProperties, SpriteReference,
-    SpriteSelectionRule, StructureType, TerrainType, Tile, TileVisualMetadata, TimeCondition,
-    TreeType, WallSegmentConfig, WallType, WaterFlowDirection, World,
+    SpriteSelectionRule, StructureType, Tile, TileVisualMetadata, TimeCondition, TreeType,
+    WallSegmentConfig, WallType, WaterFlowDirection, World,
 };
 pub use wind::{CampaignWindConfig, WindSystemKind};

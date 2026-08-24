@@ -281,7 +281,8 @@ impl MapDatabase {
                 // Fallback to MapBlueprint; if parsing fails, log and skip the file
                 match ron::from_str::<MapBlueprint>(&contents) {
                     Ok(blueprint) => {
-                        let map: Map = blueprint.into();
+                        let map = blueprint
+                            .into_map(&crate::domain::world::terrain::builtin_terrain_db());
                         maps.insert(map.id, map);
                     }
                     Err(e) => {
