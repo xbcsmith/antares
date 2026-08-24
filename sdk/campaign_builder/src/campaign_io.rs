@@ -1975,6 +1975,86 @@ impl CampaignBuilderApp {
         Ok(())
     }
 
+    /// Load custom terrain definitions from the campaign terrain RON file.
+    ///
+    /// Missing file is not an error — custom terrain support is opt-in per
+    /// campaign. When absent, only built-in terrain (IDs 13 000–13 011) is
+    /// available.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.load_terrain();
+    /// ```
+    pub fn load_terrain(&mut self) {
+        if let Some(defs) = read_ron_collection::<antares::domain::world::TerrainDefinition>(
+            &self.campaign_dir,
+            &self.campaign.terrain_file,
+            "terrain",
+            &mut self.ui_state.status_message,
+        ) {
+            let count = defs.len();
+            self.campaign_data.terrain_definitions = defs;
+            // Rebuild the merged DB: start from builtins, then overlay campaign entries.
+            let mut db = antares::domain::world::terrain::builtin_terrain_db();
+            let mut campaign_db = antares::domain::world::terrain::TerrainDatabase::new();
+            for def in &self.campaign_data.terrain_definitions {
+                let _ = campaign_db.add(def.clone());
+            }
+            db.merge(campaign_db);
+            self.campaign_data.terrain_db = db;
+            self.editor_registry.terrain_editor_state = terrain_editor::TerrainEditorState::new();
+            self.logger.info(
+                category::FILE_IO,
+                &format!("Loaded {} custom terrain definitions", count),
+            );
+            self.ui_state.status_message = format!("Loaded {} custom terrain definitions", count);
+        } else {
+            self.campaign_data.terrain_definitions.clear();
+            // Reset to built-in terrain only.
+            self.campaign_data.terrain_db = antares::domain::world::terrain::builtin_terrain_db();
+            self.editor_registry.terrain_editor_state = terrain_editor::TerrainEditorState::new();
+            self.logger
+                .debug(category::FILE_IO, "No terrain.ron found (opt-in)");
+        }
+    }
+
+    /// Save custom terrain definitions to the campaign terrain RON file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CampaignIoError`] when the terrain RON file cannot be
+    /// written or serialized.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.save_terrain()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn save_terrain(&mut self) -> Result<(), CampaignIoError> {
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.terrain_file,
+            &self.campaign_data.terrain_definitions,
+            "terrain",
+        )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!(
+                "Saved {} custom terrain definitions",
+                self.campaign_data.terrain_definitions.len()
+            ),
+        );
+        Ok(())
+    }
+
     /// Save furniture definitions to the campaign furniture RON file.
     ///
     /// Returns an `Err` on failure so the caller can aggregate warnings.
@@ -3014,6 +3094,9 @@ impl CampaignBuilderApp {
         self.editor_registry.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
         self.campaign_data.landscape_definitions.clear();
         self.editor_registry.landscape_editor_state = landscape_editor::LandscapeEditorState::new();
+        self.campaign_data.terrain_definitions.clear();
+        self.campaign_data.terrain_db = antares::domain::world::terrain::builtin_terrain_db();
+        self.editor_registry.terrain_editor_state = terrain_editor::TerrainEditorState::new();
 
         self.editor_registry
             .objects_editor_state
@@ -3158,6 +3241,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_landscape() {
             save_warnings.push(format!("Landscape: {}", e));
+        }
+
+        if let Err(e) = self.save_terrain() {
+            save_warnings.push(format!("Terrain: {}", e));
         }
 
         if let Err(e) = self.save_objects() {
@@ -3345,6 +3432,7 @@ impl CampaignBuilderApp {
                     self.load_conditions();
                     self.load_furniture();
                     self.load_landscape();
+                    self.load_terrain();
 
                     // Load quests and dialogues
                     if let Err(e) = self.load_quests() {

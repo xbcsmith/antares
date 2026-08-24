@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Map Editor GUI Component
@@ -45,13 +45,18 @@ use crate::ui_helpers::{
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::types::CombatEventType;
 use antares::domain::items::types::Item;
-use antares::domain::types::{Direction, EventId, ItemId, LandscapeId, MapId, MonsterId, Position};
+use antares::domain::types::{
+    Direction, EventId, ItemId, LandscapeId, MapId, MonsterId, Position, TerrainId,
+};
 use antares::domain::world::landscape::{LandscapeDefinition, LandscapePlacement};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
+use antares::domain::world::terrain::{
+    TerrainDatabase, TerrainDefinition, TerrainMeshStyle, TerrainVegetation, TERRAIN_GROUND,
+};
 use antares::domain::world::{
     FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent,
-    RockVariant, SkyConfig, SpriteLayer, SpriteReference, TerrainType, Tile, TileVisualMetadata,
-    TreeType, WallType, WaterFlowDirection,
+    RockVariant, SkyConfig, SpriteLayer, SpriteReference, Tile, TileVisualMetadata, TreeType,
+    WallType, WaterFlowDirection,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -1356,70 +1361,80 @@ impl TerrainEditorState {
         }
     }
 
-    /// Apply state to TileVisualMetadata based on terrain type
+    /// Apply state to TileVisualMetadata based on terrain id
     ///
-    /// Writes only the terrain-specific fields relevant to the given terrain type.
+    /// Writes only the terrain-specific fields relevant to the given terrain id.
     /// This prevents irrelevant fields (e.g., tree_type on Grass tiles) from being set.
     ///
     /// # Arguments
     ///
     /// * `metadata` - Mutable reference to TileVisualMetadata to update
-    /// * `terrain_type` - The terrain type to determine which fields to apply
+    /// * `terrain_id` - The terrain id to determine which fields to apply
+    /// * `db` - Terrain database for looking up vegetation and mesh style
     pub fn apply_to_metadata_for_terrain(
         &self,
         metadata: &mut TileVisualMetadata,
-        terrain_type: TerrainType,
+        terrain_id: TerrainId,
+        db: &TerrainDatabase,
     ) {
-        match terrain_type {
-            TerrainType::Grass => {
-                metadata.grass_density = Some(self.grass_density);
-                metadata.foliage_density = Some(self.foliage_density);
-                metadata.grass_blade_config = if self.grass_blade_config_enabled {
-                    Some(self.grass_blade_config)
-                } else {
-                    None
-                };
-                metadata.tree_type = None;
-                metadata.rock_variant = None;
-                metadata.water_flow_direction = None;
-                metadata.snow_coverage = None;
-            }
-            TerrainType::Forest => {
-                metadata.tree_type = Some(self.tree_type);
-                metadata.foliage_density = Some(self.foliage_density);
-                metadata.snow_coverage = Some(self.snow_coverage);
-                metadata.grass_density = None;
-                metadata.rock_variant = None;
-                metadata.water_flow_direction = None;
-                metadata.grass_blade_config = None;
-            }
-            TerrainType::Mountain => {
-                metadata.rock_variant = Some(self.rock_variant);
-                metadata.snow_coverage = Some(self.snow_coverage);
-                metadata.grass_density = None;
-                metadata.tree_type = None;
-                metadata.water_flow_direction = None;
-                metadata.foliage_density = None;
-                metadata.grass_blade_config = None;
-            }
-            TerrainType::Water | TerrainType::Swamp => {
-                metadata.water_flow_direction = Some(self.water_flow_direction);
-                metadata.grass_density = None;
-                metadata.tree_type = None;
-                metadata.rock_variant = None;
-                metadata.foliage_density = None;
-                metadata.snow_coverage = None;
-                metadata.grass_blade_config = None;
-            }
-            _ => {
-                metadata.grass_density = None;
-                metadata.tree_type = None;
-                metadata.rock_variant = None;
-                metadata.water_flow_direction = None;
-                metadata.foliage_density = None;
-                metadata.snow_coverage = None;
-                metadata.grass_blade_config = None;
-            }
+        let vegetation = db
+            .get_by_id(terrain_id)
+            .map(|d| d.vegetation)
+            .unwrap_or(TerrainVegetation::None);
+        let mesh_style = db
+            .get_by_id(terrain_id)
+            .map(|d| d.mesh_style)
+            .unwrap_or(TerrainMeshStyle::Flat);
+
+        if vegetation == TerrainVegetation::GrassCover {
+            // Grass coverage: set grass-specific fields
+            metadata.grass_density = Some(self.grass_density);
+            metadata.foliage_density = Some(self.foliage_density);
+            metadata.grass_blade_config = if self.grass_blade_config_enabled {
+                Some(self.grass_blade_config)
+            } else {
+                None
+            };
+            metadata.tree_type = None;
+            metadata.rock_variant = None;
+            metadata.water_flow_direction = None;
+            metadata.snow_coverage = None;
+        } else if vegetation == TerrainVegetation::Forest {
+            // Forest: set tree/canopy fields
+            metadata.tree_type = Some(self.tree_type);
+            metadata.foliage_density = Some(self.foliage_density);
+            metadata.snow_coverage = Some(self.snow_coverage);
+            metadata.grass_density = None;
+            metadata.rock_variant = None;
+            metadata.water_flow_direction = None;
+            metadata.grass_blade_config = None;
+        } else if mesh_style == TerrainMeshStyle::Mountain {
+            // Mountain mesh: rock variant + snow
+            metadata.rock_variant = Some(self.rock_variant);
+            metadata.snow_coverage = Some(self.snow_coverage);
+            metadata.grass_density = None;
+            metadata.tree_type = None;
+            metadata.water_flow_direction = None;
+            metadata.foliage_density = None;
+            metadata.grass_blade_config = None;
+        } else if mesh_style == TerrainMeshStyle::Water {
+            // Water mesh: flow direction
+            metadata.water_flow_direction = Some(self.water_flow_direction);
+            metadata.grass_density = None;
+            metadata.tree_type = None;
+            metadata.rock_variant = None;
+            metadata.foliage_density = None;
+            metadata.snow_coverage = None;
+            metadata.grass_blade_config = None;
+        } else {
+            // No specific vegetation or special mesh — clear all terrain-specific fields
+            metadata.grass_density = None;
+            metadata.tree_type = None;
+            metadata.rock_variant = None;
+            metadata.water_flow_direction = None;
+            metadata.foliage_density = None;
+            metadata.snow_coverage = None;
+            metadata.grass_blade_config = None;
         }
     }
 
@@ -1495,7 +1510,7 @@ pub struct MapEditorState {
     /// Selected position (for inspector)
     pub selected_position: Option<Position>,
     /// Currently selected terrain type for painting
-    pub selected_terrain: TerrainType,
+    pub selected_terrain: TerrainId,
     /// Currently selected wall type for painting
     pub selected_wall: WallType,
     /// Undo/redo stack
@@ -1605,7 +1620,7 @@ impl MapEditorState {
             metadata,
             current_tool: EditorTool::Select,
             selected_position: None,
-            selected_terrain: TerrainType::Ground,
+            selected_terrain: TERRAIN_GROUND,
             selected_wall: WallType::None,
             undo_stack: UndoStack::new(),
             has_changes: false,
@@ -1790,12 +1805,14 @@ impl MapEditorState {
     /// use campaign_builder::map_editor::MapEditorState;
     /// use antares::domain::world::Map;
     /// use antares::domain::types::Position;
+    /// use antares::domain::world::terrain::builtin_terrain_db;
     ///
+    /// let db = builtin_terrain_db();
     /// let mut editor = MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
     /// editor.selected_position = Some(Position::new(5, 5));
-    /// editor.apply_terrain_state_to_selection();
+    /// editor.apply_terrain_state_to_selection(&db);
     /// ```
-    pub fn apply_terrain_state_to_selection(&mut self) {
+    pub fn apply_terrain_state_to_selection(&mut self, db: &TerrainDatabase) {
         let target_positions: Vec<Position> = if self.selected_tiles.is_empty() {
             self.selected_position.into_iter().collect()
         } else {
@@ -1804,7 +1821,7 @@ impl MapEditorState {
 
         let terrain_state = self.terrain_editor_state.clone();
         for pos in target_positions {
-            self.apply_terrain_state_to_tile(pos, &terrain_state);
+            self.apply_terrain_state_to_tile(pos, &terrain_state, db);
         }
     }
 
@@ -1813,7 +1830,12 @@ impl MapEditorState {
     /// Updates the editor metadata map first, then mirrors the resolved metadata
     /// back into the saved map tile so save/reload preserves runtime vegetation
     /// fields.
-    fn apply_terrain_state_to_tile(&mut self, pos: Position, terrain_state: &TerrainEditorState) {
+    fn apply_terrain_state_to_tile(
+        &mut self,
+        pos: Position,
+        terrain_state: &TerrainEditorState,
+        db: &TerrainDatabase,
+    ) {
         let Some(terrain_type) = self.map.get_tile(pos).map(|tile| tile.terrain) else {
             return;
         };
@@ -1828,7 +1850,7 @@ impl MapEditorState {
             .unwrap_or_default();
 
         if terrain_state.use_terrain_override {
-            terrain_state.apply_to_metadata_for_terrain(&mut updated_metadata, terrain_type);
+            terrain_state.apply_to_metadata_for_terrain(&mut updated_metadata, terrain_type, db);
         } else {
             // Explicit "no override" — clear all terrain-specific fields so the
             // runtime falls back to its built-in defaults.
@@ -1894,15 +1916,16 @@ impl MapEditorState {
     }
 
     /// Paints a tile with the currently selected terrain and wall
-    pub fn paint_tile(&mut self, pos: Position) {
+    pub fn paint_tile(&mut self, pos: Position, db: &TerrainDatabase) {
         if let Some(tile) = self.map.get_tile(pos).cloned() {
             let mut new_tile = tile;
             new_tile.terrain = self.selected_terrain;
             new_tile.wall_type = self.selected_wall;
-            new_tile.blocked = matches!(
-                self.selected_terrain,
-                TerrainType::Mountain | TerrainType::Water
-            ) || matches!(self.selected_wall, WallType::Normal);
+            new_tile.blocked = db
+                .get_by_id(self.selected_terrain)
+                .map(|d| d.blocked)
+                .unwrap_or(false)
+                || matches!(self.selected_wall, WallType::Normal);
             self.set_tile(pos, new_tile);
         }
     }
@@ -1912,8 +1935,9 @@ impl MapEditorState {
         &mut self,
         from: Position,
         to: Position,
-        terrain: TerrainType,
+        terrain: TerrainId,
         wall: WallType,
+        db: &TerrainDatabase,
     ) {
         let min_x = from.x.min(to.x);
         let max_x = from.x.max(to.x);
@@ -1924,7 +1948,7 @@ impl MapEditorState {
             for x in min_x..=max_x {
                 let pos = Position::new(x, y);
                 if self.map.is_valid_position(pos) {
-                    let new_tile = Tile::new(pos.x, pos.y, terrain, wall);
+                    let new_tile = Tile::new(pos.x, pos.y, terrain, wall, db);
                     self.set_tile(pos, new_tile);
                 }
             }
@@ -2002,8 +2026,8 @@ impl MapEditorState {
     }
 
     /// Erases a tile (resets to default)
-    pub fn erase_tile(&mut self, pos: Position) {
-        let default_tile = Tile::new(pos.x, pos.y, TerrainType::Ground, WallType::None);
+    pub fn erase_tile(&mut self, pos: Position, db: &TerrainDatabase) {
+        let default_tile = Tile::new(pos.x, pos.y, TERRAIN_GROUND, WallType::None, db);
         self.set_tile(pos, default_tile);
     }
 
@@ -3779,6 +3803,7 @@ impl NpcPlacementEditorState {
 pub struct MapGridWidget<'a> {
     state: &'a mut MapEditorState,
     tile_size: f32,
+    terrain_db: Option<&'a TerrainDatabase>,
 }
 
 impl<'a> MapGridWidget<'a> {
@@ -3786,6 +3811,7 @@ impl<'a> MapGridWidget<'a> {
         Self {
             state,
             tile_size: 24.0,
+            terrain_db: None,
         }
     }
 
@@ -3794,24 +3820,37 @@ impl<'a> MapGridWidget<'a> {
         self
     }
 
-    fn tile_color(tile: &Tile, event_type: Option<&EventType>, has_npc_placement: bool) -> Color32 {
+    /// Set the terrain database used for color lookup and tile painting.
+    pub fn terrain_db(mut self, db: &'a TerrainDatabase) -> Self {
+        self.terrain_db = Some(db);
+        self
+    }
+
+    fn tile_color(
+        tile: &Tile,
+        event_type: Option<&EventType>,
+        has_npc_placement: bool,
+        db: Option<&TerrainDatabase>,
+    ) -> Color32 {
         if has_npc_placement {
             return Color32::from_rgb(255, 200, 0); // Yellow for NPC placements
         }
 
-        // Determine terrain color first so we can blend it with wall color if needed.
+        // Determine terrain color from database; fall back to mid-gray if db not provided.
         // Apply visual color tint to the grid preview so vegetation presets such as
         // dried grass, dead trees, and flowering shrubs are visible while authoring.
-        let mut terrain_color = match tile.terrain {
-            TerrainType::Ground => Color32::from_rgb(210, 180, 140), // Tan
-            TerrainType::Grass => Color32::from_rgb(50, 205, 50),    // Lime Green
-            TerrainType::Water => Color32::from_rgb(30, 144, 255),   // Dodger Blue
-            TerrainType::Lava => Color32::from_rgb(255, 69, 0),      // Red-Orange
-            TerrainType::Swamp => Color32::from_rgb(85, 107, 47),    // Dark Olive Green
-            TerrainType::Stone => Color32::from_rgb(169, 169, 169),  // Dark Gray
-            TerrainType::Dirt => Color32::from_rgb(139, 69, 19),     // Saddle Brown
-            TerrainType::Forest => Color32::from_rgb(34, 139, 34),   // Forest Green
-            TerrainType::Mountain => Color32::from_rgb(105, 105, 105), // Dim Gray
+        let mut terrain_color = if let Some(db) = db {
+            let [r, g, b] = db
+                .get_by_id(tile.terrain)
+                .map(|def| def.color)
+                .unwrap_or([0.5, 0.5, 0.5]);
+            Color32::from_rgb(
+                (r * 255.0).round() as u8,
+                (g * 255.0).round() as u8,
+                (b * 255.0).round() as u8,
+            )
+        } else {
+            Color32::from_rgb(128, 128, 128)
         };
 
         if let Some((r, g, b)) = tile.visual.color_tint {
@@ -3956,7 +3995,12 @@ impl<'a> Widget for MapGridWidget<'a> {
                         let has_npc_placement =
                             self.state.show_npcs && npc_positions.contains(&pos);
 
-                        let color = Self::tile_color(tile, event_type.as_ref(), has_npc_placement);
+                        let color = Self::tile_color(
+                            tile,
+                            event_type.as_ref(),
+                            has_npc_placement,
+                            self.terrain_db,
+                        );
 
                         let rect = Rect::from_min_size(
                             to_screen(x, y),
@@ -4082,10 +4126,14 @@ impl<'a> Widget for MapGridWidget<'a> {
                     match self.state.current_tool {
                         EditorTool::Select => {}
                         EditorTool::PaintTile => {
-                            self.state.paint_tile(pos);
+                            if let Some(db) = self.terrain_db {
+                                self.state.paint_tile(pos, db);
+                            }
                         }
                         EditorTool::Erase => {
-                            self.state.erase_tile(pos);
+                            if let Some(db) = self.terrain_db {
+                                self.state.erase_tile(pos, db);
+                            }
                         }
                         EditorTool::PlaceEvent => {
                             // If there's already an event at this tile, load it into the editor
@@ -4136,7 +4184,9 @@ impl<'a> Widget for MapGridWidget<'a> {
                         EditorTool::Fill => {
                             // Fill tool requires two clicks (start and end)
                             // For simplicity, we'll just paint single tiles for now
-                            self.state.paint_tile(pos);
+                            if let Some(db) = self.terrain_db {
+                                self.state.paint_tile(pos, db);
+                            }
                         }
                     }
 
@@ -4244,8 +4294,12 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                             MapEvent::LockedContainer { .. } => EventType::Treasure,
                         });
                         let has_npc_placement = npc_positions.contains(&pos);
-                        let color =
-                            MapGridWidget::tile_color(tile, event_type.as_ref(), has_npc_placement);
+                        let color = MapGridWidget::tile_color(
+                            tile,
+                            event_type.as_ref(),
+                            has_npc_placement,
+                            None,
+                        );
 
                         let rect =
                             Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
@@ -4437,6 +4491,8 @@ pub struct MapEditorRefs<'a> {
     pub landscape_definitions: &'a [antares::domain::LandscapeDefinition],
     pub characters: &'a [antares::domain::character_definition::CharacterDefinition],
     pub display_config: &'a DisplayConfig,
+    /// Merged terrain database (builtins + campaign overrides) for palette and color rendering.
+    pub terrain_db: &'a TerrainDatabase,
 }
 
 /// Read-only data slices for the map inspector panel.
@@ -4450,6 +4506,8 @@ pub struct MapInspectorData<'a> {
     /// Reusable landscape definitions used to label and edit selected placements.
     pub landscape_definitions: &'a [antares::domain::LandscapeDefinition],
     pub characters: &'a [antares::domain::character_definition::CharacterDefinition],
+    /// Terrain database for the inspector's terrain ComboBox and runtime hints.
+    pub terrain_db: &'a TerrainDatabase,
 }
 
 impl MapsEditorState {
@@ -4751,6 +4809,7 @@ impl MapsEditorState {
                     ctx.data_file,
                     ctx.unsaved_changes,
                     ctx.status_message,
+                    refs.terrain_db,
                 );
             }
             MapsEditorMode::Add | MapsEditorMode::Edit => {
@@ -4773,6 +4832,7 @@ impl MapsEditorState {
         maps_dir: &str,
         unsaved_changes: &mut bool,
         status_message: &mut String,
+        terrain_db: &TerrainDatabase,
     ) {
         // Build and sort filtered list snapshot for UI display
         let filtered_maps = Self::build_filtered_maps_snapshot(maps, &self.search_filter);
@@ -4866,7 +4926,7 @@ impl MapsEditorState {
                         // Preview
                         right_ui.heading("Preview");
                         right_ui.separator();
-                        Self::show_map_preview(right_ui, map);
+                        Self::show_map_preview(right_ui, map, terrain_db);
                     }
                 } else {
                     right_ui.heading("No Map Selected");
@@ -5086,7 +5146,8 @@ impl MapsEditorState {
             };
 
             // Tool palette row (Tools, Terrain, and Wall)
-            let tool_zoom_action = Self::show_tool_palette(ui, editor, self.zoom_level);
+            let tool_zoom_action =
+                Self::show_tool_palette(ui, editor, self.zoom_level, refs.terrain_db);
 
             // Prefer zoom action from the view toolbar over the tool palette (fallback to tool palette).
             let zoom_action = view_zoom_action.or(tool_zoom_action);
@@ -5227,7 +5288,8 @@ impl MapsEditorState {
 
                                     let _map_response = ui.add(
                                         MapGridWidget::new(editor_ref)
-                                            .tile_size(effective_tile_size),
+                                            .tile_size(effective_tile_size)
+                                            .terrain_db(refs.terrain_db),
                                     );
 
                                     // Debug logging removed for map widget response rect.
@@ -5255,6 +5317,7 @@ impl MapsEditorState {
                                         furniture_definitions: refs.furniture_definitions,
                                         landscape_definitions: refs.landscape_definitions,
                                         characters: refs.characters,
+                                        terrain_db: refs.terrain_db,
                                     };
                                     if let Some(npc_id) = Self::show_inspector_panel(
                                         ui,
@@ -5383,6 +5446,7 @@ impl MapsEditorState {
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
         _current_zoom: f32,
+        terrain_db: &TerrainDatabase,
     ) -> Option<ZoomAction> {
         let action: Option<ZoomAction> = None;
 
@@ -5408,27 +5472,19 @@ impl MapsEditorState {
 
             // Terrain selection
             ui.label("Terrain:");
+            let selected_name = terrain_db
+                .get_by_id(editor.selected_terrain)
+                .map(|d| d.name.as_str())
+                .unwrap_or("Unknown");
             egui::ComboBox::from_id_salt("map_terrain_palette")
-                .selected_text(format!("{:?}", editor.selected_terrain))
+                .selected_text(selected_name)
                 .show_ui(ui, |ui| {
-                    for terrain in &[
-                        TerrainType::Ground,
-                        TerrainType::Grass,
-                        TerrainType::Water,
-                        TerrainType::Stone,
-                        TerrainType::Dirt,
-                        TerrainType::Forest,
-                        TerrainType::Mountain,
-                        TerrainType::Lava,
-                        TerrainType::Swamp,
-                    ] {
-                        ui.push_id(format!("{terrain:?}"), |ui| {
+                    let mut sorted_defs: Vec<&TerrainDefinition> = terrain_db.all_definitions();
+                    sorted_defs.sort_by_key(|d| d.id);
+                    for def in &sorted_defs {
+                        ui.push_id(def.id, |ui| {
                             if ui
-                                .selectable_value(
-                                    &mut editor.selected_terrain,
-                                    *terrain,
-                                    format!("{:?}", terrain),
-                                )
+                                .selectable_value(&mut editor.selected_terrain, def.id, &def.name)
                                 .changed()
                             {
                                 ui.ctx().request_repaint();
@@ -5587,7 +5643,7 @@ impl MapsEditorState {
                 .map
                 .get_tile(pos)
                 .map(|t| (t.terrain, t.wall_type, t.blocked, t.visual.clone()));
-            let mut change_terrain_to: Option<TerrainType> = None;
+            let mut change_terrain_to: Option<TerrainId> = None;
 
             ui.group(|ui| {
                 ui.label(format!("Position: ({}, {})", pos.x, pos.y));
@@ -5597,27 +5653,27 @@ impl MapsEditorState {
                     // e.g. Forest → Ground without switching to Paint Tile tool.
                     ui.horizontal(|ui| {
                         ui.label("Terrain:");
+                        let terrain_name = data
+                            .terrain_db
+                            .get_by_id(terrain_type)
+                            .map(|d| d.name.as_str())
+                            .unwrap_or("Unknown");
                         let mut sel = terrain_type;
                         egui::ComboBox::from_id_salt("inspector_tile_terrain")
-                            .selected_text(format!("{:?}", terrain_type))
+                            .selected_text(terrain_name)
                             .show_ui(ui, |ui| {
-                                for &t in &[
-                                    TerrainType::Ground,
-                                    TerrainType::Grass,
-                                    TerrainType::Stone,
-                                    TerrainType::Dirt,
-                                    TerrainType::Forest,
-                                    TerrainType::Water,
-                                    TerrainType::Swamp,
-                                    TerrainType::Lava,
-                                    TerrainType::Mountain,
-                                ] {
-                                    if ui
-                                        .selectable_value(&mut sel, t, format!("{:?}", t))
-                                        .clicked()
-                                    {
-                                        ui.ctx().request_repaint();
-                                    }
+                                let mut sorted_defs: Vec<&TerrainDefinition> =
+                                    data.terrain_db.all_definitions();
+                                sorted_defs.sort_by_key(|d| d.id);
+                                for def in &sorted_defs {
+                                    ui.push_id(def.id, |ui| {
+                                        if ui
+                                            .selectable_value(&mut sel, def.id, &def.name)
+                                            .clicked()
+                                        {
+                                            ui.ctx().request_repaint();
+                                        }
+                                    });
                                 }
                             });
                         if sel != terrain_type {
@@ -5634,7 +5690,12 @@ impl MapsEditorState {
                     );
                     // Explain the source of procedural trees so authors know
                     // to change the terrain type rather than clearing metadata.
-                    if terrain_type == TerrainType::Forest {
+                    if data
+                        .terrain_db
+                        .get_by_id(terrain_type)
+                        .map(|d| d.vegetation == TerrainVegetation::Forest)
+                        .unwrap_or(false)
+                    {
                         ui.label(
                             egui::RichText::new(
                                 "💡 Procedural trees come from Forest terrain. \
@@ -5646,8 +5707,12 @@ impl MapsEditorState {
                     }
                     ui.label(Self::vegetation_authoring_summary(visual));
                     ui.label(
-                        egui::RichText::new(Self::vegetation_runtime_hint(terrain_type, visual))
-                            .small()
+                        egui::RichText::new(Self::vegetation_runtime_hint(
+                            terrain_type,
+                            data.terrain_db,
+                            visual,
+                        ))
+                        .small()
                             .color(egui::Color32::GRAY),
                     );
                 }
@@ -6118,9 +6183,12 @@ impl MapsEditorState {
                 if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
                     let mut new_tile = old_tile;
                     new_tile.terrain = new_terrain;
-                    new_tile.blocked =
-                        matches!(new_terrain, TerrainType::Mountain | TerrainType::Water)
-                            || matches!(new_tile.wall_type, WallType::Normal);
+                    new_tile.blocked = data
+                        .terrain_db
+                        .get_by_id(new_terrain)
+                        .map(|d| d.blocked)
+                        .unwrap_or(false)
+                        || matches!(new_tile.wall_type, WallType::Normal);
                     // Clear terrain-specific visual metadata (tree_type,
                     // grass_density, rock_variant, etc.) that no longer applies
                     // to the new terrain type, so the runtime uses its defaults.
@@ -6174,6 +6242,7 @@ impl MapsEditorState {
                     Self::show_terrain_specific_controls(
                         ui,
                         terrain_type,
+                        data.terrain_db,
                         &mut editor.terrain_editor_state,
                     );
 
@@ -6188,7 +6257,7 @@ impl MapsEditorState {
                         "✅ Apply Terrain Settings".to_string()
                     };
                     if ui.button(&terrain_apply_text).clicked() {
-                        editor.apply_terrain_state_to_selection();
+                        editor.apply_terrain_state_to_selection(data.terrain_db);
                         // Reload terrain state from the primary selected tile
                         // so the panel confirms the values just written.
                         let tile_visual = editor.map.get_tile(pos).map(|t| t.visual.clone());
@@ -6319,26 +6388,36 @@ impl MapsEditorState {
     }
 
     /// Explain how the current vegetation metadata affects runtime rendering.
-    fn vegetation_runtime_hint(terrain_type: TerrainType, metadata: &TileVisualMetadata) -> String {
-        match terrain_type {
-            TerrainType::Grass => format!(
+    fn vegetation_runtime_hint(
+        terrain_id: TerrainId,
+        db: &TerrainDatabase,
+        metadata: &TileVisualMetadata,
+    ) -> String {
+        let vegetation = db
+            .get_by_id(terrain_id)
+            .map(|d| d.vegetation)
+            .unwrap_or(TerrainVegetation::None);
+        if vegetation == TerrainVegetation::GrassCover {
+            format!(
                 "Runtime effect: grass density controls clump coverage; foliage density multiplies coverage; blade config {} height/shape/color variation.",
                 if metadata.grass_blade_config.is_some() {
                     "customizes"
                 } else {
                     "uses default"
                 }
-            ),
-            TerrainType::Forest => {
-                if metadata.tree_type() == TreeType::Dead || metadata.foliage_density() <= 0.0 {
-                    "Runtime effect: forest tile spawns a dead or leafless tree with no foliage canopy.".to_string()
-                } else if metadata.tree_type() == TreeType::Shrub {
-                    "Runtime effect: forest tile spawns shrub vegetation instead of a full tree.".to_string()
-                } else {
-                    "Runtime effect: tree type selects species mesh; foliage density controls canopy and understory shrubs.".to_string()
-                }
+            )
+        } else if vegetation == TerrainVegetation::Forest {
+            if metadata.tree_type() == TreeType::Dead || metadata.foliage_density() <= 0.0 {
+                "Runtime effect: forest tile spawns a dead or leafless tree with no foliage canopy."
+                    .to_string()
+            } else if metadata.tree_type() == TreeType::Shrub {
+                "Runtime effect: forest tile spawns shrub vegetation instead of a full tree."
+                    .to_string()
+            } else {
+                "Runtime effect: tree type selects species mesh; foliage density controls canopy and understory shrubs.".to_string()
             }
-            _ => "Runtime effect: vegetation fields are saved, but only Grass and Forest terrain consume them directly.".to_string(),
+        } else {
+            "Runtime effect: vegetation fields are saved, but only GrassCover and Forest terrain consume them directly.".to_string()
         }
     }
 
@@ -8811,7 +8890,7 @@ impl MapsEditorState {
     /// Tile size is computed so the entire map fits within the available width
     /// and a proportional max height, preserving the map's aspect ratio.
     /// No tiles are ever truncated regardless of map size.
-    fn show_map_preview(ui: &mut egui::Ui, map: &Map) {
+    fn show_map_preview(ui: &mut egui::Ui, map: &Map, terrain_db: &TerrainDatabase) {
         // Maximum tile size in the preview -- keeps small maps from looking huge.
         const MAX_PREVIEW_TILE: f32 = 18.0;
 
@@ -8840,17 +8919,15 @@ impl MapsEditorState {
             for x in 0..map.width {
                 let pos = Position::new(x as i32, y as i32);
                 if let Some(tile) = map.get_tile(pos) {
-                    let base_color = match tile.terrain {
-                        TerrainType::Ground => Color32::from_rgb(160, 140, 120),
-                        TerrainType::Grass => Color32::from_rgb(100, 180, 100),
-                        TerrainType::Water => Color32::from_rgb(80, 120, 200),
-                        TerrainType::Lava => Color32::from_rgb(220, 60, 30),
-                        TerrainType::Swamp => Color32::from_rgb(90, 100, 70),
-                        TerrainType::Stone => Color32::from_rgb(120, 120, 130),
-                        TerrainType::Dirt => Color32::from_rgb(140, 110, 80),
-                        TerrainType::Forest => Color32::from_rgb(60, 120, 60),
-                        TerrainType::Mountain => Color32::from_rgb(100, 100, 110),
-                    };
+                    let [r, g, b] = terrain_db
+                        .get_by_id(tile.terrain)
+                        .map(|def| def.color)
+                        .unwrap_or([0.5, 0.5, 0.5]);
+                    let base_color = Color32::from_rgb(
+                        (r * 255.0).round() as u8,
+                        (g * 255.0).round() as u8,
+                        (b * 255.0).round() as u8,
+                    );
 
                     // Darken blocked (wall) tiles.
                     let color = if tile.blocked {
@@ -9256,19 +9333,20 @@ impl MapsEditorState {
         }
     }
 
-    /// Show terrain-specific inspector controls based on selected tile's terrain type
+    /// Show terrain-specific inspector controls based on selected tile's terrain id
     ///
     /// Displays context-sensitive controls that vary by terrain type:
-    /// - Grassland/Plains: grass_density dropdown, foliage_density slider
-    /// - Forest: tree_type dropdown, foliage_density slider, snow_coverage slider
-    /// - Mountain/Hill: rock_variant dropdown, snow_coverage slider
-    /// - Water/Swamp: water_flow_direction dropdown
-    /// - Desert/Snow: snow_coverage slider only
+    /// - GrassCover vegetation: grass_density dropdown, foliage_density slider
+    /// - Forest vegetation: tree_type dropdown, foliage_density slider, snow_coverage slider
+    /// - Mountain mesh: rock_variant dropdown, snow_coverage slider
+    /// - Water mesh: water_flow_direction dropdown
+    /// - Other: no terrain-specific controls
     ///
     /// # Arguments
     ///
     /// * `ui` - egui UI context
-    /// * `terrain_type` - The TerrainType of the selected tile
+    /// * `terrain_id` - The TerrainId of the selected tile
+    /// * `db` - Terrain database for looking up vegetation and mesh style
     /// * `state` - Mutable reference to TerrainEditorState
     ///
     /// # Returns
@@ -9276,7 +9354,8 @@ impl MapsEditorState {
     /// `true` if any control was modified, `false` otherwise
     fn show_terrain_specific_controls(
         ui: &mut egui::Ui,
-        terrain_type: TerrainType,
+        terrain_id: TerrainId,
+        db: &TerrainDatabase,
         state: &mut TerrainEditorState,
     ) -> bool {
         let mut changed = false;
@@ -9300,253 +9379,253 @@ impl MapsEditorState {
             return changed;
         }
 
-        match terrain_type {
-            TerrainType::Grass => {
-                // Grass density dropdown
-                ui.label("Grass Density:")
-                    .on_hover_text("Runtime effect: changes clump coverage for Grass terrain.");
-                let mut density_index = match state.grass_density {
-                    GrassDensity::None => 0,
-                    GrassDensity::Low => 1,
-                    GrassDensity::Medium => 2,
-                    GrassDensity::High => 3,
-                    GrassDensity::VeryHigh => 4,
+        let vegetation = db
+            .get_by_id(terrain_id)
+            .map(|d| d.vegetation)
+            .unwrap_or(TerrainVegetation::None);
+        let mesh_style = db
+            .get_by_id(terrain_id)
+            .map(|d| d.mesh_style)
+            .unwrap_or(TerrainMeshStyle::Flat);
+
+        if vegetation == TerrainVegetation::GrassCover {
+            // Grass density dropdown
+            ui.label("Grass Density:")
+                .on_hover_text("Runtime effect: changes clump coverage for Grass terrain.");
+            let mut density_index = match state.grass_density {
+                GrassDensity::None => 0,
+                GrassDensity::Low => 1,
+                GrassDensity::Medium => 2,
+                GrassDensity::High => 3,
+                GrassDensity::VeryHigh => 4,
+            };
+
+            let old_index = density_index;
+            egui::ComboBox::from_id_salt("grass_density_box")
+                .selected_text(format!("{:?}", state.grass_density))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut density_index, 0, "None");
+                    ui.selectable_value(&mut density_index, 1, "Low");
+                    ui.selectable_value(&mut density_index, 2, "Medium");
+                    ui.selectable_value(&mut density_index, 3, "High");
+                    ui.selectable_value(&mut density_index, 4, "VeryHigh");
+                });
+
+            if old_index != density_index {
+                changed = true;
+                state.grass_density = match density_index {
+                    0 => GrassDensity::None,
+                    1 => GrassDensity::Low,
+                    2 => GrassDensity::Medium,
+                    3 => GrassDensity::High,
+                    4 => GrassDensity::VeryHigh,
+                    _ => GrassDensity::Medium,
                 };
+            }
 
-                let old_index = density_index;
-                egui::ComboBox::from_id_salt("grass_density_box")
-                    .selected_text(format!("{:?}", state.grass_density))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut density_index, 0, "None");
-                        ui.selectable_value(&mut density_index, 1, "Low");
-                        ui.selectable_value(&mut density_index, 2, "Medium");
-                        ui.selectable_value(&mut density_index, 3, "High");
-                        ui.selectable_value(&mut density_index, 4, "VeryHigh");
-                    });
+            ui.label("Foliage Density:")
+                .on_hover_text("Runtime effect: multiplies grass clump coverage for this tile.");
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
+                        .text("density")
+                        .step_by(0.1),
+                )
+                .changed();
 
-                if old_index != density_index {
-                    changed = true;
-                    state.grass_density = match density_index {
-                        0 => GrassDensity::None,
-                        1 => GrassDensity::Low,
-                        2 => GrassDensity::Medium,
-                        3 => GrassDensity::High,
-                        4 => GrassDensity::VeryHigh,
-                        _ => GrassDensity::Medium,
-                    };
-                }
+            ui.separator();
+            changed |= ui
+                .checkbox(
+                    &mut state.grass_blade_config_enabled,
+                    "Custom Grass Blade Config",
+                )
+                .on_hover_text("Runtime effect: customizes clump blade length, width, lean, curvature, and color variation.")
+                .changed();
 
-                ui.label("Foliage Density:").on_hover_text(
-                    "Runtime effect: multiplies grass clump coverage for this tile.",
-                );
+            if state.grass_blade_config_enabled {
+                ui.label("Blade Length:");
                 changed |= ui
                     .add(
-                        egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
-                            .text("density")
-                            .step_by(0.1),
+                        egui::Slider::new(&mut state.grass_blade_config.length, 0.5..=2.0)
+                            .text("x")
+                            .step_by(0.05),
                     )
                     .changed();
 
-                ui.separator();
+                ui.label("Blade Width:");
                 changed |= ui
-                    .checkbox(
-                        &mut state.grass_blade_config_enabled,
-                        "Custom Grass Blade Config",
+                    .add(
+                        egui::Slider::new(&mut state.grass_blade_config.width, 0.5..=2.0)
+                            .text("x")
+                            .step_by(0.05),
                     )
-                    .on_hover_text("Runtime effect: customizes clump blade length, width, lean, curvature, and color variation.")
                     .changed();
 
-                if state.grass_blade_config_enabled {
-                    ui.label("Blade Length:");
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut state.grass_blade_config.length, 0.5..=2.0)
-                                .text("x")
-                                .step_by(0.05),
-                        )
-                        .changed();
+                ui.label("Blade Tilt (radians):");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.grass_blade_config.tilt, 0.0..=0.5)
+                            .text("rad")
+                            .step_by(0.01),
+                    )
+                    .changed();
 
-                    ui.label("Blade Width:");
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut state.grass_blade_config.width, 0.5..=2.0)
-                                .text("x")
-                                .step_by(0.05),
-                        )
-                        .changed();
+                ui.label("Blade Curve:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.grass_blade_config.curve, 0.0..=1.0)
+                            .text("curve")
+                            .step_by(0.05),
+                    )
+                    .changed();
 
-                    ui.label("Blade Tilt (radians):");
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut state.grass_blade_config.tilt, 0.0..=0.5)
-                                .text("rad")
-                                .step_by(0.01),
-                        )
-                        .changed();
-
-                    ui.label("Blade Curve:");
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut state.grass_blade_config.curve, 0.0..=1.0)
-                                .text("curve")
-                                .step_by(0.05),
-                        )
-                        .changed();
-
-                    ui.label("Color Variation:");
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(
-                                &mut state.grass_blade_config.color_variation,
-                                0.0..=1.0,
-                            )
+                ui.label("Color Variation:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.grass_blade_config.color_variation, 0.0..=1.0)
                             .text("variation")
                             .step_by(0.05),
-                        )
-                        .changed();
-                }
-            }
-
-            TerrainType::Forest => {
-                // Tree type dropdown
-                ui.label("Tree Type:")
-                    .on_hover_text("Runtime effect: selects the species-specific tree or shrub mesh spawned on Forest terrain.");
-                let mut tree_index = match state.tree_type {
-                    TreeType::Oak => 0,
-                    TreeType::Pine => 1,
-                    TreeType::Dead => 2,
-                    TreeType::Palm => 3,
-                    TreeType::Willow => 4,
-                    TreeType::Birch => 5,
-                    TreeType::Shrub => 6,
-                };
-
-                let old_index = tree_index;
-                egui::ComboBox::from_id_salt("tree_type_box")
-                    .selected_text(format!("{:?}", state.tree_type))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut tree_index, 0, "Oak");
-                        ui.selectable_value(&mut tree_index, 1, "Pine");
-                        ui.selectable_value(&mut tree_index, 2, "Dead");
-                        ui.selectable_value(&mut tree_index, 3, "Palm");
-                        ui.selectable_value(&mut tree_index, 4, "Willow");
-                        ui.selectable_value(&mut tree_index, 5, "Birch");
-                        ui.selectable_value(&mut tree_index, 6, "Shrub");
-                    });
-
-                if old_index != tree_index {
-                    changed = true;
-                    state.tree_type = match tree_index {
-                        0 => TreeType::Oak,
-                        1 => TreeType::Pine,
-                        2 => TreeType::Dead,
-                        3 => TreeType::Palm,
-                        4 => TreeType::Willow,
-                        5 => TreeType::Birch,
-                        6 => TreeType::Shrub,
-                        _ => TreeType::Oak,
-                    };
-                }
-
-                ui.label("Foliage Density:")
-                    .on_hover_text("Runtime effect: controls canopy fullness and planned understory shrub density.");
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
-                            .text("density")
-                            .step_by(0.1),
-                    )
-                    .changed();
-
-                ui.label("Snow Coverage:");
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
-                            .text("coverage")
-                            .step_by(0.05),
                     )
                     .changed();
             }
+        } else if vegetation == TerrainVegetation::Forest {
+            // Tree type dropdown
+            ui.label("Tree Type:")
+                .on_hover_text("Runtime effect: selects the species-specific tree or shrub mesh spawned on Forest terrain.");
+            let mut tree_index = match state.tree_type {
+                TreeType::Oak => 0,
+                TreeType::Pine => 1,
+                TreeType::Dead => 2,
+                TreeType::Palm => 3,
+                TreeType::Willow => 4,
+                TreeType::Birch => 5,
+                TreeType::Shrub => 6,
+            };
 
-            TerrainType::Mountain => {
-                // Rock variant dropdown
-                ui.label("Rock Variant:");
-                let mut rock_index = match state.rock_variant {
-                    RockVariant::Smooth => 0,
-                    RockVariant::Jagged => 1,
-                    RockVariant::Layered => 2,
-                    RockVariant::Crystal => 3,
+            let old_index = tree_index;
+            egui::ComboBox::from_id_salt("tree_type_box")
+                .selected_text(format!("{:?}", state.tree_type))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut tree_index, 0, "Oak");
+                    ui.selectable_value(&mut tree_index, 1, "Pine");
+                    ui.selectable_value(&mut tree_index, 2, "Dead");
+                    ui.selectable_value(&mut tree_index, 3, "Palm");
+                    ui.selectable_value(&mut tree_index, 4, "Willow");
+                    ui.selectable_value(&mut tree_index, 5, "Birch");
+                    ui.selectable_value(&mut tree_index, 6, "Shrub");
+                });
+
+            if old_index != tree_index {
+                changed = true;
+                state.tree_type = match tree_index {
+                    0 => TreeType::Oak,
+                    1 => TreeType::Pine,
+                    2 => TreeType::Dead,
+                    3 => TreeType::Palm,
+                    4 => TreeType::Willow,
+                    5 => TreeType::Birch,
+                    6 => TreeType::Shrub,
+                    _ => TreeType::Oak,
                 };
-
-                let old_index = rock_index;
-                egui::ComboBox::from_id_salt("rock_variant_box")
-                    .selected_text(format!("{:?}", state.rock_variant))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut rock_index, 0, "Smooth");
-                        ui.selectable_value(&mut rock_index, 1, "Jagged");
-                        ui.selectable_value(&mut rock_index, 2, "Layered");
-                        ui.selectable_value(&mut rock_index, 3, "Crystal");
-                    });
-
-                if old_index != rock_index {
-                    changed = true;
-                    state.rock_variant = match rock_index {
-                        0 => RockVariant::Smooth,
-                        1 => RockVariant::Jagged,
-                        2 => RockVariant::Layered,
-                        3 => RockVariant::Crystal,
-                        _ => RockVariant::Smooth,
-                    };
-                }
-
-                ui.label("Snow Coverage:");
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
-                            .text("coverage")
-                            .step_by(0.05),
-                    )
-                    .changed();
             }
 
-            TerrainType::Water | TerrainType::Swamp => {
-                // Water flow direction dropdown
-                ui.label("Water Flow Direction:");
-                let mut flow_index = match state.water_flow_direction {
-                    WaterFlowDirection::Still => 0,
-                    WaterFlowDirection::North => 1,
-                    WaterFlowDirection::South => 2,
-                    WaterFlowDirection::East => 3,
-                    WaterFlowDirection::West => 4,
+            ui.label("Foliage Density:").on_hover_text(
+                "Runtime effect: controls canopy fullness and planned understory shrub density.",
+            );
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
+                        .text("density")
+                        .step_by(0.1),
+                )
+                .changed();
+
+            ui.label("Snow Coverage:");
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
+                        .text("coverage")
+                        .step_by(0.05),
+                )
+                .changed();
+        } else if mesh_style == TerrainMeshStyle::Mountain {
+            // Rock variant dropdown
+            ui.label("Rock Variant:");
+            let mut rock_index = match state.rock_variant {
+                RockVariant::Smooth => 0,
+                RockVariant::Jagged => 1,
+                RockVariant::Layered => 2,
+                RockVariant::Crystal => 3,
+            };
+
+            let old_index = rock_index;
+            egui::ComboBox::from_id_salt("rock_variant_box")
+                .selected_text(format!("{:?}", state.rock_variant))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut rock_index, 0, "Smooth");
+                    ui.selectable_value(&mut rock_index, 1, "Jagged");
+                    ui.selectable_value(&mut rock_index, 2, "Layered");
+                    ui.selectable_value(&mut rock_index, 3, "Crystal");
+                });
+
+            if old_index != rock_index {
+                changed = true;
+                state.rock_variant = match rock_index {
+                    0 => RockVariant::Smooth,
+                    1 => RockVariant::Jagged,
+                    2 => RockVariant::Layered,
+                    3 => RockVariant::Crystal,
+                    _ => RockVariant::Smooth,
                 };
-
-                let old_index = flow_index;
-                egui::ComboBox::from_id_salt("water_flow_box")
-                    .selected_text(format!("{:?}", state.water_flow_direction))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut flow_index, 0, "Still");
-                        ui.selectable_value(&mut flow_index, 1, "North");
-                        ui.selectable_value(&mut flow_index, 2, "South");
-                        ui.selectable_value(&mut flow_index, 3, "East");
-                        ui.selectable_value(&mut flow_index, 4, "West");
-                    });
-
-                if old_index != flow_index {
-                    changed = true;
-                    state.water_flow_direction = match flow_index {
-                        0 => WaterFlowDirection::Still,
-                        1 => WaterFlowDirection::North,
-                        2 => WaterFlowDirection::South,
-                        3 => WaterFlowDirection::East,
-                        4 => WaterFlowDirection::West,
-                        _ => WaterFlowDirection::Still,
-                    };
-                }
             }
 
-            _ => {
-                ui.label("No terrain-specific controls for this terrain type.");
+            ui.label("Snow Coverage:");
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
+                        .text("coverage")
+                        .step_by(0.05),
+                )
+                .changed();
+        } else if mesh_style == TerrainMeshStyle::Water {
+            // Water flow direction dropdown
+            ui.label("Water Flow Direction:");
+            let mut flow_index = match state.water_flow_direction {
+                WaterFlowDirection::Still => 0,
+                WaterFlowDirection::North => 1,
+                WaterFlowDirection::South => 2,
+                WaterFlowDirection::East => 3,
+                WaterFlowDirection::West => 4,
+            };
+
+            let old_index = flow_index;
+            egui::ComboBox::from_id_salt("water_flow_box")
+                .selected_text(format!("{:?}", state.water_flow_direction))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut flow_index, 0, "Still");
+                    ui.selectable_value(&mut flow_index, 1, "North");
+                    ui.selectable_value(&mut flow_index, 2, "South");
+                    ui.selectable_value(&mut flow_index, 3, "East");
+                    ui.selectable_value(&mut flow_index, 4, "West");
+                });
+
+            if old_index != flow_index {
+                changed = true;
+                state.water_flow_direction = match flow_index {
+                    0 => WaterFlowDirection::Still,
+                    1 => WaterFlowDirection::North,
+                    2 => WaterFlowDirection::South,
+                    3 => WaterFlowDirection::East,
+                    4 => WaterFlowDirection::West,
+                    _ => WaterFlowDirection::Still,
+                };
             }
+        } else {
+            ui.label(
+                egui::RichText::new("No terrain-specific controls for this terrain type.")
+                    .small()
+                    .color(egui::Color32::GRAY),
+            );
         }
 
         changed
@@ -10031,6 +10110,10 @@ fn classify_map_environment(map: &Map) -> (&'static str, Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::world::terrain::{
+        builtin_terrain_db, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_LAVA,
+        TERRAIN_MOUNTAIN, TERRAIN_STONE, TERRAIN_WATER,
+    };
 
     fn custom_sky_config() -> SkyConfig {
         SkyConfig {
@@ -10142,7 +10225,7 @@ mod tests {
         let mut state = MapEditorState::new(map);
 
         let pos = Position::new(5, 5);
-        let tile = Tile::new(5, 5, TerrainType::Water, WallType::None);
+        let tile = Tile::new(5, 5, TERRAIN_WATER, WallType::None, &builtin_terrain_db());
         state.set_tile(pos, tile);
 
         assert!(state.has_changes);
@@ -10157,10 +10240,10 @@ mod tests {
 
         let pos = Position::new(5, 5);
         let original_tile = state.map.get_tile(pos).unwrap().clone();
-        let new_tile = Tile::new(5, 5, TerrainType::Water, WallType::None);
+        let new_tile = Tile::new(5, 5, TERRAIN_WATER, WallType::None, &builtin_terrain_db());
 
         state.set_tile(pos, new_tile.clone());
-        assert_eq!(state.map.get_tile(pos).unwrap().terrain, TerrainType::Water);
+        assert_eq!(state.map.get_tile(pos).unwrap().terrain, TERRAIN_WATER);
 
         state.undo();
         assert_eq!(
@@ -10169,7 +10252,7 @@ mod tests {
         );
 
         state.redo();
-        assert_eq!(state.map.get_tile(pos).unwrap().terrain, TerrainType::Water);
+        assert_eq!(state.map.get_tile(pos).unwrap().terrain, TERRAIN_WATER);
     }
 
     #[test]
@@ -10247,12 +10330,18 @@ mod tests {
         let from = Position::new(2, 2);
         let to = Position::new(4, 4);
 
-        state.fill_region(from, to, TerrainType::Stone, WallType::None);
+        state.fill_region(
+            from,
+            to,
+            TERRAIN_STONE,
+            WallType::None,
+            &builtin_terrain_db(),
+        );
 
         for y in 2..=4 {
             for x in 2..=4 {
                 let pos = Position::new(x, y);
-                assert_eq!(state.map.get_tile(pos).unwrap().terrain, TerrainType::Stone);
+                assert_eq!(state.map.get_tile(pos).unwrap().terrain, TERRAIN_STONE);
             }
         }
     }
@@ -10520,8 +10609,8 @@ mod tests {
     fn test_save_to_ron() {
         let mut state =
             MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 5, 5));
-        state.selected_terrain = TerrainType::Grass;
-        state.paint_tile(Position { x: 0, y: 0 });
+        state.selected_terrain = TERRAIN_GRASS;
+        state.paint_tile(Position { x: 0, y: 0 }, &builtin_terrain_db());
 
         let ron = state.save_to_ron().unwrap();
         assert!(ron.contains("id:"));
@@ -10718,8 +10807,8 @@ mod tests {
         // Select a position
         let pos = Position::new(5, 5);
         state.selected_position = Some(pos);
-        state.selected_terrain = TerrainType::Grass;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_GRASS;
+        state.paint_tile(pos, &builtin_terrain_db());
 
         // Set terrain editor state
         state.terrain_editor_state.grass_density = GrassDensity::High;
@@ -10734,7 +10823,7 @@ mod tests {
         };
 
         // Apply terrain state
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&builtin_terrain_db());
 
         // Verify metadata was updated
         let metadata = state
@@ -10771,16 +10860,17 @@ mod tests {
         let pos2 = Position::new(4, 5);
         let pos3 = Position::new(6, 7);
         state.selected_tiles = vec![pos1, pos2, pos3];
-        state.selected_terrain = TerrainType::Forest;
-        state.paint_tile(pos1);
-        state.paint_tile(pos2);
-        state.paint_tile(pos3);
+        state.selected_terrain = TERRAIN_FOREST;
+        let db = builtin_terrain_db();
+        state.paint_tile(pos1, &db);
+        state.paint_tile(pos2, &db);
+        state.paint_tile(pos3, &db);
 
         // Set terrain editor state
         state.terrain_editor_state.tree_type = TreeType::Oak;
 
         // Apply terrain state
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&db);
 
         // Verify all tiles were updated
         let metadata_map = state
@@ -10848,8 +10938,8 @@ mod tests {
         let mut state =
             MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
         let pos = Position::new(2, 2);
-        state.selected_terrain = TerrainType::Grass;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_GRASS;
+        state.paint_tile(pos, &builtin_terrain_db());
 
         let metadata = VisualPreset::TallGrass.to_metadata();
         state.apply_visual_metadata(pos, &metadata);
@@ -10966,7 +11056,11 @@ mod tests {
             ..Default::default()
         };
 
-        terrain_state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Grass);
+        terrain_state.apply_to_metadata_for_terrain(
+            &mut metadata,
+            TERRAIN_GRASS,
+            &builtin_terrain_db(),
+        );
 
         assert_eq!(metadata.height, Some(0.4));
         assert_eq!(metadata.color_tint, Some((0.5, 0.8, 0.5)));
@@ -11005,7 +11099,11 @@ mod tests {
             ..Default::default()
         };
 
-        terrain_state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Forest);
+        terrain_state.apply_to_metadata_for_terrain(
+            &mut metadata,
+            TERRAIN_FOREST,
+            &builtin_terrain_db(),
+        );
 
         assert_eq!(metadata.scale, Some(1.2));
         assert_eq!(metadata.tree_type, Some(TreeType::Pine));
@@ -11075,7 +11173,7 @@ mod tests {
         // Apply Logic (simulation of button click)
         let visual_metadata = state.visual_editor.to_metadata();
         state.apply_visual_metadata_to_selection(&visual_metadata);
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&builtin_terrain_db());
 
         // Reset logic
         state.visual_editor.reset();
@@ -11364,6 +11462,7 @@ mod tests {
                 furniture_definitions: &[],
                 landscape_definitions: &[],
                 characters: &[],
+                terrain_db: &builtin_terrain_db(),
             };
             MapsEditorState::show_inspector_panel(ui, &mut state, &data, &[], &[]);
         });
@@ -11425,6 +11524,7 @@ mod tests {
                 furniture_definitions: &[],
                 landscape_definitions: &[],
                 characters: &[],
+                terrain_db: &builtin_terrain_db(),
             };
             // Must not panic.
             MapsEditorState::show_inspector_panel(ui, &mut state, &data, &[], &[]);
@@ -11488,25 +11588,26 @@ mod tests {
         let mut state = MapEditorState::new(map.clone());
 
         // Paint different terrain types
-        state.selected_terrain = TerrainType::Grass;
-        state.paint_tile(Position { x: 0, y: 0 });
-        state.selected_terrain = TerrainType::Water;
-        state.paint_tile(Position { x: 1, y: 0 });
-        state.selected_terrain = TerrainType::Stone;
-        state.paint_tile(Position { x: 2, y: 0 });
+        let db = builtin_terrain_db();
+        state.selected_terrain = TERRAIN_GRASS;
+        state.paint_tile(Position { x: 0, y: 0 }, &db);
+        state.selected_terrain = TERRAIN_WATER;
+        state.paint_tile(Position { x: 1, y: 0 }, &db);
+        state.selected_terrain = TERRAIN_STONE;
+        state.paint_tile(Position { x: 2, y: 0 }, &db);
 
         // Verify terrain was set
         assert_eq!(
             state.map.get_tile(Position { x: 0, y: 0 }).unwrap().terrain,
-            TerrainType::Grass
+            TERRAIN_GRASS
         );
         assert_eq!(
             state.map.get_tile(Position { x: 1, y: 0 }).unwrap().terrain,
-            TerrainType::Water
+            TERRAIN_WATER
         );
         assert_eq!(
             state.map.get_tile(Position { x: 2, y: 0 }).unwrap().terrain,
-            TerrainType::Stone
+            TERRAIN_STONE
         );
     }
 
@@ -11548,25 +11649,26 @@ mod tests {
             MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 5, 5));
 
         // Paint a tile
-        state.selected_terrain = TerrainType::Lava;
-        state.paint_tile(Position { x: 2, y: 2 });
+        let db = builtin_terrain_db();
+        state.selected_terrain = TERRAIN_LAVA;
+        state.paint_tile(Position { x: 2, y: 2 }, &db);
         assert_eq!(
             state.map.get_tile(Position { x: 2, y: 2 }).unwrap().terrain,
-            TerrainType::Lava
+            TERRAIN_LAVA
         );
 
         // Undo
         state.undo();
         assert_eq!(
             state.map.get_tile(Position { x: 2, y: 2 }).unwrap().terrain,
-            TerrainType::Ground
+            TERRAIN_GROUND
         );
 
         // Redo
         state.redo();
         assert_eq!(
             state.map.get_tile(Position { x: 2, y: 2 }).unwrap().terrain,
-            TerrainType::Lava
+            TERRAIN_LAVA
         );
     }
 
@@ -13076,7 +13178,7 @@ mod tests {
         };
 
         let mut metadata = TileVisualMetadata::default();
-        state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Grass);
+        state.apply_to_metadata_for_terrain(&mut metadata, TERRAIN_GRASS, &builtin_terrain_db());
 
         assert_eq!(metadata.grass_density, Some(GrassDensity::High));
         assert_eq!(metadata.foliage_density, Some(1.7));
@@ -13107,7 +13209,7 @@ mod tests {
         };
 
         let mut metadata = TileVisualMetadata::default();
-        state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Forest);
+        state.apply_to_metadata_for_terrain(&mut metadata, TERRAIN_FOREST, &builtin_terrain_db());
 
         assert_eq!(metadata.tree_type, Some(TreeType::Willow));
         assert_eq!(metadata.foliage_density, Some(0.6));
@@ -13285,14 +13387,14 @@ mod tests {
         let pos = Position::new(5, 5);
         state.selected_position = Some(pos);
         state.selected_tiles = vec![]; // Ensure multi-select is empty
-        state.selected_terrain = TerrainType::Grass;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_GRASS;
+        state.paint_tile(pos, &builtin_terrain_db());
 
         // Set terrain state
         state.terrain_editor_state.grass_density = GrassDensity::High;
 
         // Apply
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&builtin_terrain_db());
 
         // Verify
         let metadata = state
@@ -14583,8 +14685,8 @@ mod tests {
 
         let pos = Position::new(5, 5);
         state.selected_position = Some(pos);
-        state.selected_terrain = TerrainType::Forest;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_FOREST;
+        state.paint_tile(pos, &builtin_terrain_db());
 
         // Stage terrain settings (not yet written to tile).
         state.terrain_editor_state.tree_type = TreeType::Pine;
@@ -14624,8 +14726,9 @@ mod tests {
 
         let pos = Position::new(5, 5);
         state.selected_position = Some(pos);
-        state.selected_terrain = TerrainType::Forest;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_FOREST;
+        let db = builtin_terrain_db();
+        state.paint_tile(pos, &db);
 
         // Stage terrain settings.
         state.terrain_editor_state.tree_type = TreeType::Pine;
@@ -14633,7 +14736,7 @@ mod tests {
         state.terrain_editor_state.snow_coverage = 0.8;
 
         // Simulate Terrain Apply button.
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&db);
 
         // Simulate the post-apply reload (terrain panel confirms applied values).
         let tile_visual = state.map.get_tile(pos).map(|t| t.visual.clone());
@@ -14662,8 +14765,9 @@ mod tests {
 
         let pos = Position::new(3, 3);
         state.selected_position = Some(pos);
-        state.selected_terrain = TerrainType::Forest;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_FOREST;
+        let db = builtin_terrain_db();
+        state.paint_tile(pos, &db);
 
         // --- Step 1: apply visual (height only) ---
         state.visual_editor.enable_height = true;
@@ -14680,7 +14784,7 @@ mod tests {
         // --- Step 2: stage terrain, then apply terrain ---
         state.terrain_editor_state.tree_type = TreeType::Birch;
         state.terrain_editor_state.foliage_density = 1.8;
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&db);
 
         // After terrain apply: tile must have BOTH height (from visual apply)
         // and tree_type/foliage (from terrain apply).
@@ -14709,8 +14813,9 @@ mod tests {
 
         let pos = Position::new(4, 4);
         state.selected_position = Some(pos);
-        state.selected_terrain = TerrainType::Grass;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_GRASS;
+        let db = builtin_terrain_db();
+        state.paint_tile(pos, &db);
 
         // Simulate Frame 1 – initial tile selection loads both editors.
         state.maybe_load_visual_from_selected_position();
@@ -14753,7 +14858,7 @@ mod tests {
         );
 
         // Simulate Frame 4 – Terrain Apply: staged values write to tile.
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&db);
 
         // Both visual and terrain changes must now be in the tile.
         let tile = state.map.get_tile(pos).unwrap();
@@ -14842,14 +14947,15 @@ mod tests {
 
         let pos = Position::new(3, 3);
         state.selected_position = Some(pos);
-        state.selected_terrain = TerrainType::Grass;
-        state.paint_tile(pos);
+        state.selected_terrain = TERRAIN_GRASS;
+        let db = builtin_terrain_db();
+        state.paint_tile(pos, &db);
 
         // paint_tile sets has_changes; reset it to isolate the terrain apply.
         state.has_changes = false;
 
         state.terrain_editor_state.grass_density = GrassDensity::High;
-        state.apply_terrain_state_to_selection();
+        state.apply_terrain_state_to_selection(&db);
 
         assert!(
             state.has_changes,
@@ -15309,13 +15415,13 @@ mod tests {
 
         // Set terrain to Forest so apply_to_metadata_for_terrain would normally write tree_type.
         if let Some(tile) = editor.map.get_tile_mut(pos) {
-            tile.terrain = TerrainType::Forest;
+            tile.terrain = TERRAIN_FOREST;
         }
 
         // Apply with use_terrain_override = false must clear the tile.
         editor.terrain_editor_state = TerrainEditorState::default();
         editor.terrain_editor_state.use_terrain_override = false;
-        editor.apply_terrain_state_to_selection();
+        editor.apply_terrain_state_to_selection(&builtin_terrain_db());
 
         assert!(
             editor.map.get_tile(pos).unwrap().visual.tree_type.is_none(),
@@ -15369,17 +15475,20 @@ mod tests {
 
         // Give the tile Forest terrain and an explicit tree_type override.
         if let Some(tile) = editor.map.get_tile_mut(pos) {
-            tile.terrain = TerrainType::Forest;
+            tile.terrain = TERRAIN_FOREST;
             tile.visual.tree_type = Some(TreeType::Pine);
             tile.visual.foliage_density = Some(1.5);
         }
 
         // Simulate the terrain ComboBox selecting Ground.
-        let new_terrain = TerrainType::Ground;
+        let new_terrain = TERRAIN_GROUND;
         if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
             let mut new_tile = old_tile;
             new_tile.terrain = new_terrain;
-            new_tile.blocked = matches!(new_terrain, TerrainType::Mountain | TerrainType::Water)
+            new_tile.blocked = builtin_terrain_db()
+                .get_by_id(new_terrain)
+                .map(|d| d.blocked)
+                .unwrap_or(false)
                 || matches!(new_tile.wall_type, WallType::Normal);
             TerrainEditorState::clear_metadata(&mut new_tile.visual);
             editor.set_tile(pos, new_tile);
@@ -15390,7 +15499,7 @@ mod tests {
         }
 
         let tile = editor.map.get_tile(pos).unwrap();
-        assert_eq!(tile.terrain, TerrainType::Ground, "terrain must be Ground");
+        assert_eq!(tile.terrain, TERRAIN_GROUND, "terrain must be Ground");
         assert!(
             tile.visual.tree_type.is_none(),
             "tree_type must be cleared after terrain change"
@@ -15412,12 +15521,12 @@ mod tests {
         editor.selected_position = Some(pos);
 
         if let Some(tile) = editor.map.get_tile_mut(pos) {
-            tile.terrain = TerrainType::Forest;
+            tile.terrain = TERRAIN_FOREST;
             tile.visual.tree_type = Some(TreeType::Oak);
         }
 
         // Apply terrain change.
-        let new_terrain = TerrainType::Grass;
+        let new_terrain = TERRAIN_GRASS;
         if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
             let mut new_tile = old_tile;
             new_tile.terrain = new_terrain;
@@ -15426,10 +15535,7 @@ mod tests {
             editor.set_tile(pos, new_tile);
         }
 
-        assert_eq!(
-            editor.map.get_tile(pos).unwrap().terrain,
-            TerrainType::Grass
-        );
+        assert_eq!(editor.map.get_tile(pos).unwrap().terrain, TERRAIN_GRASS);
         assert!(
             editor.can_undo(),
             "undo must be available after terrain change"
@@ -15439,8 +15545,7 @@ mod tests {
         editor.undo();
         let tile = editor.map.get_tile(pos).unwrap();
         assert_eq!(
-            tile.terrain,
-            TerrainType::Forest,
+            tile.terrain, TERRAIN_FOREST,
             "undo must restore Forest terrain"
         );
         assert_eq!(
@@ -15460,24 +15565,27 @@ mod tests {
 
         // Make tile Mountain (blocked by terrain rules).
         if let Some(tile) = editor.map.get_tile_mut(pos) {
-            tile.terrain = TerrainType::Mountain;
+            tile.terrain = TERRAIN_MOUNTAIN;
             tile.blocked = true;
             tile.visual.rock_variant = Some(RockVariant::Jagged);
         }
 
         // Change to Ground.
-        let new_terrain = TerrainType::Ground;
+        let new_terrain = TERRAIN_GROUND;
         if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
             let mut new_tile = old_tile;
             new_tile.terrain = new_terrain;
-            new_tile.blocked = matches!(new_terrain, TerrainType::Mountain | TerrainType::Water)
+            new_tile.blocked = builtin_terrain_db()
+                .get_by_id(new_terrain)
+                .map(|d| d.blocked)
+                .unwrap_or(false)
                 || matches!(new_tile.wall_type, WallType::Normal);
             TerrainEditorState::clear_metadata(&mut new_tile.visual);
             editor.set_tile(pos, new_tile);
         }
 
         let tile = editor.map.get_tile(pos).unwrap();
-        assert_eq!(tile.terrain, TerrainType::Ground);
+        assert_eq!(tile.terrain, TERRAIN_GROUND);
         assert!(!tile.blocked, "Ground tile must not be blocked");
         assert!(
             tile.visual.rock_variant.is_none(),
@@ -15495,7 +15603,7 @@ mod tests {
 
         // Tile has both a visual height override and a tree_type override.
         if let Some(tile) = editor.map.get_tile_mut(pos) {
-            tile.terrain = TerrainType::Forest;
+            tile.terrain = TERRAIN_FOREST;
             tile.visual.height = Some(3.5);
             tile.visual.tree_type = Some(TreeType::Willow);
         }
@@ -15503,7 +15611,7 @@ mod tests {
         // Apply terrain change to Ground.
         if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
             let mut new_tile = old_tile;
-            new_tile.terrain = TerrainType::Ground;
+            new_tile.terrain = TERRAIN_GROUND;
             new_tile.blocked = false;
             TerrainEditorState::clear_metadata(&mut new_tile.visual);
             editor.set_tile(pos, new_tile);

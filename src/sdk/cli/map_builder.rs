@@ -29,8 +29,8 @@
 use crate::domain::types::{MapId, Position, TerrainId};
 use crate::domain::world::terrain::{
     builtin_terrain_db, TerrainDatabase, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS,
-    TERRAIN_GROUND, TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_SAND, TERRAIN_SNOW, TERRAIN_STONE,
-    TERRAIN_SWAMP, TERRAIN_WATER,
+    TERRAIN_GROUND, TERRAIN_ICE, TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_SAND, TERRAIN_SNOW,
+    TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
 };
 use crate::domain::world::{Map, MapEvent, Tile, WallType};
 use rustyline::error::ReadlineError;
@@ -189,9 +189,10 @@ impl MapBuilder {
             return;
         };
 
+        let db = &self.terrain_db;
         let terrains: Vec<TerrainId> = terrains_csv
             .split(',')
-            .map(|s| parse_terrain(s.trim()))
+            .map(|s| parse_terrain(s.trim(), db))
             .collect();
 
         let mut count = 0;
@@ -277,20 +278,7 @@ impl MapBuilder {
                 } else if map.events.contains_key(&pos) {
                     '!'
                 } else {
-                    match tile.terrain {
-                        TERRAIN_GROUND => '.',
-                        TERRAIN_GRASS => ',',
-                        TERRAIN_WATER => '~',
-                        TERRAIN_LAVA => '^',
-                        TERRAIN_SWAMP => '%',
-                        TERRAIN_STONE => '░',
-                        TERRAIN_DIRT => ':',
-                        TERRAIN_FOREST => '♣',
-                        TERRAIN_MOUNTAIN => '▲',
-                        TERRAIN_SAND => '~',
-                        TERRAIN_SNOW => '*',
-                        _ => '?', // campaign-defined terrain
-                    }
+                    builtin_glyph(tile.terrain).unwrap_or('?')
                 };
                 print!("{}", c);
             }
@@ -404,7 +392,7 @@ impl MapBuilder {
                         return true;
                     }
                 };
-                let terrain = parse_terrain(parts[3]);
+                let terrain = parse_terrain(parts[3], &self.terrain_db);
                 let wall = if parts.len() == 5 {
                     parse_wall(parts[4])
                 } else {
@@ -445,7 +433,7 @@ impl MapBuilder {
                         return true;
                     }
                 };
-                let terrain = parse_terrain(parts[5]);
+                let terrain = parse_terrain(parts[5], &self.terrain_db);
                 let wall = if parts.len() == 7 {
                     parse_wall(parts[6])
                 } else {
@@ -597,42 +585,69 @@ impl Default for MapBuilder {
 // Free-standing helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Parses a terrain name (case-insensitive) into a built-in [`TerrainId`].
+/// Returns the ASCII display glyph for a built-in terrain ID, or `None` for
+/// custom campaign terrain.
 ///
-/// Also accepts numeric IDs (e.g. `"13001"`) for custom campaign terrain.
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::terrain::{TERRAIN_GROUND, TERRAIN_WATER};
+/// use antares::sdk::cli::map_builder::builtin_glyph;
+///
+/// assert_eq!(builtin_glyph(TERRAIN_GROUND), Some('.'));
+/// assert_eq!(builtin_glyph(TERRAIN_WATER), Some('~'));
+/// assert_eq!(builtin_glyph(99999), None);
+/// ```
+pub fn builtin_glyph(id: TerrainId) -> Option<char> {
+    match id {
+        TERRAIN_GROUND => Some('.'),
+        TERRAIN_GRASS => Some(','),
+        TERRAIN_WATER => Some('~'),
+        TERRAIN_LAVA => Some('^'),
+        TERRAIN_SWAMP => Some('%'),
+        TERRAIN_STONE => Some('░'),
+        TERRAIN_DIRT => Some(':'),
+        TERRAIN_FOREST => Some('♣'),
+        TERRAIN_MOUNTAIN => Some('▲'),
+        TERRAIN_SAND => Some('~'),
+        TERRAIN_SNOW => Some('*'),
+        TERRAIN_ICE => Some('≈'),
+        _ => None,
+    }
+}
+
+/// Parses a terrain name (case-insensitive) or numeric ID into a [`TerrainId`].
+///
+/// Looks up the name in the provided [`TerrainDatabase`], so campaign-specific
+/// terrain types are recognised in addition to all built-in terrain names.
 /// Unrecognised names default to [`TERRAIN_GROUND`] with a warning.
 ///
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::terrain::TERRAIN_GRASS;
+/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS};
 /// use antares::sdk::cli::map_builder::parse_terrain;
 ///
-/// assert_eq!(parse_terrain("grass"), TERRAIN_GRASS);
-/// assert_eq!(parse_terrain("Grass"), TERRAIN_GRASS);
+/// let db = builtin_terrain_db();
+/// assert_eq!(parse_terrain("grass", &db), TERRAIN_GRASS);
+/// assert_eq!(parse_terrain("Grass", &db), TERRAIN_GRASS);
 /// ```
-pub fn parse_terrain(s: &str) -> TerrainId {
+pub fn parse_terrain(s: &str, db: &TerrainDatabase) -> TerrainId {
     // Try to parse as a numeric ID first (for custom campaign terrain)
     if let Ok(id) = s.trim().parse::<TerrainId>() {
         return id;
     }
-    match s.to_lowercase().as_str() {
-        "ground" => TERRAIN_GROUND,
-        "grass" => TERRAIN_GRASS,
-        "water" => TERRAIN_WATER,
-        "lava" => TERRAIN_LAVA,
-        "swamp" => TERRAIN_SWAMP,
-        "stone" => TERRAIN_STONE,
-        "dirt" => TERRAIN_DIRT,
-        "forest" => TERRAIN_FOREST,
-        "mountain" => TERRAIN_MOUNTAIN,
-        "sand" => TERRAIN_SAND,
-        "snow" => TERRAIN_SNOW,
-        _ => {
-            println!("⚠️  Unknown terrain '{}', using Ground", s);
-            TERRAIN_GROUND
-        }
+    // Case-insensitive name lookup in the terrain database
+    let lower = s.trim().to_lowercase();
+    if let Some(def) = db
+        .all_definitions()
+        .into_iter()
+        .find(|d| d.name.to_lowercase() == lower)
+    {
+        return def.id;
     }
+    println!("⚠️  Unknown terrain '{}', using Ground", s);
+    TERRAIN_GROUND
 }
 
 /// Parses a wall type name (case-insensitive) into a [`WallType`].
@@ -763,10 +778,40 @@ mod tests {
 
     #[test]
     fn test_parse_terrain() {
-        assert_eq!(parse_terrain("ground"), TERRAIN_GROUND);
-        assert_eq!(parse_terrain("grass"), TERRAIN_GRASS);
-        assert_eq!(parse_terrain("water"), TERRAIN_WATER);
-        assert_eq!(parse_terrain("FOREST"), TERRAIN_FOREST);
+        let db = builtin_terrain_db();
+        assert_eq!(parse_terrain("ground", &db), TERRAIN_GROUND);
+        assert_eq!(parse_terrain("grass", &db), TERRAIN_GRASS);
+        assert_eq!(parse_terrain("water", &db), TERRAIN_WATER);
+        assert_eq!(parse_terrain("FOREST", &db), TERRAIN_FOREST);
+    }
+
+    #[test]
+    fn test_parse_terrain_resolves_custom_campaign_terrain_by_name() {
+        use crate::domain::world::terrain::{
+            TerrainDefinition, TerrainMeshStyle, TerrainVegetation,
+        };
+
+        let custom_id: TerrainId = 13100;
+        let mut db = builtin_terrain_db();
+        db.add(TerrainDefinition {
+            id: custom_id,
+            name: "Volcanic Rock".to_string(),
+            texture_path: "assets/textures/terrain/volcanic_rock.png".to_string(),
+            roughness: 0.9,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.3, 0.1, 0.1],
+        })
+        .unwrap();
+
+        assert_eq!(parse_terrain("Volcanic Rock", &db), custom_id);
+        assert_eq!(parse_terrain("volcanic rock", &db), custom_id);
+        // Unknown name returns TERRAIN_GROUND
+        assert_eq!(parse_terrain("nonexistent", &db), TERRAIN_GROUND);
+        // Numeric ID passes through
+        assert_eq!(parse_terrain("13100", &db), custom_id);
     }
 
     #[test]

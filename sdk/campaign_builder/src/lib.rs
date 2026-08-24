@@ -85,6 +85,7 @@ pub mod stock_templates_editor;
 pub mod template_browser;
 pub mod template_metadata;
 pub mod templates;
+pub mod terrain_editor;
 pub mod test_utils;
 #[cfg(target_os = "macos")]
 pub mod tray;
@@ -491,6 +492,13 @@ pub struct CampaignMetadata {
     #[serde(default = "default_landscape_file")]
     pub landscape_file: String,
 
+    /// Relative path to the custom terrain definitions RON file.
+    ///
+    /// Custom terrain is opt-in per campaign. Existing `campaign.ron` files
+    /// that omit this field default to `"data/terrain.ron"`.
+    #[serde(default = "default_terrain_file")]
+    pub terrain_file: String,
+
     /// Relative path to the XP threshold tables RON file.
     ///
     /// Defaults to `"data/levels.ron"` when absent from the RON file (via `serde(default)`).
@@ -563,6 +571,10 @@ fn default_landscape_file() -> String {
     "data/landscape.ron".to_string()
 }
 
+fn default_terrain_file() -> String {
+    "data/terrain.ron".to_string()
+}
+
 fn default_levels_file() -> String {
     "data/levels.ron".to_string()
 }
@@ -628,6 +640,7 @@ impl Default for CampaignMetadata {
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
             furniture_file: "data/furniture.ron".to_string(),
             landscape_file: "data/landscape.ron".to_string(),
+            terrain_file: "data/terrain.ron".to_string(),
             levels_file: "data/levels.ron".to_string(),
             starting_time: default_starting_time(),
         }
@@ -647,6 +660,7 @@ pub enum EditorTab {
     Creatures,
     Furniture,
     Landscape,
+    Terrain,
     Objects,
     Importer,
     Maps,
@@ -676,6 +690,7 @@ impl EditorTab {
             EditorTab::Creatures => "Creatures",
             EditorTab::Furniture => "Furniture",
             EditorTab::Landscape => "Landscape",
+            EditorTab::Terrain => "Terrain",
             EditorTab::Objects => "Objects",
             EditorTab::Importer => "Importer",
             EditorTab::Maps => "Maps",
@@ -1131,6 +1146,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Creatures,
                     EditorTab::Furniture,
                     EditorTab::Landscape,
+                    EditorTab::Terrain,
                     EditorTab::Objects,
                     EditorTab::Importer,
                     EditorTab::Maps,
@@ -1359,6 +1375,25 @@ impl eframe::App for CampaignBuilderApp {
                     ui.ctx().request_repaint();
                 }
             }
+            EditorTab::Terrain => {
+                self.editor_registry.terrain_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.terrain_definitions,
+                    self.campaign_dir.as_deref(),
+                    &mut self.unsaved_changes,
+                );
+                // Rebuild the merged terrain DB from builtins + campaign overrides.
+                // O(12 + n) — negligible per frame.
+                let mut db =
+                    antares::domain::world::terrain::builtin_terrain_db();
+                let mut campaign_db =
+                    antares::domain::world::terrain::TerrainDatabase::new();
+                for def in &self.campaign_data.terrain_definitions {
+                    let _ = campaign_db.add(def.clone());
+                }
+                db.merge(campaign_db);
+                self.campaign_data.terrain_db = db;
+            }
             EditorTab::Objects => {
                 self.editor_registry.objects_editor_state.show(
                     ui,
@@ -1501,6 +1536,7 @@ impl eframe::App for CampaignBuilderApp {
                     landscape_definitions: &self.campaign_data.landscape_definitions,
                     characters: &self.editor_registry.characters_editor_state.characters,
                     display_config: &self.tool_config.display,
+                    terrain_db: &self.campaign_data.terrain_db,
                 };
                 let mut maps_ctx = EditorContext {
                     campaign_dir: self.campaign_dir.as_ref(),

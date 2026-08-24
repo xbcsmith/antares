@@ -1,3 +1,133 @@
+## Phase 5 (continued): Campaign Builder Terrain Editor
+
+### Summary
+
+Added the full terrain editor UI and supporting I/O infrastructure to the
+Campaign Builder SDK. Campaign authors can now create and edit custom terrain
+definitions (IDs >= 13100) through the new `Terrain` tab. Built-in terrain
+(IDs 13000-13011) is shown as read-only reference. Custom definitions are
+persisted to `data/terrain.ron` and merged with the built-in database on
+every load and tab render.
+
+### Deliverables
+
+- [x] `terrain_editor.rs` (NEW) - TerrainEditorState with list/edit/add/delete UI
+- [x] `editor_state.rs` - CampaignData.terrain_definitions, terrain_db (seeded from builtin_terrain_db); EditorRegistry.terrain_editor_state
+- [x] `campaign_io.rs` - load_terrain(), save_terrain(); wired into do_open_campaign, do_new_campaign, do_save_campaign
+- [x] `lib.rs` - CampaignMetadata.terrain_file; EditorTab::Terrain; MapEditorRefs.terrain_db passed
+- [x] 9 unit tests in terrain_editor::tests
+
+### Files Changed
+
+- `sdk/campaign_builder/src/terrain_editor.rs` (NEW)
+- `sdk/campaign_builder/src/editor_state.rs`
+- `sdk/campaign_builder/src/campaign_io.rs`
+- `sdk/campaign_builder/src/lib.rs`
+
+---
+
+## Phase 5 (map_editor.rs): TerrainType → TerrainId Migration
+
+### Summary
+
+Completed the final leg of the Terrain Externalization plan inside
+`sdk/campaign_builder/src/map_editor.rs`. The deleted `TerrainType` enum has
+been fully replaced with `TerrainId` (u32) backed by `TerrainDatabase`. Every
+site that previously matched on `TerrainType` variants now does a DB lookup via
+`TerrainDatabase::get_by_id`, reading `vegetation`, `mesh_style`, `blocked`, and
+`color` from the definition. The map editor palette and tile inspector are now
+fully data-driven and will automatically reflect any custom terrain IDs added by
+a campaign author.
+
+### Deliverables
+
+- [x] Imports: `TerrainType` removed; `TerrainId`, `TerrainDatabase`, `TerrainDefinition`, `TerrainMeshStyle`, `TerrainVegetation`, `TERRAIN_GROUND` added
+- [x] `MapEditorState.selected_terrain`: `TerrainType` → `TerrainId` (default `TERRAIN_GROUND`)
+- [x] `MapEditorRefs` / `MapInspectorData`: added `pub terrain_db: &'a TerrainDatabase`
+- [x] `MapGridWidget`: added `terrain_db: Option<&'a TerrainDatabase>` field + `.terrain_db()` builder; `tile_color` uses DB lookup for base color
+- [x] `paint_tile(pos, db)`, `fill_region(..., db)`, `erase_tile(pos, db)`: all take `&TerrainDatabase`; blocked flag uses `db.get_by_id(id).map(|d| d.blocked)`
+- [x] `apply_to_metadata_for_terrain(metadata, terrain_id, db)`: if/else on `vegetation`/`mesh_style` replaces old enum match
+- [x] `apply_terrain_state_to_tile(..., db)`, `apply_terrain_state_to_selection(db)`: db propagated through
+- [x] Tool palette terrain ComboBox: DB-driven, sorted by id, `push_id(def.id)`, `from_id_salt`
+- [x] Inspector tile terrain ComboBox: DB-driven same pattern
+- [x] `show_terrain_specific_controls(ui, terrain_id, db, state)`: if/else on vegetation/mesh_style
+- [x] `vegetation_runtime_hint(terrain_id, db, metadata)`: DB-driven
+- [x] `show_map_preview`: DB color lookup replaces hardcoded match
+- [x] Tests: all `TerrainType::*` replaced with `TERRAIN_*` constants; `Tile::new`, `paint_tile`, `fill_region`, `apply_to_metadata_for_terrain`, `apply_terrain_state_to_selection` all pass `&builtin_terrain_db()`
+- [x] SPDX year updated to 2026
+
+### Quality Gates
+
+```
+cargo fmt --all                                                          → clean
+cargo test --package campaign_builder 2>&1 | grep error | grep map_editor → 0 errors
+cargo clippy --package campaign_builder -- -D warnings | grep map_editor  → 0 warnings
+```
+
+### Remaining Follow-up (not in scope)
+
+`sdk/campaign_builder/src/lib.rs` line ~1495 constructs `MapEditorRefs` without
+the new `terrain_db` field. That one-line addition is tracked separately as it
+requires access to the campaign's merged `TerrainDatabase` at the call site.
+
+---
+
+## Phase 5: Terrain Externalization — SDK and Campaign Builder Tooling
+
+### Summary
+
+Updated the SDK CLI tools (`map_builder.rs` and `texture_generator.rs`) to use
+`TerrainDatabase` dynamically instead of hardcoded constant matches and static
+spec arrays. `parse_terrain` now performs case-insensitive lookup against any
+campaign-extended `TerrainDatabase`, enabling custom terrain names. Terrain
+texture generation is fully data-driven from the DB, expanding from 9 to 12
+PNGs and covering any campaign-defined terrain automatically.
+
+### Deliverables
+
+- [x] `parse_terrain(s, db)` — DB-backed, case-insensitive name lookup replaces hardcoded `match`
+- [x] `builtin_glyph(id)` — free function for ASCII map display, used by `show_map`
+- [x] `show_map` — replaced `match tile.terrain { ... }` with `builtin_glyph(tile.terrain).unwrap_or('?')`
+- [x] `TerrainTextureSpec.filename` changed from `&'static str` to `String`
+- [x] `TERRAIN_SPECS` static constant removed; replaced with `terrain_specs_for_db(db)`
+- [x] `terrain_texture_seed(id)` — deterministic multiplicative hash seed per terrain ID
+- [x] `run_generate` — terrain section drives from `builtin_terrain_db()`; now writes 12 PNGs
+- [x] All new tests pass: `test_parse_terrain_resolves_custom_campaign_terrain_by_name`, `test_texture_generator_covers_all_database_terrains`
+- [x] Updated tests: terrain spec count 9 → 12, TERRAIN_SPECS references → `terrain_specs_for_db()`
+
+### Files Changed
+
+**`src/sdk/cli/map_builder.rs`**
+- Added `TERRAIN_ICE` to imports.
+- Added `pub fn builtin_glyph(id: TerrainId) -> Option<char>` — maps 12 built-in IDs to ASCII glyphs; returns `None` for campaign terrain.
+- `parse_terrain(s, db)` — new signature takes `&TerrainDatabase`; tries numeric parse, then case-insensitive `db.all_definitions()` scan, then falls back to `TERRAIN_GROUND`.
+- `show_map` match block replaced with `builtin_glyph(tile.terrain).unwrap_or('?')`.
+- `process_command` set/fill branches pass `&self.terrain_db` to `parse_terrain`.
+- `bulk_set_for_terrains` uses `let db = &self.terrain_db;` (split-borrow safe) for closure.
+- New test: `test_parse_terrain_resolves_custom_campaign_terrain_by_name` — adds custom terrain to DB and verifies lookup by name, lowercase, numeric ID, and unknown fallback.
+
+**`src/sdk/cli/texture_generator.rs`**
+- Added `use crate::domain::world::terrain::{builtin_terrain_db, TerrainDatabase};`.
+- `TerrainTextureSpec.filename: &'static str` → `String`.
+- Removed `const TERRAIN_SPECS: &[TerrainTextureSpec]`.
+- Added `fn terrain_texture_seed(id: u32) -> u64` (wrapping multiplicative hash).
+- Added `fn terrain_specs_for_db(db: &TerrainDatabase) -> Vec<TerrainTextureSpec>` — sorts by ID, derives filename from lowercased name, converts color `[f32;3]` to u8.
+- `run_generate` terrain loop now calls `terrain_specs_for_db(&builtin_terrain_db())`; 12 PNGs instead of 9.
+- Module doc updated: 9 → 12 terrain PNGs; removed "no antares library imports" note.
+- Updated tests: `test_terrain_specs_count` expects 12; all `TERRAIN_SPECS.iter()` calls use `terrain_specs_for_db(&builtin_terrain_db())` instead.
+- New test: `test_texture_generator_covers_all_database_terrains` — verifies count matches DB, spot-checks `ground.png`, `sand.png`, `snow.png`, `ice.png`.
+
+### Quality Gates
+
+```
+cargo fmt --all                                → clean
+cargo check --package antares                  → 0 errors
+cargo clippy --package antares -- -D warnings  → 0 warnings
+cargo nextest run --package antares            → 5566 passed, 8 skipped, 0 failed
+```
+
+---
+
 ## Phase 4: Terrain Externalization — Rendering and Gameplay Systems
 
 ### Summary
@@ -1652,3 +1782,138 @@ This completes all 5 phases of
 `docs/explanation/character_bio_and_navigation_implementation_plan.md`.
 
 ---
+
+## Terrain Externalization — Phase 5: SDK and Campaign Builder Tooling
+
+**Plan**: `docs/explanation/terrain_externalization_implementation_plan.md` §Phase 5
+
+### Summary
+
+Phase 5 wires the terrain data-driven infrastructure (introduced in Phases 1–4)
+into the SDK CLI tools and Campaign Builder UI.  Four sub-tasks were
+completed.
+
+### 5.1 + 5.2 — `map_builder.rs` and `texture_generator.rs`
+
+**`src/sdk/cli/map_builder.rs`**
+- Added `pub fn builtin_glyph(id: TerrainId) -> Option<char>` — maps the 12
+  built-in terrain IDs to ASCII display characters (`'.'`, `','`, `'~'`, …);
+  custom campaign terrain falls back to `'?'`.
+- Updated `parse_terrain` signature to `(s: &str, db: &TerrainDatabase) -> TerrainId`.
+  Tries numeric parse first, then `db.all_definitions()` case-insensitive name
+  scan, then falls back to `TERRAIN_GROUND` with a warning.  The old hard-coded
+  `match` string literal block is gone.
+- `show_map` glyph branch replaced with `builtin_glyph(tile.terrain).unwrap_or('?')`.
+- All `process_command` call-sites pass `&self.terrain_db`.
+- Tests: `test_parse_terrain` updated; new
+  `test_parse_terrain_resolves_custom_campaign_terrain_by_name` covers DB
+  lookup, case-insensitive match, numeric pass-through, and unknown fallback.
+
+**`src/sdk/cli/texture_generator.rs`**
+- `TerrainTextureSpec.filename` changed from `&'static str` to `String`
+  (filenames are now derived from `TerrainDefinition.name`).
+- `const TERRAIN_SPECS` (9 hard-coded entries) removed.
+- Added `fn terrain_texture_seed(id: u32) -> u64` — deterministic
+  multiplicative hash for per-terrain noise seeds.
+- Added `fn terrain_specs_for_db(db: &TerrainDatabase) -> Vec<TerrainTextureSpec>` —
+  sorts definitions by ID, derives filenames (`def.name.to_lowercase()
+  .replace(' ', "_") + ".png"`), converts `[f32; 3]` color to `u8` channels.
+- `run_generate` now calls `terrain_specs_for_db(&builtin_terrain_db())`,
+  writing 12 PNGs (Ground through Ice) instead of the old 9.
+- Terrain-spec tests updated for 12 entries; new
+  `test_texture_generator_covers_all_database_terrains` asserts count == DB
+  size and that `sand.png`, `snow.png`, and `ice.png` are present.
+
+### 5.3 — `templates.rs`
+
+Already complete from a prior phase; templates were already using
+`TERRAIN_GRASS`/`TERRAIN_STONE`/`TERRAIN_FOREST` constants.
+
+### 5.4 — `terrain_editor.rs` + Campaign Builder infrastructure
+
+**New file: `sdk/campaign_builder/src/terrain_editor.rs`**
+- `TerrainEditorState` — list/edit/add/delete CRUD for campaign-defined
+  `TerrainDefinition` entries.  Mirrors `landscape_editor.rs` in structure.
+- List view uses `TwoColumnLayout` (SDK Rule 9), `show_standard_list_item`
+  (Rule 15), `push_id` per row (Rule 1).  Includes a collapsible read-only
+  built-in terrain reference section.
+- Edit form: name, texture path + Browse button, roughness slider (0–1),
+  mesh-style `ComboBox` (all 3 variants), vegetation `ComboBox` (all 3),
+  blocked checkbox, height slider (0–5), R/G/B color sliders + swatch;
+  Back / Save / Cancel (Rule 16).
+- `next_available_id()` assigns IDs ≥ 13100 (campaign range).
+- 9 unit tests covering: new state, enter_edit, apply_edit, 3 delete/
+  selection invariants, 2 ID assignment tests, RON round-trip.
+
+**`sdk/campaign_builder/src/editor_state.rs`**
+- `CampaignData` gains `terrain_definitions: Vec<TerrainDefinition>` and
+  `terrain_db: TerrainDatabase` (seeded from `builtin_terrain_db()` in
+  `Default`).
+- `EditorRegistry` gains `terrain_editor_state: terrain_editor::TerrainEditorState`.
+
+**`sdk/campaign_builder/src/campaign_io.rs`**
+- `load_terrain()` — reads `data/terrain.ron`, builds the merged DB via
+  `builtin_terrain_db()` + `merge()`, resets editor state.  Called from
+  `do_open_campaign`.
+- `save_terrain()` — writes campaign-defined definitions only.  Called from
+  `do_save_campaign`.
+- `do_new_campaign` clears terrain_definitions and resets terrain_db to
+  builtins.
+
+**`sdk/campaign_builder/src/lib.rs`**
+- `CampaignMetadata` gains `terrain_file: String` (serde default
+  `"data/terrain.ron"`).
+- `EditorTab::Terrain` added after `Landscape`; wired into the tab bar and
+  central-panel match.
+- `Terrain` tab arm calls `terrain_editor_state.show()` then rebuilds the
+  merged `terrain_db` from builtins + campaign definitions.
+- `MapEditorRefs` construction passes `terrain_db: &self.campaign_data.terrain_db`.
+
+### 5.5 — `map_editor.rs` — `TerrainType` → `TerrainId` migration
+
+`TerrainType` has been removed from the domain.  All references in
+`map_editor.rs` were migrated:
+
+- `selected_terrain: TerrainType` → `selected_terrain: TerrainId`;
+  initialised with `TERRAIN_GROUND`.
+- `MapEditorRefs` and `MapInspectorData` gain `terrain_db: &'a TerrainDatabase`.
+- `paint_tile`, `fill_region`, `erase_tile` take a `db: &TerrainDatabase`
+  parameter; `Tile::new` calls now pass the db.
+- `paint_tile` blocking check: `db.get_by_id(selected_terrain).map(|d|
+  d.blocked).unwrap_or(false)`.
+- `tile_color` (grid rendering) and `show_map_preview` (mini-map) now look
+  up `[r, g, b]` from `TerrainDefinition.color` via the db instead of a
+  hard-coded `match`; `MapGridWidget` carries `terrain_db: &'a
+  TerrainDatabase`.
+- Terrain palette `ComboBox` (tool palette + inspector) iterates
+  `db.all_definitions()` sorted by ID, showing the definition `name`.
+- `apply_to_metadata_for_terrain` dispatches on
+  `TerrainDefinition.vegetation` / `mesh_style` instead of per-enum-variant:
+  `GrassCover` → grass controls; `Forest` → tree/canopy controls;
+  `Mountain` mesh → rock-variant controls; `Water` mesh → flow controls.
+- `show_terrain_specific_controls` applies the same vegetation/mesh-style
+  dispatch.
+- `vegetation_runtime_hint` updated to use DB lookup.
+- All tests updated: `Tile::new` calls pass `&builtin_terrain_db()`,
+  `TerrainType::*` literals replaced with `TERRAIN_*` constants, method
+  signatures updated.
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --package antares --all-targets --all-features` — 0 errors
+- `cargo clippy --package antares --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --package antares --all-features` — **5566/5566 passed**,
+  8 skipped
+- `cargo check --package campaign_builder` — 0 errors from Phase 5 work;
+  11 pre-existing errors in `npc_editor/mod.rs` and `asset_manager.rs`
+  (missing `NpcDefinition` fields from a prior phase not yet addressed)
+  remain unchanged
+- `cargo test --package campaign_builder` — zero Phase 5 errors; npc_editor
+  and asset_manager pre-existing build failures block the full test run
+
+### Plan status
+
+This completes Phase 5 of
+`docs/explanation/terrain_externalization_implementation_plan.md`.
+Phase 6 (data migration, repo-wide cleanup, and docs) remains.
