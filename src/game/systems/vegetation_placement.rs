@@ -10,7 +10,7 @@
 use bevy::prelude::Vec2;
 
 use crate::domain::types::{MapId, Position, TerrainId};
-use crate::domain::world::terrain::{TERRAIN_FOREST, TERRAIN_GRASS};
+use crate::domain::world::terrain::{TerrainDatabase, TerrainVegetation};
 use crate::domain::world::{GrassDensity, Tile, TileVisualMetadata, TreeType, WallType};
 
 /// Offset from integer tile coordinates to the visual tile center.
@@ -202,7 +202,7 @@ impl VegetationExclusionZone {
 ///
 /// let db = builtin_terrain_db();
 /// let tile = Tile::new(0, 0, TERRAIN_FOREST, WallType::None, &db);
-/// let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+/// let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &db);
 /// assert!(plan.tree_anchor.is_some());
 /// ```
 #[derive(Clone, Debug, PartialEq)]
@@ -405,27 +405,41 @@ pub fn grass_exclusion_zones(vegetation: &[VegetationAnchor]) -> Vec<VegetationE
 
 /// Creates a deterministic vegetation plan for one tile.
 ///
+/// # Arguments
+///
+/// * `tile` - The tile to plan vegetation for
+/// * `map_id` - Map identifier used as part of the deterministic seed
+/// * `position` - Tile position used as part of the deterministic seed
+/// * `db` - Terrain database used to look up vegetation properties
+///
 /// # Examples
 ///
 /// ```
-/// use antares::domain::types::Position;
-/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS};
+/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_FOREST};
 /// use antares::domain::world::{Tile, WallType};
+/// use antares::domain::types::Position;
 /// use antares::game::systems::vegetation_placement::tile_vegetation_plan;
 ///
 /// let db = builtin_terrain_db();
-/// let tile = Tile::new(0, 0, TERRAIN_GRASS, WallType::None, &db);
-/// let first = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
-/// let second = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
-/// assert_eq!(first, second);
+/// let tile = Tile::new(0, 0, TERRAIN_FOREST, WallType::None, &db);
+/// let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &db);
+/// assert!(plan.tree_anchor.is_some());
 /// ```
-pub fn tile_vegetation_plan(tile: &Tile, map_id: MapId, position: Position) -> TileVegetationPlan {
+pub fn tile_vegetation_plan(
+    tile: &Tile,
+    map_id: MapId,
+    position: Position,
+    db: &TerrainDatabase,
+) -> TileVegetationPlan {
     let metadata = &tile.visual;
     let seed = vegetation_seed(map_id, position, TILE_PLAN_SALT);
     let explicit_tree_type = metadata.tree_type;
-    let supports_cover = supports_vegetation_cover(tile);
-    let uses_default_forest_tree =
-        explicit_tree_type.is_none() && supports_cover && tile.terrain == TERRAIN_FOREST;
+    let supports_cover = supports_vegetation_cover(tile, db);
+    let uses_default_forest_tree = explicit_tree_type.is_none()
+        && supports_cover
+        && db
+            .get_by_id(tile.terrain)
+            .is_some_and(|d| d.vegetation == TerrainVegetation::Forest);
 
     let tree_anchor = match explicit_tree_type {
         Some(TreeType::Shrub) => None,
@@ -436,7 +450,7 @@ pub fn tile_vegetation_plan(tile: &Tile, map_id: MapId, position: Position) -> T
 
     let shrub_anchors = if explicit_tree_type == Some(TreeType::Shrub) {
         shrub_anchors_for_tile_with_map(map_id, position, 0.0, metadata)
-    } else if supports_cover && should_plan_understory_shrubs(tile.terrain, metadata) {
+    } else if supports_cover && should_plan_understory_shrubs(tile.terrain, metadata, db) {
         let tree_radius = tree_anchor.map(VegetationAnchor::max_radius).unwrap_or(0.0);
         shrub_anchors_for_tile_with_map(map_id, position, tree_radius, metadata)
     } else {
@@ -469,14 +483,22 @@ pub fn tile_vegetation_plan(tile: &Tile, map_id: MapId, position: Position) -> T
     }
 }
 
-fn supports_vegetation_cover(tile: &Tile) -> bool {
+fn supports_vegetation_cover(tile: &Tile, db: &TerrainDatabase) -> bool {
     !tile.blocked
         && tile.wall_type == WallType::None
-        && matches!(tile.terrain, TERRAIN_FOREST | TERRAIN_GRASS)
+        && db
+            .get_by_id(tile.terrain)
+            .is_some_and(|d| d.vegetation != TerrainVegetation::None)
 }
 
-fn should_plan_understory_shrubs(terrain: TerrainId, metadata: &TileVisualMetadata) -> bool {
-    terrain == TERRAIN_FOREST && metadata.foliage_density().clamp(0.0, 2.0) > 0.0
+fn should_plan_understory_shrubs(
+    terrain: TerrainId,
+    metadata: &TileVisualMetadata,
+    db: &TerrainDatabase,
+) -> bool {
+    db.get_by_id(terrain)
+        .is_some_and(|d| d.vegetation == TerrainVegetation::Forest)
+        && metadata.foliage_density().clamp(0.0, 2.0) > 0.0
 }
 
 fn shrub_count_for_metadata(metadata: &TileVisualMetadata) -> usize {
@@ -563,7 +585,7 @@ fn mix_u64(mut value: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::world::terrain::builtin_terrain_db;
+    use crate::domain::world::terrain::{builtin_terrain_db, TERRAIN_FOREST};
     use crate::domain::world::WallType;
 
     fn forest_tile() -> Tile {
@@ -679,8 +701,8 @@ mod tests {
         let tile = forest_tile();
         let position = Position::new(1, 2);
 
-        let first = tile_vegetation_plan(&tile, 5, position);
-        let second = tile_vegetation_plan(&tile, 5, position);
+        let first = tile_vegetation_plan(&tile, 5, position, &builtin_terrain_db());
+        let second = tile_vegetation_plan(&tile, 5, position, &builtin_terrain_db());
 
         assert_eq!(first, second);
     }
@@ -690,8 +712,8 @@ mod tests {
         let tile = forest_tile();
         let position = Position::new(1, 2);
 
-        let first = tile_vegetation_plan(&tile, 5, position);
-        let second = tile_vegetation_plan(&tile, 6, position);
+        let first = tile_vegetation_plan(&tile, 5, position, &builtin_terrain_db());
+        let second = tile_vegetation_plan(&tile, 6, position, &builtin_terrain_db());
 
         assert_ne!(first.shrub_anchors, second.shrub_anchors);
     }
@@ -699,7 +721,7 @@ mod tests {
     #[test]
     fn test_tile_vegetation_plan_forest_default_tree_and_shrubs_do_not_overlap() {
         let tile = forest_tile();
-        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &builtin_terrain_db());
         let tree = plan
             .tree_anchor
             .expect("forest tile should have default tree anchor");
@@ -722,7 +744,7 @@ mod tests {
         let mut tile = forest_tile();
         tile.visual.tree_type = Some(TreeType::Shrub);
 
-        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &builtin_terrain_db());
 
         assert!(plan.tree_anchor.is_none());
         assert_eq!(plan.explicit_tree_type, Some(TreeType::Shrub));
@@ -735,7 +757,7 @@ mod tests {
         let mut tile = forest_tile();
         tile.blocked = true;
 
-        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &builtin_terrain_db());
 
         assert!(plan.tree_anchor.is_none());
         assert!(plan.shrub_anchors.is_empty());
@@ -749,7 +771,7 @@ mod tests {
         let mut tile = forest_tile();
         tile.wall_type = WallType::Normal;
 
-        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &builtin_terrain_db());
 
         assert!(plan.tree_anchor.is_none());
         assert!(plan.shrub_anchors.is_empty());
@@ -761,7 +783,7 @@ mod tests {
     #[test]
     fn test_tile_vegetation_plan_grass_clumps_avoid_trunk_exclusion_zone() {
         let tile = forest_tile();
-        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &builtin_terrain_db());
         let tree = plan
             .tree_anchor
             .expect("forest tile should have default tree anchor");
@@ -772,7 +794,7 @@ mod tests {
     #[test]
     fn test_tile_vegetation_plan_allows_grass_outside_exclusion_zones() {
         let tile = forest_tile();
-        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &builtin_terrain_db());
         let outside = tile_center(Position::new(0, 0)) + Vec2::new(0.49, 0.49);
 
         assert!(plan.allows_grass_clump_at(outside));
@@ -800,8 +822,63 @@ mod tests {
         let mut tile = forest_tile();
         tile.visual.grass_density = Some(GrassDensity::None);
 
-        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &builtin_terrain_db());
 
         assert_eq!(plan.grass_coverage_multiplier, 0.0);
+    }
+
+    #[test]
+    fn test_vegetation_plan_uses_terrain_definition_for_forest_detection() {
+        use crate::domain::world::terrain::{TerrainDefinition, TerrainMeshStyle, TERRAIN_GROUND};
+
+        // Custom terrain with Forest vegetation (not the built-in TERRAIN_FOREST ID)
+        let custom_forest_id = 13_100u32;
+        let mut custom_db = builtin_terrain_db();
+        custom_db
+            .add(TerrainDefinition {
+                id: custom_forest_id,
+                name: "Custom Forest".to_string(),
+                texture_path: "assets/textures/terrain/forest_floor.png".to_string(),
+                roughness: 0.9,
+                mesh_style: TerrainMeshStyle::Flat,
+                vegetation: TerrainVegetation::Forest,
+                blocked: false,
+                height: 2.2,
+                color: [0.1, 0.4, 0.1],
+            })
+            .unwrap();
+
+        // A tile with the custom forest terrain should get a tree anchor
+        let mut tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::None, &builtin_terrain_db());
+        tile.terrain = custom_forest_id;
+
+        let plan = tile_vegetation_plan(&tile, 1, Position::new(0, 0), &custom_db);
+        assert!(
+            plan.tree_anchor.is_some(),
+            "Custom forest terrain must get a tree anchor"
+        );
+        assert!(
+            plan.uses_default_forest_tree,
+            "Custom forest terrain must use default forest tree"
+        );
+    }
+
+    #[test]
+    fn test_supports_vegetation_cover_uses_terrain_definition() {
+        use crate::domain::world::terrain::{TERRAIN_GRASS, TERRAIN_GROUND};
+
+        let db = builtin_terrain_db();
+
+        // Ground has no vegetation → no cover
+        let ground_tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::None, &db);
+        assert!(!supports_vegetation_cover(&ground_tile, &db));
+
+        // Grass has GrassCover vegetation → cover
+        let grass_tile = Tile::new(0, 0, TERRAIN_GRASS, WallType::None, &db);
+        assert!(supports_vegetation_cover(&grass_tile, &db));
+
+        // Forest has Forest vegetation → cover
+        let forest_tile = Tile::new(0, 0, TERRAIN_FOREST, WallType::None, &db);
+        assert!(supports_vegetation_cover(&forest_tile, &db));
     }
 }

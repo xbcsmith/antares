@@ -1,3 +1,76 @@
+## Phase 4: Terrain Externalization — Rendering and Gameplay Systems
+
+### Summary
+
+Made all rendering and gameplay terrain logic fully data-driven by reading
+`TerrainDefinition` fields (`mesh_style`, `vegetation`, `height`, `color`,
+`texture_path`, `roughness`) from the active campaign's `TerrainDatabase`
+(available via `content.0.terrain`). Hardcoded `TERRAIN_*` constant comparisons
+in the dispatch, material, automap, vegetation, floor-clearance, and Walk on
+Water systems are replaced with db-driven lookups. 5564 tests pass.
+
+### Deliverables
+
+- [x] `TerrainMaterialCache::is_fully_loaded` is DB-driven (takes `&TerrainDatabase`)
+- [x] `TerrainMaterialCache::iter_all()` iterator added
+- [x] `terrain_materials.rs` fully data-driven — `TEXTURE_*` constants, `texture_path_for`, `roughness_for` deleted; startup system iterates `terrain_db.all_definitions()`
+- [x] `map.rs` tile dispatch: `match mesh_style { Water / Mountain / Flat(vegetation) / Flat }` replaces `match tile.terrain {}`; wall-tint from `def.color`; height from `def.height`
+- [x] `hud.rs` `automap_tile_color` buckets by `mesh_style == Water` and `vegetation != None`
+- [x] `item_world_events.rs` floor clearance from `definition.vegetation != None`
+- [x] `vegetation_placement.rs` tree/shrub/grass dispatch from `definition.vegetation` field
+- [x] `exploration_movement.rs` Walk on Water checks `mesh_style == Water` (any campaign terrain)
+- [x] All required Phase 4 tests pass
+
+### Files Changed
+
+**`src/game/resources/terrain_material_cache.rs`**
+- Removed 9-element hardcoded `TERRAIN_*` import.
+- `is_fully_loaded(&self, db: &TerrainDatabase) -> bool` — iterates `db.all_definitions()` for O(n) completeness check.
+- Added `iter_all() -> impl Iterator<Item=(TerrainId, &Handle<StandardMaterial>)>`.
+- Tests: `all_terrain_ids()` expanded to 12 IDs; `is_fully_loaded` calls updated; `test_is_fully_loaded_false_with_eleven_of_twelve` and `test_is_fully_loaded_db_driven_custom_terrain` added.
+
+**`src/game/systems/terrain_materials.rs`**
+- Deleted `TEXTURE_*` constants (9), `texture_path_for`, `roughness_for`, `all_terrain_ids()`.
+- `load_terrain_materials_system` accepts `content: Option<Res<GameContent>>`; iterates `terrain_db.all_definitions()` for texture and roughness.
+- `refresh_terrain_materials_after_startup_allocations_system` uses `terrain_db.all_definitions()` and `def.roughness`.
+- 5 tests deleted; 3 DB-property tests + `test_load_terrain_materials_system_loads_sand_snow_ice` added.
+
+**`src/game/systems/map.rs`**
+- Deleted `should_spawn_grass_cover`, `terrain_height_for_id` helpers.
+- `should_spawn_procedural_vegetation` takes `def: Option<&TerrainDefinition>`.
+- Per-tile loop: pre-computes `def`, `mesh_style`, `terrain_height`, `has_vegetation`, `is_forest`.
+- Tile dispatch: `match mesh_style { Water / Mountain / Flat(vegetation) / Flat }`.
+- Wall tint: `def.map(|d| d.color).unwrap_or(floor_rgb)`.
+- Tests replaced and `test_terrain_height_from_terrain_definition`, `test_terrain_color_from_terrain_definition` added.
+
+**`src/game/systems/hud.rs`**
+- `automap_tile_color(tile, terrain_db: Option<&TerrainDatabase>)` — uses `mesh_style == Water` and `vegetation != None`.
+- `update_mini_map` and `update_automap_image` gain `content: Option<Res<GameContent>>`.
+- `test_automap_color_buckets_by_mesh_style_and_vegetation` added.
+
+**`src/game/systems/item_world_events.rs`**
+- Floor clearance: `match tile_terrain { TERRAIN_GRASS | TERRAIN_FOREST }` → `definition.vegetation != TerrainVegetation::None`.
+
+**`src/game/systems/vegetation_placement.rs`**
+- `tile_vegetation_plan`, `supports_vegetation_cover`, `should_plan_understory_shrubs` all gain `db: &TerrainDatabase`.
+- `vegetation != TerrainVegetation::None` / `vegetation == TerrainVegetation::Forest` replace constant matches.
+- `test_vegetation_plan_uses_terrain_definition_for_forest_detection` and `test_supports_vegetation_cover_uses_terrain_definition` added.
+
+**`src/game/systems/input/exploration_movement.rs`**
+- `should_override_water(gs, target, terrain_db: Option<&TerrainDatabase>)` — checks `mesh_style == TerrainMeshStyle::Water`; falls back to `t.terrain == TERRAIN_WATER` when `terrain_db` is `None`.
+- `test_walk_on_water_override_applies_to_any_water_mesh_style_terrain` added.
+
+### Quality Gates
+
+```
+cargo fmt --all             → clean
+cargo check --all-targets   → 0 errors
+cargo clippy -- -D warnings → 0 warnings
+cargo nextest run           → 5564 passed, 8 skipped, 0 failed
+```
+
+---
+
 ## Phase 3: Terrain Externalization — Built-in Terrain Content and Loading
 
 ### Summary

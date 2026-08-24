@@ -10,10 +10,7 @@
 //! during the Bevy `Startup` schedule.
 
 use crate::domain::types::TerrainId;
-use crate::domain::world::terrain::{
-    TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_LAVA, TERRAIN_MOUNTAIN,
-    TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
-};
+use crate::domain::world::terrain::TerrainDatabase;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -24,16 +21,19 @@ use std::collections::HashMap;
 /// Caches one `StandardMaterial` handle per terrain ID.
 ///
 /// Created and populated by [`crate::game::systems::terrain_materials::load_terrain_materials_system`]
-/// during the Bevy `Startup` schedule. Once all nine built-in terrain variants
-/// are loaded, [`is_fully_loaded`](Self::is_fully_loaded) returns `true`.
+/// during the Bevy `Startup` schedule. Once all terrain definitions in the
+/// active campaign's [`TerrainDatabase`] are loaded,
+/// [`is_fully_loaded`](Self::is_fully_loaded) returns `true`.
 ///
 /// # Examples
 ///
 /// ```
 /// use antares::game::resources::TerrainMaterialCache;
+/// use antares::domain::world::terrain::builtin_terrain_db;
 ///
+/// let db = builtin_terrain_db();
 /// let cache = TerrainMaterialCache::default();
-/// assert!(!cache.is_fully_loaded());
+/// assert!(!cache.is_fully_loaded(&db));
 /// ```
 #[derive(Resource, Default, Debug)]
 pub struct TerrainMaterialCache {
@@ -75,47 +75,54 @@ impl TerrainMaterialCache {
         self.items.insert(terrain, handle);
     }
 
-    /// Returns `true` when the nine built-in terrain variants all have handles.
+    /// Returns `true` when every terrain in `db` has a cached material handle.
     ///
-    /// The nine checked IDs are the original engine terrains (Ground through
-    /// Forest, IDs 13000–13008). Sand, Snow, and Ice are not yet required.
+    /// The check is DB-driven: the cache is fully loaded when every [`TerrainId`]
+    /// in the supplied [`TerrainDatabase`] has an associated handle. This allows
+    /// the check to scale automatically as the active campaign adds terrain types.
     ///
     /// # Examples
     ///
     /// ```
     /// use antares::game::resources::TerrainMaterialCache;
-    /// use antares::domain::world::terrain::{
-    ///     TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_LAVA,
-    ///     TERRAIN_MOUNTAIN, TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
-    /// };
+    /// use antares::domain::world::terrain::builtin_terrain_db;
+    /// use bevy::prelude::*;
+    ///
+    /// let db = builtin_terrain_db();
+    /// let mut cache = TerrainMaterialCache::default();
+    /// assert!(!cache.is_fully_loaded(&db));
+    ///
+    /// for def in db.all_definitions() {
+    ///     cache.set(def.id, Handle::default());
+    /// }
+    /// assert!(cache.is_fully_loaded(&db));
+    /// ```
+    pub fn is_fully_loaded(&self, db: &TerrainDatabase) -> bool {
+        db.all_definitions()
+            .iter()
+            .all(|d| self.items.contains_key(&d.id))
+    }
+
+    /// Returns an iterator over all cached terrain handles.
+    ///
+    /// Yields `(TerrainId, &Handle<StandardMaterial>)` for every entry in the
+    /// cache. The order of iteration is not guaranteed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::TerrainMaterialCache;
+    /// use antares::domain::world::terrain::TERRAIN_WATER;
     /// use bevy::prelude::*;
     ///
     /// let mut cache = TerrainMaterialCache::default();
-    /// assert!(!cache.is_fully_loaded());
-    ///
-    /// for terrain in [
-    ///     TERRAIN_GROUND, TERRAIN_GRASS, TERRAIN_STONE,
-    ///     TERRAIN_MOUNTAIN, TERRAIN_DIRT, TERRAIN_WATER,
-    ///     TERRAIN_LAVA, TERRAIN_SWAMP, TERRAIN_FOREST,
-    /// ] {
-    ///     cache.set(terrain, Handle::default());
-    /// }
-    /// assert!(cache.is_fully_loaded());
+    /// cache.set(TERRAIN_WATER, Handle::default());
+    /// assert_eq!(cache.iter_all().count(), 1);
     /// ```
-    pub fn is_fully_loaded(&self) -> bool {
-        [
-            TERRAIN_GROUND,
-            TERRAIN_GRASS,
-            TERRAIN_STONE,
-            TERRAIN_MOUNTAIN,
-            TERRAIN_DIRT,
-            TERRAIN_WATER,
-            TERRAIN_LAVA,
-            TERRAIN_SWAMP,
-            TERRAIN_FOREST,
-        ]
-        .iter()
-        .all(|id| self.items.contains_key(id))
+    pub fn iter_all(
+        &self,
+    ) -> impl Iterator<Item = (crate::domain::types::TerrainId, &Handle<StandardMaterial>)> {
+        self.items.iter().map(|(&id, handle)| (id, handle))
     }
 }
 
@@ -126,19 +133,27 @@ impl TerrainMaterialCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::world::terrain::{
+        builtin_terrain_db, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND,
+        TERRAIN_ICE, TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_SAND, TERRAIN_SNOW, TERRAIN_STONE,
+        TERRAIN_SWAMP, TERRAIN_WATER,
+    };
 
-    /// All nine built-in terrain IDs in a fixed order.
-    fn all_terrain_ids() -> [TerrainId; 9] {
+    /// All twelve built-in terrain IDs in a fixed order.
+    fn all_terrain_ids() -> [TerrainId; 12] {
         [
             TERRAIN_GROUND,
             TERRAIN_GRASS,
-            TERRAIN_STONE,
-            TERRAIN_MOUNTAIN,
-            TERRAIN_DIRT,
             TERRAIN_WATER,
             TERRAIN_LAVA,
             TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
             TERRAIN_FOREST,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
         ]
     }
 
@@ -156,7 +171,7 @@ mod tests {
     fn test_terrain_material_cache_is_fully_loaded_false_when_empty() {
         let cache = TerrainMaterialCache::default();
         assert!(
-            !cache.is_fully_loaded(),
+            !cache.is_fully_loaded(&builtin_terrain_db()),
             "is_fully_loaded() should be false when no handles are set"
         );
     }
@@ -179,22 +194,22 @@ mod tests {
         );
     }
 
-    /// After nine `set()` calls (one per built-in terrain), `is_fully_loaded()` returns `true`.
+    /// After twelve `set()` calls (one per built-in terrain), `is_fully_loaded()` returns `true`.
     #[test]
     fn test_terrain_material_cache_is_fully_loaded_true_when_all_set() {
         let mut cache = TerrainMaterialCache::default();
 
         for terrain in all_terrain_ids() {
             assert!(
-                !cache.is_fully_loaded(),
+                !cache.is_fully_loaded(&builtin_terrain_db()),
                 "is_fully_loaded() should still be false before all variants are set"
             );
             cache.set(terrain, Handle::default());
         }
 
         assert!(
-            cache.is_fully_loaded(),
-            "is_fully_loaded() should be true after all nine variants are set"
+            cache.is_fully_loaded(&builtin_terrain_db()),
+            "is_fully_loaded() should be true after all twelve variants are set"
         );
     }
 
@@ -259,16 +274,16 @@ mod tests {
         }
     }
 
-    /// `is_fully_loaded()` must return `false` if only eight of nine types are set.
+    /// `is_fully_loaded()` must return `false` if only eleven of twelve types are set.
     #[test]
-    fn test_is_fully_loaded_false_with_eight_of_nine() {
+    fn test_is_fully_loaded_false_with_eleven_of_twelve() {
         let all = all_terrain_ids();
         let mut cache = TerrainMaterialCache::default();
-        for terrain in &all[..8] {
+        for terrain in &all[..11] {
             cache.set(*terrain, Handle::default());
         }
         assert!(
-            !cache.is_fully_loaded(),
+            !cache.is_fully_loaded(&builtin_terrain_db()),
             "is_fully_loaded() should be false when one variant is missing"
         );
     }
@@ -294,5 +309,40 @@ mod tests {
                 .unwrap_or_else(|| panic!("Expected Some for ID {terrain}"));
             assert_eq!(*got, handle);
         }
+    }
+
+    /// `is_fully_loaded` is driven by the supplied DB — a single-entry custom DB
+    /// is fully loaded as soon as its one entry is cached, while the 12-entry
+    /// builtin DB remains incomplete.
+    #[test]
+    fn test_is_fully_loaded_db_driven_custom_terrain() {
+        use crate::domain::world::terrain::{
+            TerrainDefinition, TerrainMeshStyle, TerrainVegetation,
+        };
+
+        let mut custom_db = TerrainDatabase::new();
+        custom_db
+            .add(TerrainDefinition {
+                id: TERRAIN_GROUND,
+                name: "Custom".to_string(),
+                texture_path: "assets/textures/terrain/ground.png".to_string(),
+                roughness: 0.8,
+                mesh_style: TerrainMeshStyle::Flat,
+                vegetation: TerrainVegetation::None,
+                blocked: false,
+                height: 0.0,
+                color: [0.5, 0.5, 0.5],
+            })
+            .unwrap();
+
+        let mut cache = TerrainMaterialCache::default();
+        // Not loaded yet
+        assert!(!cache.is_fully_loaded(&custom_db));
+        // Set the one entry
+        cache.set(TERRAIN_GROUND, Handle::default());
+        // Now fully loaded for this custom DB
+        assert!(cache.is_fully_loaded(&custom_db));
+        // But NOT fully loaded for the builtin DB (which has 12 entries)
+        assert!(!cache.is_fully_loaded(&builtin_terrain_db()));
     }
 }
