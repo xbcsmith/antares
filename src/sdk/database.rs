@@ -45,6 +45,7 @@ use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
 use crate::domain::world::object_mesh::ObjectMeshDatabase;
+use crate::domain::world::terrain::{builtin_terrain_db, TerrainDatabase};
 use crate::domain::world::{Map, MapBlueprint};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -110,6 +111,9 @@ pub enum DatabaseError {
     /// Failed to load or parse `data/wind.ron`
     #[error("Failed to load wind configuration: {0}")]
     WindLoadError(String),
+
+    #[error("Failed to load terrain: {0}")]
+    TerrainLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: String, error: String },
@@ -737,6 +741,14 @@ pub struct ContentDatabase {
     /// Loaded from `data/wind.ron` in the campaign directory.
     /// Missing file is not an error — absent file means no wind animation.
     pub wind: crate::domain::world::wind::CampaignWindConfig,
+
+    /// Terrain definition database — built-in and campaign-defined terrain types.
+    ///
+    /// Always seeded with the 12 built-in definitions (Ground through Ice,
+    /// IDs 13000–13011). Campaign-specific `data/terrain.ron` entries are merged
+    /// on top: new IDs are added, re-used built-in IDs override the built-in.
+    /// Missing `terrain.ron` is not an error.
+    pub terrain: TerrainDatabase,
 }
 
 impl ContentDatabase {
@@ -772,6 +784,7 @@ impl ContentDatabase {
             object_meshes: ObjectMeshDatabase::new(),
             skills: SkillDatabase::new(),
             wind: crate::domain::world::wind::CampaignWindConfig::default(),
+            terrain: TerrainDatabase::new(),
         }
     }
 
@@ -1032,6 +1045,19 @@ impl ContentDatabase {
             crate::domain::world::wind::CampaignWindConfig::default()
         };
 
+        // Load terrain: always seed with built-ins, then merge campaign-specific
+        // terrain.ron if present (campaign entries override/add to built-ins).
+        let terrain = {
+            let mut db = builtin_terrain_db();
+            let terrain_path = data_dir.join("terrain.ron");
+            if terrain_path.exists() {
+                let campaign_terrain = TerrainDatabase::load_from_file(&terrain_path)
+                    .map_err(|e| DatabaseError::TerrainLoadError(e.to_string()))?;
+                db.merge(campaign_terrain);
+            }
+            db
+        };
+
         let db = Self {
             classes,
             races,
@@ -1052,6 +1078,7 @@ impl ContentDatabase {
             object_meshes,
             skills,
             wind,
+            terrain,
         };
         db.validate_landscape_content(Some(campaign_path))?;
         Ok(db)
@@ -1261,6 +1288,18 @@ impl ContentDatabase {
             crate::domain::world::wind::CampaignWindConfig::default()
         };
 
+        // Load terrain: always seed with built-ins, then merge if terrain.ron present.
+        let terrain = {
+            let mut db = builtin_terrain_db();
+            let terrain_path = data_path.join("terrain.ron");
+            if terrain_path.exists() {
+                let campaign_terrain = TerrainDatabase::load_from_file(&terrain_path)
+                    .map_err(|e| DatabaseError::TerrainLoadError(e.to_string()))?;
+                db.merge(campaign_terrain);
+            }
+            db
+        };
+
         let db = Self {
             classes,
             races,
@@ -1281,6 +1320,7 @@ impl ContentDatabase {
             object_meshes,
             skills,
             wind,
+            terrain,
         };
         db.validate_landscape_content(Some(asset_root))?;
         Ok(db)
@@ -4236,6 +4276,55 @@ mod tests {
         assert!(
             db.object_meshes.has_mesh("11001"),
             "legacy numeric key '11001' must always resolve after merge"
+        );
+    }
+
+    #[test]
+    fn test_content_database_terrain_loads_all_builtin_ids() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign should load without error");
+        // 12 built-ins; 1 override (13001 replaced) + 1 new entry (13100) = 13 total
+        assert!(
+            db.terrain.len() >= 12,
+            "ContentDatabase terrain must have at least 12 entries, got {}",
+            db.terrain.len()
+        );
+        // All 12 built-in IDs are present (override replaces, not removes)
+        use crate::domain::world::terrain::{
+            TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_ICE, TERRAIN_LAVA,
+            TERRAIN_MOUNTAIN, TERRAIN_SAND, TERRAIN_SNOW, TERRAIN_STONE, TERRAIN_SWAMP,
+            TERRAIN_WATER,
+        };
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_GRASS,
+            TERRAIN_WATER,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_FOREST,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            assert!(
+                db.terrain.has_definition(id),
+                "ContentDatabase terrain is missing built-in ID {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_content_database_new_has_empty_terrain() {
+        let db = ContentDatabase::new();
+        assert!(
+            db.terrain.is_empty(),
+            "ContentDatabase::new() should have empty terrain database"
         );
     }
 }

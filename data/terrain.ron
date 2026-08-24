@@ -1,0 +1,170 @@
+// terrain.ron - Built-in terrain definitions for Antares RPG
+//
+// This file contains the twelve built-in terrain definitions in RON (Rusty
+// Object Notation) format. IDs 13000–13011 are reserved for built-in terrain.
+// Campaign-defined custom terrain should start at 13100 by convention.
+//
+// TerrainMeshStyle variants: Flat, Water, Mountain
+// TerrainVegetation variants: None, GrassCover, Forest
+//
+// blocked: true prevents party movement onto that tile by default.
+// height:  visual height offset for mesh rendering (0.0 = ground level).
+// color:   RGB triple in [0.0, 1.0] range used as a tint / minimap color.
+
+[
+    // ── Ground (13000) ────────────────────────────────────────────────────────
+    (
+        id: 13000,
+        name: "Ground",
+        texture_path: "assets/textures/terrain/ground.png",
+        roughness: 0.95,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.6, 0.5, 0.4),
+    ),
+
+    // ── Grass (13001) ─────────────────────────────────────────────────────────
+    (
+        id: 13001,
+        name: "Grass",
+        texture_path: "assets/textures/terrain/grass.png",
+        roughness: 0.9,
+        mesh_style: Flat,
+        vegetation: GrassCover,
+        blocked: false,
+        height: 0.0,
+        color: (0.3, 0.6, 0.2),
+    ),
+
+    // ── Water (13002) ─────────────────────────────────────────────────────────
+    (
+        id: 13002,
+        name: "Water",
+        texture_path: "assets/textures/terrain/water.png",
+        roughness: 0.1,
+        mesh_style: Water,
+        vegetation: None,
+        blocked: true,
+        height: 0.0,
+        color: (0.1, 0.3, 0.8),
+    ),
+
+    // ── Lava (13003) ──────────────────────────────────────────────────────────
+    (
+        id: 13003,
+        name: "Lava",
+        texture_path: "assets/textures/terrain/lava.png",
+        roughness: 0.6,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.8, 0.3, 0.2),
+    ),
+
+    // ── Swamp (13004) ─────────────────────────────────────────────────────────
+    (
+        id: 13004,
+        name: "Swamp",
+        texture_path: "assets/textures/terrain/swamp.png",
+        roughness: 0.88,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.35, 0.3, 0.2),
+    ),
+
+    // ── Stone (13005) ─────────────────────────────────────────────────────────
+    (
+        id: 13005,
+        name: "Stone",
+        texture_path: "assets/textures/terrain/stone.png",
+        roughness: 0.75,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.5, 0.5, 0.5),
+    ),
+
+    // ── Dirt (13006) ──────────────────────────────────────────────────────────
+    (
+        id: 13006,
+        name: "Dirt",
+        texture_path: "assets/textures/terrain/dirt.png",
+        roughness: 0.92,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.55, 0.4, 0.25),
+    ),
+
+    // ── Forest (13007) ────────────────────────────────────────────────────────
+    (
+        id: 13007,
+        name: "Forest",
+        texture_path: "assets/textures/terrain/forest_floor.png",
+        roughness: 0.9,
+        mesh_style: Flat,
+        vegetation: Forest,
+        blocked: false,
+        height: 2.2,
+        color: (0.1, 0.4, 0.1),
+    ),
+
+    // ── Mountain (13008) ──────────────────────────────────────────────────────
+    (
+        id: 13008,
+        name: "Mountain",
+        texture_path: "assets/textures/terrain/mountain.png",
+        roughness: 0.85,
+        mesh_style: Mountain,
+        vegetation: None,
+        blocked: true,
+        height: 3.0,
+        color: (0.4, 0.4, 0.4),
+    ),
+
+    // ── Sand (13009) ──────────────────────────────────────────────────────────
+    (
+        id: 13009,
+        name: "Sand",
+        texture_path: "assets/textures/terrain/sand.png",
+        roughness: 0.95,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.9, 0.85, 0.6),
+    ),
+
+    // ── Snow (13010) ──────────────────────────────────────────────────────────
+    (
+        id: 13010,
+        name: "Snow",
+        texture_path: "assets/textures/terrain/snow.png",
+        roughness: 0.95,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.95, 0.95, 1.0),
+    ),
+
+    // ── Ice (13011) ───────────────────────────────────────────────────────────
+    (
+        id: 13011,
+        name: "Ice",
+        texture_path: "assets/textures/terrain/ice.png",
+        roughness: 0.05,
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        height: 0.0,
+        color: (0.8, 0.9, 1.0),
+    ),
+]

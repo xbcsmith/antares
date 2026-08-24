@@ -1,3 +1,81 @@
+## Phase 3: Terrain Externalization — Built-in Terrain Content and Loading
+
+### Summary
+
+Implemented Phase 3 of the terrain externalization plan: authored `data/terrain.ron`
+with all 12 built-in terrain definitions, added a `pub mod builtin` short-name alias
+module and a `TerrainDatabase::merge` method in `terrain.rs`, wired terrain loading
+with base + campaign-override merge into both `ContentDatabase` (`sdk/database.rs`)
+and `GameData` (`campaign_loader.rs`), generated placeholder PNG textures for Sand,
+Snow, and Ice, and added all required fixture files and tests. 5558 tests pass.
+
+### Deliverables
+
+- [x] `data/terrain.ron` — 12 `TerrainDefinition` entries (IDs 13000–13011) matching `builtin_terrain_definitions()` exactly
+- [x] `terrain::builtin::*` constants — `pub mod builtin` in `terrain.rs` re-exporting all 12 `TERRAIN_*` constants under short names (`GROUND`, `GRASS`, …) plus `WATER_BLOCKED` / `MOUNTAIN_BLOCKED` sentinels
+- [x] `TerrainDatabase::merge(other: TerrainDatabase)` — inserts/overwrites by ID; enables campaign override/extension of built-ins
+- [x] `ContentDatabase.terrain: TerrainDatabase` — always seeded with `builtin_terrain_db()`, merges campaign `data/terrain.ron` on load; `TerrainLoadError` variant added to `DatabaseError`
+- [x] `GameData.terrain: TerrainDatabase` — seeded from `data/terrain.ron` (fallback to `builtin_terrain_db()`), merges campaign `data/terrain.ron` on load; `CampaignLoader::load_terrain()` private method added
+- [x] `assets/textures/terrain/{sand,snow,ice}.png` — 64×64 placeholder PNGs (matching existing terrain texture resolution)
+- [x] `data/test_campaign/data/terrain.ron` — test fixture with 1 override (ID 13001 → "Campaign Grass") and 1 new entry (ID 13100 → "Volcanic Ash")
+- [x] Test `test_load_default_terrain_ron` — `data/terrain.ron` parses, has exactly 12 entries, all built-in IDs present, Water/Mountain blocked
+- [x] Test `test_terrain_database_merge_campaign_override` — override of ID 13001 + addition of ID 13100; final count 13; other built-ins untouched
+- [x] Test `test_campaign_loader_missing_terrain_ron_uses_builtin_only` — temp-dir campaign (no terrain.ron); ≥ 12 entries; Water/Mountain blocked
+- [x] Test `test_campaign_loader_terrain_merge_from_fixture` — test_campaign; ≥ 13 entries; Volcanic Ash present; Grass overridden
+- [x] Test `test_content_database_terrain_loads_all_builtin_ids` — test_campaign loads; ≥ 12 entries; all built-in IDs present
+- [x] Test `test_content_database_new_has_empty_terrain` — `ContentDatabase::new()` has empty terrain database
+- [x] All tests pass (5558 passed, 8 skipped, 0 failed)
+
+### Files Changed
+
+**`src/domain/world/terrain.rs`**
+- Added `pub mod builtin` with 12 `TerrainId` aliases and 2 `bool` sentinels.
+- Added `pub fn merge(&mut self, other: TerrainDatabase)` to `impl TerrainDatabase` after `has_definition`.
+- Added `test_load_default_terrain_ron` and `test_terrain_database_merge_campaign_override` to `mod tests`.
+
+**`src/sdk/database.rs`**
+- Added `#[error("Failed to load terrain: {0}")] TerrainLoadError(String)` to `DatabaseError`.
+- Added `use crate::domain::world::terrain::{builtin_terrain_db, TerrainDatabase}`.
+- Added `pub terrain: TerrainDatabase` field to `ContentDatabase`.
+- Updated `new()` (empty), `load_campaign_with_skills_file`, and `load_core` (both seed from `builtin_terrain_db()` then merge).
+- Added two new tests.
+
+**`src/domain/campaign_loader.rs`**
+- Added `use crate::domain::world::terrain::TerrainDatabase` import.
+- Added `pub terrain: TerrainDatabase` to `GameData` and its `new()` + doc example.
+- Added private `fn load_terrain(&self) -> Result<TerrainDatabase, CampaignError>`.
+- Called `load_terrain` from `load_game_data` after wind config.
+- Added two new tests.
+
+**`data/terrain.ron`** (new)
+- 12 RON `TerrainDefinition` entries; IDs 13000–13011.
+
+**`data/test_campaign/data/terrain.ron`** (new)
+- 2 entries: override ID 13001 ("Campaign Grass") + new ID 13100 ("Volcanic Ash").
+
+**`assets/textures/terrain/sand.png`**, **`snow.png`**, **`ice.png`** (new)
+- 64×64 placeholder PNGs: sand (warm beige), snow (off-white), ice (light blue).
+
+### Architecture Compliance
+
+- ID range: built-ins at 13000–13011; campaign custom at 13100+ (convention).
+- Merge semantics: campaign entry with existing ID overrides built-in; new ID adds.
+- Missing campaign `terrain.ron` is not an error (opt-in per campaign).
+- `ContentDatabase::new()` terrain is empty (consistent with other fields).
+- `GameData` terrain is populated from `data/terrain.ron` or built-in fallback.
+- All test data uses `data/test_campaign`, not `campaigns/tutorial`.
+
+### Quality Gates
+
+```
+cargo fmt --all             → clean
+cargo check --all-targets   → 0 errors
+cargo clippy -- -D warnings → 0 warnings
+cargo nextest run           → 5558 passed, 8 skipped, 0 failed
+```
+
+---
+
 ## Phase 2: Terrain Externalization — Replace `TerrainType` with `TerrainId` in Domain Types
 
 ### Summary

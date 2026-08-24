@@ -472,6 +472,50 @@ impl TerrainDatabase {
     pub fn has_definition(&self, id: TerrainId) -> bool {
         self.items.contains_key(&id)
     }
+
+    /// Merges all definitions from `other` into this database.
+    ///
+    /// For each entry in `other`:
+    /// - If `self` already has a definition with that ID, it is **replaced**.
+    /// - If the ID is new, it is **added**.
+    ///
+    /// This is the mechanism by which a campaign `terrain.ron` can override a
+    /// built-in terrain definition or extend the database with new entries.
+    /// ID validation is skipped during merge; callers are responsible for
+    /// ensuring `other` contains only valid IDs (>= [`TERRAIN_ID_MIN`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::terrain::{
+    ///     TerrainDatabase, TerrainDefinition, TerrainMeshStyle, TerrainVegetation,
+    ///     builtin_terrain_db, TERRAIN_GRASS,
+    /// };
+    ///
+    /// let mut base = builtin_terrain_db();
+    /// let mut campaign = TerrainDatabase::new();
+    /// campaign.add(TerrainDefinition {
+    ///     id: TERRAIN_GRASS,
+    ///     name: "Lush Grass".to_string(),
+    ///     texture_path: "assets/textures/terrain/lush_grass.png".to_string(),
+    ///     roughness: 0.95,
+    ///     mesh_style: TerrainMeshStyle::Flat,
+    ///     vegetation: TerrainVegetation::GrassCover,
+    ///     blocked: false,
+    ///     height: 0.0,
+    ///     color: [0.1, 0.7, 0.1],
+    /// }).unwrap();
+    ///
+    /// base.merge(campaign);
+    ///
+    /// // The built-in Grass is now replaced by the campaign's "Lush Grass"
+    /// assert_eq!(base.get_by_id(TERRAIN_GRASS).unwrap().name, "Lush Grass");
+    /// ```
+    pub fn merge(&mut self, other: TerrainDatabase) {
+        for (id, def) in other.items {
+            self.items.insert(id, def);
+        }
+    }
 }
 
 // ===== Built-in terrain ID constants =====
@@ -500,6 +544,54 @@ pub const TERRAIN_SAND: TerrainId = 13_009;
 pub const TERRAIN_SNOW: TerrainId = 13_010;
 /// Built-in terrain ID for Ice (flat, walkable).
 pub const TERRAIN_ICE: TerrainId = 13_011;
+
+/// Short-name aliases for the twelve built-in terrain IDs.
+///
+/// These are re-exports of the top-level `TERRAIN_*` constants with shorter
+/// names for ergonomic use in engine code and tests.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::terrain::builtin;
+///
+/// assert_eq!(builtin::GROUND, 13_000);
+/// assert_eq!(builtin::WATER, 13_002);
+/// assert!(builtin::WATER_BLOCKED);
+/// ```
+pub mod builtin {
+    use super::*;
+
+    /// Ground terrain ID (flat, walkable).
+    pub const GROUND: TerrainId = TERRAIN_GROUND;
+    /// Grass terrain ID (flat, walkable, grass-cover vegetation).
+    pub const GRASS: TerrainId = TERRAIN_GRASS;
+    /// Water terrain ID (water mesh, blocked by default).
+    pub const WATER: TerrainId = TERRAIN_WATER;
+    /// Lava terrain ID (flat, walkable, damages party).
+    pub const LAVA: TerrainId = TERRAIN_LAVA;
+    /// Swamp terrain ID (flat, walkable, slows movement).
+    pub const SWAMP: TerrainId = TERRAIN_SWAMP;
+    /// Stone terrain ID (flat, walkable).
+    pub const STONE: TerrainId = TERRAIN_STONE;
+    /// Dirt terrain ID (flat, walkable).
+    pub const DIRT: TerrainId = TERRAIN_DIRT;
+    /// Forest terrain ID (flat, walkable, forest vegetation).
+    pub const FOREST: TerrainId = TERRAIN_FOREST;
+    /// Mountain terrain ID (mountain mesh, blocked by default).
+    pub const MOUNTAIN: TerrainId = TERRAIN_MOUNTAIN;
+    /// Sand terrain ID (flat, walkable).
+    pub const SAND: TerrainId = TERRAIN_SAND;
+    /// Snow terrain ID (flat, walkable).
+    pub const SNOW: TerrainId = TERRAIN_SNOW;
+    /// Ice terrain ID (flat, walkable, near-water slipperiness).
+    pub const ICE: TerrainId = TERRAIN_ICE;
+
+    /// `true` because Water blocks movement by default.
+    pub const WATER_BLOCKED: bool = true;
+    /// `true` because Mountain blocks movement by default.
+    pub const MOUNTAIN_BLOCKED: bool = true;
+}
 
 /// Returns a [`TerrainDatabase`] pre-populated with all twelve built-in terrain
 /// definitions (Ground through Ice, IDs 13000–13011).
@@ -914,5 +1006,105 @@ mod tests {
         let mut tile = Tile::new(0, 0, TERRAIN_WATER, WallType::None, &db);
         tile.blocked = false;
         assert!(!tile.blocked);
+    }
+
+    #[test]
+    fn test_load_default_terrain_ron() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let terrain_path = std::path::Path::new(manifest_dir).join("data/terrain.ron");
+        let db = TerrainDatabase::load_from_file(&terrain_path)
+            .expect("data/terrain.ron should parse without error");
+        assert_eq!(
+            db.len(),
+            12,
+            "data/terrain.ron must contain exactly 12 entries"
+        );
+        // Verify all 12 built-in IDs are present
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_GRASS,
+            TERRAIN_WATER,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_FOREST,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            assert!(
+                db.has_definition(id),
+                "data/terrain.ron is missing built-in terrain ID {id}"
+            );
+        }
+        // Water and Mountain are blocked
+        assert!(
+            db.get_by_id(TERRAIN_WATER).unwrap().blocked,
+            "Water must be blocked"
+        );
+        assert!(
+            db.get_by_id(TERRAIN_MOUNTAIN).unwrap().blocked,
+            "Mountain must be blocked"
+        );
+    }
+
+    #[test]
+    fn test_terrain_database_merge_campaign_override() {
+        // Start with the 12 built-ins
+        let mut base = builtin_terrain_db();
+        assert_eq!(base.len(), 12);
+
+        // Build a "campaign" database:
+        // - ID 13001 (Grass) overrides the built-in with a custom name
+        // - ID 13100 adds a completely new entry
+        let mut campaign = TerrainDatabase::new();
+        campaign
+            .add(TerrainDefinition {
+                id: 13_001,
+                name: "Lush Meadow".to_string(),
+                texture_path: "assets/textures/terrain/lush_meadow.png".to_string(),
+                roughness: 0.92,
+                mesh_style: TerrainMeshStyle::Flat,
+                vegetation: TerrainVegetation::GrassCover,
+                blocked: false,
+                height: 0.0,
+                color: [0.1, 0.8, 0.1],
+            })
+            .unwrap();
+        campaign
+            .add(TerrainDefinition {
+                id: 13_100,
+                name: "Volcanic Ash".to_string(),
+                texture_path: "assets/textures/terrain/volcanic_ash.png".to_string(),
+                roughness: 0.70,
+                mesh_style: TerrainMeshStyle::Flat,
+                vegetation: TerrainVegetation::None,
+                blocked: false,
+                height: 0.0,
+                color: [0.2, 0.2, 0.2],
+            })
+            .unwrap();
+
+        base.merge(campaign);
+
+        // 12 built-ins + 1 new = 13 total (override replaces, not adds)
+        assert_eq!(base.len(), 13);
+        // Built-in Grass (13001) is now overridden
+        assert_eq!(
+            base.get_by_id(13_001).unwrap().name,
+            "Lush Meadow",
+            "campaign override of ID 13001 should replace built-in"
+        );
+        // New custom entry (13100) was added
+        assert!(
+            base.has_definition(13_100),
+            "new campaign entry 13100 should be present"
+        );
+        assert_eq!(base.get_by_id(13_100).unwrap().name, "Volcanic Ash");
+        // Other built-ins remain untouched
+        assert_eq!(base.get_by_id(TERRAIN_GROUND).unwrap().name, "Ground");
+        assert!(base.get_by_id(TERRAIN_WATER).unwrap().blocked);
     }
 }
