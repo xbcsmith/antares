@@ -1,3 +1,38 @@
+## Phase 6 Gap-Fixes: Missed Deliverables Remediation
+
+### Summary
+
+After a full cross-phase deliverable audit, two gaps were identified and resolved:
+
+1. **`data/terrain.ron` roughness values** — Sand roughness was 0.95 (plan spec ~0.85);
+   Snow roughness was 0.95 (plan spec ~0.3). Both corrected to 0.85 and 0.30 respectively.
+   The same values in `src/domain/world/terrain.rs::builtin_terrain_definitions()` were
+   also corrected (Sand 0.95→0.85, Snow 0.95→0.30).
+
+2. **Phase 4.5 missing tests** — Three required tests were absent from
+   `src/game/systems/map.rs`:
+   - `test_map_spawns_mountain_mesh_for_mountain_style` — verifies TERRAIN_MOUNTAIN has
+     `mesh_style: Mountain` and all other built-ins do not.
+   - `test_map_spawns_water_mesh_for_water_style` — verifies TERRAIN_WATER has
+     `mesh_style: Water` and all other built-ins do not.
+   - `test_grass_cover_spawns_for_vegetation_terrains` — verifies that only Grass
+     (13001) and Forest (13007) have `vegetation != None`; all 10 remaining built-ins
+     have `vegetation == None`. Covers the map spawner's grass-cover gating logic.
+
+### Files Changed
+
+- `data/terrain.ron` — Sand/Snow roughness corrected
+- `src/domain/world/terrain.rs` — Sand/Snow roughness in `builtin_terrain_definitions()` corrected
+- `src/game/systems/map.rs` — 3 new Phase 4.5 tests added (also imported `TERRAIN_DIRT`,
+  `TERRAIN_ICE`, `TERRAIN_LAVA`, `TERRAIN_SAND`, `TERRAIN_SNOW`, `TERRAIN_SWAMP` into
+  the test module)
+
+### Validation
+
+`cargo nextest run --all-features` — **5570 tests pass** (5567 existing + 3 new), 8 skipped
+
+---
+
 ## Phase 6: Data Migration, Repo-Wide Cleanup, and Docs
 
 ### Summary

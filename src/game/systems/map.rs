@@ -2914,8 +2914,9 @@ mod tests {
     use super::*;
     use crate::domain::types::Position;
     use crate::domain::world::terrain::{
-        builtin_terrain_db, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_MOUNTAIN,
-        TERRAIN_STONE, TERRAIN_WATER,
+        builtin_terrain_db, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND,
+        TERRAIN_ICE, TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_SAND, TERRAIN_SNOW, TERRAIN_STONE,
+        TERRAIN_SWAMP, TERRAIN_WATER,
     };
     use crate::domain::world::SpriteAnimation;
     use crate::game::components::dialogue::NpcDialogue;
@@ -3262,6 +3263,127 @@ mod tests {
             npc_id: "test_npc".to_string(),
         };
         assert_eq!(marker.npc_id, "test_npc");
+    }
+
+    #[test]
+    fn test_map_spawns_mountain_mesh_for_mountain_style() {
+        // Verify that the Mountain terrain in the built-in DB has TerrainMeshStyle::Mountain
+        // — this is the property that drives map.rs to take the mountain mesh-spawn branch.
+        let db = builtin_terrain_db();
+        let mountain = db
+            .get_by_id(TERRAIN_MOUNTAIN)
+            .expect("Mountain must be in builtin DB");
+        assert_eq!(
+            mountain.mesh_style,
+            TerrainMeshStyle::Mountain,
+            "Mountain terrain must use Mountain mesh style"
+        );
+        // Non-mountain terrains must NOT use Mountain mesh style.
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_GRASS,
+            TERRAIN_WATER,
+            TERRAIN_STONE,
+            TERRAIN_FOREST,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_ne!(
+                def.mesh_style,
+                TerrainMeshStyle::Mountain,
+                "terrain {} must NOT use Mountain mesh style",
+                def.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_map_spawns_water_mesh_for_water_style() {
+        // Verify that only the Water terrain in the built-in DB has TerrainMeshStyle::Water
+        // — this is the property that drives map.rs to take the water mesh-spawn branch.
+        let db = builtin_terrain_db();
+        let water = db
+            .get_by_id(TERRAIN_WATER)
+            .expect("Water must be in builtin DB");
+        assert_eq!(
+            water.mesh_style,
+            TerrainMeshStyle::Water,
+            "Water terrain must use Water mesh style"
+        );
+        // All other built-in terrains must NOT use Water mesh style.
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_GRASS,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_FOREST,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_ne!(
+                def.mesh_style,
+                TerrainMeshStyle::Water,
+                "terrain {} must NOT use Water mesh style",
+                def.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_grass_cover_spawns_for_vegetation_terrains() {
+        // The map spawner enables grass-cover for any tile whose TerrainDefinition has
+        // vegetation != TerrainVegetation::None.  Verify the built-in DB partitions
+        // the 12 terrain IDs correctly: Grass and Forest have vegetation; all others don't.
+        use crate::domain::world::terrain::TerrainVegetation;
+        let db = builtin_terrain_db();
+
+        // IDs expected to have vegetation (drives grass-cover spawning).
+        for id in [TERRAIN_GRASS, TERRAIN_FOREST] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_ne!(
+                def.vegetation,
+                TerrainVegetation::None,
+                "terrain {} must have vegetation (drives grass-cover spawning)",
+                def.name
+            );
+        }
+
+        // All remaining built-in IDs must have NO vegetation.
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_WATER,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_eq!(
+                def.vegetation,
+                TerrainVegetation::None,
+                "terrain {} must NOT have vegetation",
+                def.name
+            );
+        }
     }
 
     #[test]
