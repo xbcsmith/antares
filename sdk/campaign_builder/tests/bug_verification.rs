@@ -80,10 +80,10 @@ fn test_bug_3_map_editor_terrain_wall_independence() {
     );
 
     // Verify old pattern is removed
-    let paint_terrain_with_payload = source_code.contains("PaintTerrain(TerrainType)");
+    let paint_terrain_with_payload = source_code.contains("PaintTerrain(");
     assert!(
         !paint_terrain_with_payload,
-        "EditorTool should not have 'PaintTerrain(TerrainType)' - should be plain 'PaintTile'"
+        "EditorTool should not have a PaintTerrain(..) variant - should be plain 'PaintTile'"
     );
 }
 

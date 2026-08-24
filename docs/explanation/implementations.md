@@ -1,3 +1,80 @@
+## Phase 6: Data Migration, Repo-Wide Cleanup, and Docs
+
+### Summary
+
+Completed the terrain externalization effort by migrating all remaining legacy
+terrain data, eliminating every remaining Rust reference to the old TerrainType
+system, bumping the save-format major version, and updating six documentation
+files to reflect the TerrainId / TerrainDefinition architecture.
+
+### Deliverables
+
+- [x] **6.1 Map RON migration** — `data/test_town.ron` migrated from variant names
+  (`Stone`, `Ground`) to numeric IDs (13005, 13000). `notes/map_backups/map_4.ron`,
+  `map_5.ron`, `map_6.ron` migrated (all nine variants). Campaign and test-campaign
+  maps were already numeric from Phase 2.
+- [x] **6.1 Save-format version bump** — `Cargo.toml` antares package version bumped
+  from 0.1.0 to 1.0.0. Hardcoded `"0.1.0"` strings in `src/bin/antares.rs`,
+  `src/game/systems/menu.rs`, and `src/sdk/campaign_loader.rs` replaced with
+  `env!("CARGO_PKG_VERSION")`. Fixture save file `campaigns/tutorial/saves/save_20260809_072524.ron`
+  updated to `version: "1.0.0"` to keep the lore-field backward-compat test green.
+- [x] **6.2 Repo-wide cleanup** — `sdk/campaign_builder/tests/rotation_test.rs`
+  updated: `TerrainType` import removed; all `Tile::new` calls updated to
+  `TERRAIN_GROUND + &builtin_terrain_db()`; `effective_height` / `mesh_dimensions`
+  calls updated to `(wall_type, terrain_height: f32)` signature. String literals in
+  `sdk/campaign_builder/tests/bug_verification.rs` and `integration_tests.rs`
+  updated from `"PaintTerrain(TerrainType)"` to `"PaintTerrain("`.
+  Zero `TerrainType` references remain in any `.rs` or `.ron` file.
+- [x] **6.4 New test** — `test_all_campaign_maps_load_with_numeric_terrain_ids` added
+  to `tests/map_content_tests.rs`. Discovers all `.ron` map files under
+  `data/test_campaign/data/maps` and `campaigns/*/data/maps`, parses each as `Map`,
+  and asserts every tile's `terrain >= TERRAIN_ID_MIN`.
+- [x] **6.3 Documentation** — Six documents updated:
+  - `docs/explanation/terrain_texture.md` — rewritten for per-`TerrainDefinition`
+    texture paths; built-in ID-to-path table, custom terrain RON snippet.
+  - `docs/explanation/modding_guide.md` — new `## Terrain Definitions` section
+    added: built-in ID table, custom terrain RON, Rust constants.
+  - `docs/how-to/use_terrain_specific_controls.md` — overview updated with TerrainId
+    context; new Sand/Snow/Ice (13009/13010/13011) terrain section; troubleshooting
+    updated with per-ID control mapping.
+  - `docs/reference/map_ron_format.md` — new `### Terrain IDs` subsection in
+    Content IDs Reference; stale tile-type-ID list replaced with terrain/wall docs.
+  - `docs/reference/monster_creature_mapping_reference.md` — terrain ID range
+    (13000–13099, 13100+) added to Visual/Mesh Registry table and Known Gaps.
+  - `docs/reference/architecture.md` §4.2 — `Tile.terrain` updated from
+    `TerrainType` to `TerrainId`; all narrative references updated to
+    `TerrainDefinition` / `TerrainId` / numeric IDs.
+
+### Files Changed
+
+- `data/test_town.ron`
+- `notes/map_backups/map_4.ron`, `map_5.ron`, `map_6.ron`
+- `Cargo.toml`
+- `campaigns/tutorial/saves/save_20260809_072524.ron`
+- `src/bin/antares.rs`
+- `src/game/systems/menu.rs`
+- `src/sdk/campaign_loader.rs`
+- `sdk/campaign_builder/tests/rotation_test.rs`
+- `sdk/campaign_builder/tests/bug_verification.rs`
+- `sdk/campaign_builder/tests/integration_tests.rs`
+- `tests/map_content_tests.rs` (new test added)
+- `docs/explanation/terrain_texture.md`
+- `docs/explanation/modding_guide.md`
+- `docs/how-to/use_terrain_specific_controls.md`
+- `docs/reference/map_ron_format.md`
+- `docs/reference/monster_creature_mapping_reference.md`
+- `docs/reference/architecture.md`
+- `docs/explanation/implementations.md` (this file)
+
+### Success Criteria Met
+
+- `cargo nextest run --all-features` — 5567 tests pass, 8 skipped
+- `grep -rn "TerrainType" src/ sdk/ tests/` — zero matches
+- `grep -rn "terrain: [A-Z]" campaigns/ data/` — zero matches
+- All six documentation files updated
+
+---
+
 ## Phase 5 (continued): Campaign Builder Terrain Editor
 
 ### Summary

@@ -6,7 +6,8 @@
 //! Tests for rotation_y field in TileVisualMetadata and Campaign Builder integration.
 
 use antares::domain::types::Position;
-use antares::domain::world::{Map, TerrainType, Tile, TileVisualMetadata, WallType};
+use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+use antares::domain::world::{Map, Tile, TileVisualMetadata, WallType};
 use campaign_builder::map_editor::{MapEditorState, VisualMetadataEditor, VisualPreset};
 
 // ===== Domain Model Tests =====
@@ -80,7 +81,13 @@ fn test_rotation_y_large_values() {
 
 #[test]
 fn test_tile_with_rotation() {
-    let mut tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
+    let mut tile = Tile::new(
+        0,
+        0,
+        TERRAIN_GROUND,
+        WallType::Normal,
+        &builtin_terrain_db(),
+    );
     tile.visual.rotation_y = Some(45.0);
 
     assert_eq!(tile.visual.rotation_y, Some(45.0));
@@ -178,7 +185,13 @@ fn test_visual_editor_default_rotation() {
 
 #[test]
 fn test_visual_editor_load_rotation_from_tile() {
-    let mut tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
+    let mut tile = Tile::new(
+        0,
+        0,
+        TERRAIN_GROUND,
+        WallType::Normal,
+        &builtin_terrain_db(),
+    );
     tile.visual.rotation_y = Some(45.0);
 
     let mut editor = VisualMetadataEditor::default();
@@ -190,7 +203,13 @@ fn test_visual_editor_load_rotation_from_tile() {
 
 #[test]
 fn test_visual_editor_load_no_rotation_from_tile() {
-    let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
+    let tile = Tile::new(
+        0,
+        0,
+        TERRAIN_GROUND,
+        WallType::Normal,
+        &builtin_terrain_db(),
+    );
 
     let mut editor = VisualMetadataEditor::default();
     editor.load_from_tile(&tile);
@@ -308,15 +327,12 @@ fn test_rotation_with_other_properties() {
         ..Default::default()
     };
 
-    assert_eq!(
-        metadata.effective_height(TerrainType::Ground, WallType::Normal),
-        2.5
-    );
+    assert_eq!(metadata.effective_height(WallType::Normal, 0.0), 2.5);
     assert_eq!(metadata.effective_rotation_y(), 45.0);
     assert_eq!(metadata.effective_scale(), 1.2);
     assert_eq!(metadata.color_tint, Some((0.8, 0.9, 1.0)));
 
-    let (w, h, d) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+    let (w, h, d) = metadata.mesh_dimensions(WallType::Normal, 0.0);
     assert_eq!(w, 1.2); // 1.0 * 1.2 scale
     assert_eq!(h, 3.0); // 2.5 * 1.2 scale
     assert_eq!(d, 1.2); // 1.0 * 1.2 scale
@@ -324,7 +340,7 @@ fn test_rotation_with_other_properties() {
 
 #[test]
 fn test_rotation_roundtrip_through_editor() {
-    let mut original_tile = Tile::new(0, 0, TerrainType::Ground, WallType::Door);
+    let mut original_tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Door, &builtin_terrain_db());
     original_tile.visual.rotation_y = Some(135.0);
     original_tile.visual.height = Some(2.0);
 
@@ -388,10 +404,7 @@ fn test_rotation_with_all_fields_none() {
     assert_eq!(metadata.rotation_y, None);
 
     // All effective values should be defaults
-    assert_eq!(
-        metadata.effective_height(TerrainType::Ground, WallType::None),
-        0.0
-    );
+    assert_eq!(metadata.effective_height(WallType::None, 0.0), 0.0);
     assert_eq!(metadata.effective_width_x(), 1.0);
     assert_eq!(metadata.effective_width_z(), 1.0);
     assert_eq!(metadata.effective_scale(), 1.0);
