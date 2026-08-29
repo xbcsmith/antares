@@ -12,9 +12,10 @@
 
 use crate::application;
 use crate::domain::combat::types::CombatEventType;
-use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TimeOfDay};
+use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TerrainId, TimeOfDay};
 use crate::domain::world::dropped_items::DroppedItem;
 use crate::domain::world::lock::LockState;
+use crate::domain::world::terrain::TerrainDatabase;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -50,29 +51,6 @@ pub enum WallType {
     Door,
     /// Torch (light source)
     Torch,
-}
-
-/// Terrain type for tiles
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum TerrainType {
-    /// Normal walkable ground
-    Ground,
-    /// Grass terrain
-    Grass,
-    /// Water (may need special ability to cross)
-    Water,
-    /// Lava (damages party)
-    Lava,
-    /// Swamp (slows movement)
-    Swamp,
-    /// Stone floor
-    Stone,
-    /// Dirt path
-    Dirt,
-    /// Forest
-    Forest,
-    /// Mountain (blocked)
-    Mountain,
 }
 
 // ===== Terrain-Specific Features =====
@@ -427,16 +405,17 @@ impl Default for GrassBladeConfig {
 ///
 /// All dimensions in world units (1 unit ≈ 10 feet).
 /// All fields are optional to maintain backward compatibility.
-/// When None, defaults are determined by terrain/wall type.
+/// When None, defaults are determined by wall type and the terrain height
+/// looked up from [`TerrainDefinition::height`].
 ///
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+/// use antares::domain::world::{TileVisualMetadata, WallType};
 ///
 /// let mut metadata = TileVisualMetadata::default();
 /// metadata.height = Some(1.5); // Custom 15-foot wall
-/// assert_eq!(metadata.effective_height(TerrainType::Ground, WallType::Normal), 1.5);
+/// assert_eq!(metadata.effective_height(WallType::Normal, 0.0), 1.5);
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TileVisualMetadata {
@@ -514,32 +493,30 @@ pub struct TileVisualMetadata {
 }
 
 impl TileVisualMetadata {
-    /// Get effective height for this tile based on terrain/wall type
+    /// Get effective height for this tile.
     ///
-    /// Falls back to hardcoded defaults if not specified.
+    /// Uses the stored height if set. For wall types (Normal, Door, Torch) returns
+    /// 2.5. For flat terrain (WallType::None) returns the supplied `terrain_height`
+    /// value (the caller looks this up from [`TerrainDefinition::height`]).
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+    /// use antares::domain::world::{TileVisualMetadata, WallType};
     ///
     /// let metadata = TileVisualMetadata::default();
-    /// assert_eq!(metadata.effective_height(TerrainType::Ground, WallType::Normal), 2.5);
-    /// assert_eq!(metadata.effective_height(TerrainType::Mountain, WallType::None), 3.0);
+    /// assert_eq!(metadata.effective_height(WallType::Normal, 0.0), 2.5);
+    /// assert_eq!(metadata.effective_height(WallType::None, 3.0), 3.0);
+    /// assert_eq!(metadata.effective_height(WallType::None, 0.0), 0.0);
     /// ```
-    pub fn effective_height(&self, terrain: TerrainType, wall_type: WallType) -> f32 {
+    pub fn effective_height(&self, wall_type: WallType, terrain_height: f32) -> f32 {
         if let Some(h) = self.height {
             return h;
         }
 
-        // Default heights matching current hardcoded values
         match wall_type {
             WallType::Normal | WallType::Door | WallType::Torch => 2.5,
-            WallType::None => match terrain {
-                TerrainType::Mountain => 3.0,
-                TerrainType::Forest => 2.2,
-                _ => 0.0, // Flat terrain has no height
-            },
+            WallType::None => terrain_height,
         }
     }
 
@@ -707,22 +684,25 @@ impl TileVisualMetadata {
         self.y_offset.unwrap_or(0.0)
     }
 
-    /// Calculate mesh dimensions (width_x, height, width_z) with scale applied
+    /// Calculate mesh dimensions (width_x, height, width_z) with scale applied.
+    ///
+    /// `terrain_height` is the [`TerrainDefinition::height`] value for the tile's
+    /// terrain ID, looked up by the caller.
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+    /// use antares::domain::world::{TileVisualMetadata, WallType};
     ///
     /// let metadata = TileVisualMetadata::default();
-    /// let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+    /// let (x, h, z) = metadata.mesh_dimensions(WallType::Normal, 0.0);
     /// assert_eq!((x, h, z), (1.0, 2.5, 1.0));
     /// ```
-    pub fn mesh_dimensions(&self, terrain: TerrainType, wall_type: WallType) -> (f32, f32, f32) {
+    pub fn mesh_dimensions(&self, wall_type: WallType, terrain_height: f32) -> (f32, f32, f32) {
         let scale = self.effective_scale();
         (
             self.effective_width_x() * scale,
-            self.effective_height(terrain, wall_type) * scale,
+            self.effective_height(wall_type, terrain_height) * scale,
             self.effective_width_z() * scale,
         )
     }
@@ -758,18 +738,21 @@ impl TileVisualMetadata {
         self.effective_rotation_y().to_radians()
     }
 
-    /// Calculate Y-position for mesh center
+    /// Calculate Y-position for mesh center.
+    ///
+    /// `terrain_height` is the [`TerrainDefinition::height`] value looked up by the
+    /// caller.
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+    /// use antares::domain::world::{TileVisualMetadata, WallType};
     ///
     /// let metadata = TileVisualMetadata::default();
-    /// assert_eq!(metadata.mesh_y_position(TerrainType::Ground, WallType::Normal), 1.25);
+    /// assert_eq!(metadata.mesh_y_position(WallType::Normal, 0.0), 1.25);
     /// ```
-    pub fn mesh_y_position(&self, terrain: TerrainType, wall_type: WallType) -> f32 {
-        let height = self.effective_height(terrain, wall_type);
+    pub fn mesh_y_position(&self, wall_type: WallType, terrain_height: f32) -> f32 {
+        let height = self.effective_height(wall_type, terrain_height);
         let scale = self.effective_scale();
         (height * scale / 2.0) + self.effective_y_offset()
     }
@@ -872,19 +855,24 @@ impl TileVisualMetadata {
 
 /// A single tile in the game world
 ///
+/// A single tile in the game world
+///
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::{Tile, TerrainType, WallType};
+/// use antares::domain::types::TERRAIN_ID_MIN;
+/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+/// use antares::domain::world::{Tile, WallType};
 ///
-/// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::None);
+/// let db = builtin_terrain_db();
+/// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::None, &db);
 /// assert!(!tile.blocked);
 /// assert!(!tile.visited);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tile {
-    /// Terrain type
-    pub terrain: TerrainType,
+    /// Terrain ID (references a [`TerrainDefinition`] in the campaign's terrain database)
+    pub terrain: TerrainId,
     /// Wall type (None, Normal, Door, Torch)
     pub wall_type: WallType,
     /// Whether movement is blocked
@@ -906,20 +894,38 @@ pub struct Tile {
 }
 
 impl Tile {
-    /// Creates a new tile with the given terrain and wall type
+    /// Creates a new tile with the given terrain ID and wall type.
+    ///
+    /// Seeds `blocked` from the [`TerrainDatabase`]: `true` if the terrain
+    /// definition is blocked or `wall_type` is [`WallType::Normal`], `false`
+    /// otherwise.  The `blocked` field is a plain mutable field — callers may
+    /// override it freely after construction (e.g., for door/lock state or Walk
+    /// on Water spell overrides).
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND, TERRAIN_WATER};
+    /// use antares::domain::world::{Tile, WallType};
     ///
-    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::None);
-    /// assert_eq!(tile.terrain, TerrainType::Ground);
+    /// let db = builtin_terrain_db();
+    /// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::None, &db);
+    /// assert_eq!(tile.terrain, TERRAIN_GROUND);
     /// assert_eq!(tile.wall_type, WallType::None);
+    /// assert!(!tile.blocked);
+    ///
+    /// let water = Tile::new(0, 0, TERRAIN_WATER, WallType::None, &db);
+    /// assert!(water.blocked);
     /// ```
-    pub fn new(x: i32, y: i32, terrain: TerrainType, wall_type: WallType) -> Self {
-        let blocked = matches!(terrain, TerrainType::Mountain | TerrainType::Water)
-            || matches!(wall_type, WallType::Normal);
+    pub fn new(
+        x: i32,
+        y: i32,
+        terrain: TerrainId,
+        wall_type: WallType,
+        db: &TerrainDatabase,
+    ) -> Self {
+        let terrain_blocked = db.get_by_id(terrain).is_some_and(|d| d.blocked);
+        let blocked = terrain_blocked || matches!(wall_type, WallType::Normal);
 
         Self {
             x,
@@ -959,9 +965,11 @@ impl Tile {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+    /// use antares::domain::world::{Tile, WallType};
     ///
-    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    /// let db = builtin_terrain_db();
+    /// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
     ///     .with_height(1.5);
     /// assert_eq!(tile.visual.height, Some(1.5));
     /// ```
@@ -975,9 +983,11 @@ impl Tile {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+    /// use antares::domain::world::{Tile, WallType};
     ///
-    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    /// let db = builtin_terrain_db();
+    /// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
     ///     .with_dimensions(0.8, 1.5, 0.8);
     /// assert_eq!(tile.visual.width_x, Some(0.8));
     /// assert_eq!(tile.visual.height, Some(1.5));
@@ -995,9 +1005,11 @@ impl Tile {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+    /// use antares::domain::world::{Tile, WallType};
     ///
-    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    /// let db = builtin_terrain_db();
+    /// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
     ///     .with_color_tint(1.0, 0.5, 0.5);
     /// assert_eq!(tile.visual.color_tint, Some((1.0, 0.5, 0.5)));
     /// ```
@@ -1011,9 +1023,11 @@ impl Tile {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+    /// use antares::domain::world::{Tile, WallType};
     ///
-    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    /// let db = builtin_terrain_db();
+    /// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
     ///     .with_scale(1.5);
     /// assert_eq!(tile.visual.scale, Some(1.5));
     /// ```
@@ -1027,10 +1041,11 @@ impl Tile {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Tile, TerrainType, WallType};
-    /// use antares::domain::types::Position;
+    /// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+    /// use antares::domain::world::{Tile, WallType};
     ///
-    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    /// let db = builtin_terrain_db();
+    /// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
     ///     .with_sprite("sprites/walls.png", 5);
     ///
     /// assert!(tile.visual.uses_sprite());
@@ -1051,10 +1066,11 @@ impl Tile {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Tile, TerrainType, WallType};
-    /// use antares::domain::types::Position;
+    /// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GROUND};
+    /// use antares::domain::world::{Tile, WallType};
     ///
-    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    /// let db = builtin_terrain_db();
+    /// let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
     ///     .with_animated_sprite("sprites/water.png", vec![0, 1, 2, 3], 4.0, true);
     ///
     /// assert!(tile.visual.uses_sprite());
@@ -2514,9 +2530,9 @@ pub struct EncounterTable {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<EncounterGroup>,
 
-    /// Terrain-based modifiers to multiply the base encounter rate
+    /// Terrain-based modifiers to multiply the base encounter rate, keyed by [`TerrainId`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub terrain_modifiers: BTreeMap<TerrainType, f32>,
+    pub terrain_modifiers: BTreeMap<TerrainId, f32>,
 }
 
 // ===== Resolved NPC =====
@@ -2781,7 +2797,7 @@ impl Default for SkyConfig {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::{Map, Tile, TerrainType, WallType};
+/// use antares::domain::world::Map;
 ///
 /// let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 /// assert_eq!(map.width, 20);
@@ -2899,12 +2915,17 @@ impl Map {
         let mut tiles = Vec::with_capacity((width * height) as usize);
         for y in 0..height {
             for x in 0..width {
-                tiles.push(Tile::new(
-                    x as i32,
-                    y as i32,
-                    TerrainType::Ground,
-                    WallType::None,
-                ));
+                tiles.push(Tile {
+                    terrain: crate::domain::world::terrain::TERRAIN_GROUND,
+                    wall_type: WallType::None,
+                    blocked: false,
+                    is_special: false,
+                    is_dark: false,
+                    visited: false,
+                    x: x as i32,
+                    y: y as i32,
+                    visual: TileVisualMetadata::default(),
+                });
             }
         }
 
@@ -3393,7 +3414,7 @@ impl Map {
     ///
     /// * Tiles within the new bounds are preserved from the original map.
     /// * Any positions that are new (when growing) are initialised as
-    ///   `TerrainType::Ground` with `WallType::None`.
+    ///   built-in Ground terrain (ID 13000) with `WallType::None`.
     /// * Events and NPC placements whose tile position falls outside the new
     ///   bounds are permanently removed.
     /// * A `new_width` or `new_height` of `0` is a no-op (the map is
@@ -3424,12 +3445,17 @@ impl Map {
                 if let Some(tile) = self.get_tile(pos) {
                     new_tiles.push(tile.clone());
                 } else {
-                    new_tiles.push(Tile::new(
-                        x as i32,
-                        y as i32,
-                        TerrainType::Ground,
-                        WallType::None,
-                    ));
+                    new_tiles.push(Tile {
+                        terrain: crate::domain::world::terrain::TERRAIN_GROUND,
+                        wall_type: WallType::None,
+                        blocked: false,
+                        is_special: false,
+                        is_dark: false,
+                        visited: false,
+                        x: x as i32,
+                        y: y as i32,
+                        visual: TileVisualMetadata::default(),
+                    });
                 }
             }
         }
@@ -3482,7 +3508,7 @@ mod map_landscape_placement_tests {
             description: "No landscape field",
             tiles: [
                 (
-                    terrain: Ground,
+                    terrain: 13000,
                     wall_type: None,
                     blocked: false,
                     is_special: false,
@@ -3517,7 +3543,7 @@ mod map_landscape_placement_tests {
             description: "Only required placement fields",
             tiles: [
                 (
-                    terrain: Ground,
+                    terrain: 13000,
                     wall_type: None,
                     blocked: false,
                     is_special: false,
@@ -3996,6 +4022,7 @@ mod map_npc_resolution_tests {
 mod map_resize_tests {
     use super::*;
     use crate::domain::world::npc::NpcPlacement;
+    use crate::domain::world::terrain::{TERRAIN_GROUND, TERRAIN_MOUNTAIN};
 
     // ── grow ───────────────────────────────────────────────────────────────────
 
@@ -4012,16 +4039,14 @@ mod map_resize_tests {
             .get_tile(Position::new(0, 0))
             .expect("tile at (0,0) must exist after grow");
         assert_eq!(
-            origin.terrain,
-            TerrainType::Ground,
+            origin.terrain, TERRAIN_GROUND,
             "existing tile terrain must be preserved"
         );
         let new_tile = map
             .get_tile(Position::new(7, 6))
             .expect("tile at (7,6) must exist after grow");
         assert_eq!(
-            new_tile.terrain,
-            TerrainType::Ground,
+            new_tile.terrain, TERRAIN_GROUND,
             "newly added tiles must default to Ground terrain"
         );
     }
@@ -4029,7 +4054,7 @@ mod map_resize_tests {
     #[test]
     fn test_resize_shrink_removes_out_of_bounds_tiles() {
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
-        map.get_tile_mut(Position::new(9, 9)).unwrap().terrain = TerrainType::Mountain;
+        map.get_tile_mut(Position::new(9, 9)).unwrap().terrain = TERRAIN_MOUNTAIN;
 
         map.resize(5, 5);
 
@@ -4225,7 +4250,7 @@ mod map_resize_tests {
     #[test]
     fn test_resize_preserves_tile_terrain_in_bounds() {
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
-        map.get_tile_mut(Position::new(2, 3)).unwrap().terrain = TerrainType::Mountain;
+        map.get_tile_mut(Position::new(2, 3)).unwrap().terrain = TERRAIN_MOUNTAIN;
 
         map.resize(5, 5);
 
@@ -4233,8 +4258,7 @@ mod map_resize_tests {
             .get_tile(Position::new(2, 3))
             .expect("tile at (2,3) must still exist after shrinking to 5×5");
         assert_eq!(
-            tile.terrain,
-            TerrainType::Mountain,
+            tile.terrain, TERRAIN_MOUNTAIN,
             "Mountain terrain at (2,3) must be preserved across shrink"
         );
     }
@@ -4249,8 +4273,7 @@ mod map_resize_tests {
             .get_tile(Position::new(6, 6))
             .expect("tile at (6,6) must exist after growing to 8×8");
         assert_eq!(
-            tile.terrain,
-            TerrainType::Ground,
+            tile.terrain, TERRAIN_GROUND,
             "newly added tiles must have Ground terrain"
         );
         assert_eq!(
@@ -4976,6 +4999,9 @@ mod time_condition_tests {
 mod tests {
     use super::*;
     use crate::domain::world::dropped_items::DroppedItem;
+    use crate::domain::world::terrain::{
+        builtin_terrain_db, TERRAIN_GROUND, TERRAIN_MOUNTAIN, TERRAIN_WATER,
+    };
 
     // ===== TileVisualMetadata Tests =====
 
@@ -4993,59 +5019,38 @@ mod tests {
     #[test]
     fn test_effective_height_wall() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.effective_height(TerrainType::Ground, WallType::Normal),
-            2.5
-        );
+        assert_eq!(metadata.effective_height(WallType::Normal, 0.0), 2.5);
     }
 
     #[test]
     fn test_effective_height_door() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.effective_height(TerrainType::Ground, WallType::Door),
-            2.5
-        );
+        assert_eq!(metadata.effective_height(WallType::Door, 0.0), 2.5);
     }
 
     #[test]
     fn test_effective_height_torch() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.effective_height(TerrainType::Ground, WallType::Torch),
-            2.5
-        );
+        assert_eq!(metadata.effective_height(WallType::Torch, 0.0), 2.5);
     }
 
     #[test]
     fn test_effective_height_mountain() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.effective_height(TerrainType::Mountain, WallType::None),
-            3.0
-        );
+        assert_eq!(metadata.effective_height(WallType::None, 3.0), 3.0);
     }
 
     #[test]
     fn test_effective_height_forest() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.effective_height(TerrainType::Forest, WallType::None),
-            2.2
-        );
+        assert_eq!(metadata.effective_height(WallType::None, 2.2), 2.2);
     }
 
     #[test]
     fn test_effective_height_flat_terrain() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.effective_height(TerrainType::Ground, WallType::None),
-            0.0
-        );
-        assert_eq!(
-            metadata.effective_height(TerrainType::Grass, WallType::None),
-            0.0
-        );
+        assert_eq!(metadata.effective_height(WallType::None, 0.0), 0.0);
+        assert_eq!(metadata.effective_height(WallType::None, 0.0), 0.0);
     }
 
     #[test]
@@ -5054,20 +5059,14 @@ mod tests {
             height: Some(5.0),
             ..Default::default()
         };
-        assert_eq!(
-            metadata.effective_height(TerrainType::Ground, WallType::Normal),
-            5.0
-        );
-        assert_eq!(
-            metadata.effective_height(TerrainType::Mountain, WallType::None),
-            5.0
-        );
+        assert_eq!(metadata.effective_height(WallType::Normal, 0.0), 5.0);
+        assert_eq!(metadata.effective_height(WallType::None, 0.0), 5.0);
     }
 
     #[test]
     fn test_mesh_dimensions_default() {
         let metadata = TileVisualMetadata::default();
-        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        let (x, h, z) = metadata.mesh_dimensions(WallType::Normal, 0.0);
         assert_eq!((x, h, z), (1.0, 2.5, 1.0));
     }
 
@@ -5079,7 +5078,7 @@ mod tests {
             width_z: Some(0.6),
             ..Default::default()
         };
-        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        let (x, h, z) = metadata.mesh_dimensions(WallType::Normal, 0.0);
         assert_eq!((x, h, z), (0.8, 1.5, 0.6));
     }
 
@@ -5089,7 +5088,7 @@ mod tests {
             scale: Some(2.0),
             ..Default::default()
         };
-        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        let (x, h, z) = metadata.mesh_dimensions(WallType::Normal, 0.0);
         assert_eq!((x, h, z), (2.0, 5.0, 2.0)); // 1.0*2.0, 2.5*2.0, 1.0*2.0
     }
 
@@ -5132,35 +5131,26 @@ mod tests {
             scale: Some(2.0),
             ..Default::default()
         };
-        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        let (x, h, z) = metadata.mesh_dimensions(WallType::Normal, 0.0);
         assert_eq!((x, h, z), (1.0, 2.0, 1.0)); // 0.5*2.0, 1.0*2.0, 0.5*2.0
     }
 
     #[test]
     fn test_mesh_y_position_wall() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
-            1.25
-        ); // 2.5 / 2.0
+        assert_eq!(metadata.mesh_y_position(WallType::Normal, 0.0), 1.25); // 2.5 / 2.0
     }
 
     #[test]
     fn test_mesh_y_position_mountain() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.mesh_y_position(TerrainType::Mountain, WallType::None),
-            1.5
-        ); // 3.0 / 2.0
+        assert_eq!(metadata.mesh_y_position(WallType::None, 3.0), 1.5); // 3.0 / 2.0
     }
 
     #[test]
     fn test_mesh_y_position_forest() {
         let metadata = TileVisualMetadata::default();
-        assert_eq!(
-            metadata.mesh_y_position(TerrainType::Forest, WallType::None),
-            1.1
-        ); // 2.2 / 2.0
+        assert_eq!(metadata.mesh_y_position(WallType::None, 2.2), 1.1); // 2.2 / 2.0
     }
 
     #[test]
@@ -5169,10 +5159,7 @@ mod tests {
             y_offset: Some(0.5),
             ..Default::default()
         };
-        assert_eq!(
-            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
-            1.75
-        ); // (2.5 / 2.0) + 0.5
+        assert_eq!(metadata.mesh_y_position(WallType::Normal, 0.0), 1.75); // (2.5 / 2.0) + 0.5
     }
 
     #[test]
@@ -5181,10 +5168,7 @@ mod tests {
             scale: Some(2.0),
             ..Default::default()
         };
-        assert_eq!(
-            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
-            2.5
-        ); // (2.5 * 2.0) / 2.0
+        assert_eq!(metadata.mesh_y_position(WallType::Normal, 0.0), 2.5); // (2.5 * 2.0) / 2.0
     }
 
     #[test]
@@ -5194,10 +5178,7 @@ mod tests {
             y_offset: Some(1.0),
             ..Default::default()
         };
-        assert_eq!(
-            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
-            3.5
-        ); // ((2.5 * 2.0) / 2.0) + 1.0
+        assert_eq!(metadata.mesh_y_position(WallType::Normal, 0.0), 3.5); // ((2.5 * 2.0) / 2.0) + 1.0
     }
 
     #[test]
@@ -5262,14 +5243,16 @@ mod tests {
 
     #[test]
     fn test_tile_builder_with_height() {
-        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_height(3.0);
+        let db = builtin_terrain_db();
+        let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db).with_height(3.0);
         assert_eq!(tile.visual.height, Some(3.0));
     }
 
     #[test]
     fn test_tile_builder_with_dimensions() {
+        let db = builtin_terrain_db();
         let tile =
-            Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_dimensions(0.8, 2.0, 0.9);
+            Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db).with_dimensions(0.8, 2.0, 0.9);
         assert_eq!(tile.visual.width_x, Some(0.8));
         assert_eq!(tile.visual.height, Some(2.0));
         assert_eq!(tile.visual.width_z, Some(0.9));
@@ -5277,20 +5260,23 @@ mod tests {
 
     #[test]
     fn test_tile_builder_with_color_tint() {
+        let db = builtin_terrain_db();
         let tile =
-            Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_color_tint(1.0, 0.5, 0.25);
+            Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db).with_color_tint(1.0, 0.5, 0.25);
         assert_eq!(tile.visual.color_tint, Some((1.0, 0.5, 0.25)));
     }
 
     #[test]
     fn test_tile_builder_with_scale() {
-        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_scale(1.5);
+        let db = builtin_terrain_db();
+        let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db).with_scale(1.5);
         assert_eq!(tile.visual.scale, Some(1.5));
     }
 
     #[test]
     fn test_tile_builder_chain() {
-        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+        let db = builtin_terrain_db();
+        let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
             .with_height(2.0)
             .with_scale(1.5)
             .with_color_tint(0.8, 0.8, 1.0);
@@ -5303,7 +5289,7 @@ mod tests {
     fn test_serde_backward_compat() {
         // Old format without visual field should deserialize with default
         let ron_data = r#"(
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5321,7 +5307,8 @@ mod tests {
     #[test]
     fn test_serde_with_visual() {
         // New format with visual field should round-trip correctly
-        let tile = Tile::new(3, 7, TerrainType::Mountain, WallType::None)
+        let db = builtin_terrain_db();
+        let tile = Tile::new(3, 7, TERRAIN_MOUNTAIN, WallType::None, &db)
             .with_height(4.0)
             .with_color_tint(0.5, 0.5, 0.5);
 
@@ -5339,32 +5326,81 @@ mod tests {
 
     #[test]
     fn test_tile_creation() {
-        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::None);
-        assert_eq!(tile.terrain, TerrainType::Ground);
+        let db = builtin_terrain_db();
+        let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::None, &db);
+        assert_eq!(tile.terrain, TERRAIN_GROUND);
         assert_eq!(tile.wall_type, WallType::None);
         assert!(!tile.blocked);
         assert!(!tile.visited);
         assert_eq!(tile.x, 0);
         assert_eq!(tile.y, 0);
 
-        let wall_tile = Tile::new(1, 1, TerrainType::Ground, WallType::Normal);
+        let wall_tile = Tile::new(1, 1, TERRAIN_GROUND, WallType::Normal, &db);
         assert!(wall_tile.blocked);
     }
 
     #[test]
     fn test_tile_door() {
-        let door = Tile::new(0, 0, TerrainType::Ground, WallType::Door);
+        let db = builtin_terrain_db();
+        let door = Tile::new(0, 0, TERRAIN_GROUND, WallType::Door, &db);
         assert!(door.is_door());
         assert!(!door.has_light());
     }
 
     #[test]
     fn test_tile_blocked_terrain() {
-        let water = Tile::new(0, 0, TerrainType::Water, WallType::None);
+        let db = builtin_terrain_db();
+        let water = Tile::new(0, 0, TERRAIN_WATER, WallType::None, &db);
         assert!(water.is_blocked());
 
-        let mountain = Tile::new(0, 0, TerrainType::Mountain, WallType::None);
+        let mountain = Tile::new(0, 0, TERRAIN_MOUNTAIN, WallType::None, &db);
         assert!(mountain.is_blocked());
+    }
+
+    #[test]
+    fn test_tile_new_seeds_blocked_from_terrain_database() {
+        let db = builtin_terrain_db();
+        let water = Tile::new(0, 0, TERRAIN_WATER, WallType::None, &db);
+        assert!(water.blocked, "Water tiles must be seeded blocked=true");
+        let mountain = Tile::new(0, 0, TERRAIN_MOUNTAIN, WallType::None, &db);
+        assert!(
+            mountain.blocked,
+            "Mountain tiles must be seeded blocked=true"
+        );
+        let ground = Tile::new(0, 0, TERRAIN_GROUND, WallType::None, &db);
+        assert!(!ground.blocked, "Ground tiles must be seeded blocked=false");
+        // Verify blocked is a plain mutable field
+        let mut tile = Tile::new(0, 0, TERRAIN_WATER, WallType::None, &db);
+        tile.blocked = false;
+        assert!(
+            !tile.blocked,
+            "blocked field must be mutable after construction"
+        );
+    }
+
+    #[test]
+    fn test_effective_height_uses_supplied_terrain_height() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.effective_height(WallType::None, 3.0),
+            3.0,
+            "should use terrain_height for flat terrain"
+        );
+        assert_eq!(metadata.effective_height(WallType::None, 2.2), 2.2);
+        assert_eq!(
+            metadata.effective_height(WallType::Normal, 3.0),
+            2.5,
+            "wall overrides terrain_height"
+        );
+        let custom = TileVisualMetadata {
+            height: Some(5.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            custom.effective_height(WallType::None, 3.0),
+            5.0,
+            "stored height overrides terrain_height"
+        );
     }
 
     #[test]
@@ -5384,7 +5420,7 @@ mod tests {
         let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let tile = map.get_tile(Position::new(5, 5));
         assert!(tile.is_some());
-        assert_eq!(tile.unwrap().terrain, TerrainType::Ground);
+        assert_eq!(tile.unwrap().terrain, TERRAIN_GROUND);
 
         let out_of_bounds = map.get_tile(Position::new(10, 10));
         assert!(out_of_bounds.is_none());
@@ -5755,7 +5791,8 @@ mod tests {
 
     #[test]
     fn test_tile_with_rotation() {
-        let mut tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
+        let db = builtin_terrain_db();
+        let mut tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db);
         tile.visual.rotation_y = Some(90.0);
 
         assert_eq!(tile.visual.rotation_y, Some(90.0));
@@ -5828,7 +5865,8 @@ mod tests {
 
     #[test]
     fn test_tile_with_sprite_builder() {
-        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+        let db = builtin_terrain_db();
+        let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db)
             .with_sprite("sprites/test.png", 10);
 
         assert!(tile.visual.uses_sprite());
@@ -5838,7 +5876,8 @@ mod tests {
 
     #[test]
     fn test_tile_with_animated_sprite_builder() {
-        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_animated_sprite(
+        let db = builtin_terrain_db();
+        let tile = Tile::new(0, 0, TERRAIN_GROUND, WallType::Normal, &db).with_animated_sprite(
             "sprites/water.png",
             vec![0, 1, 2, 3],
             4.0,

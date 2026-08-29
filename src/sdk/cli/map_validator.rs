@@ -301,7 +301,7 @@ fn validate_map_file(
         }
     };
 
-    let map: Map = blueprint.into();
+    let map = blueprint.into_map(&crate::domain::world::terrain::builtin_terrain_db());
 
     // Validate structure
     validate_structure(&map, &mut errors);
@@ -680,18 +680,18 @@ mod tests {
         let mut map = make_minimal_map();
         map.width = 300;
         map.height = 300;
-        map.tiles = (0..(300 * 300))
-            .map(|i| {
-                let xi = i % 300;
-                let yi = i / 300;
-                crate::domain::world::Tile::new(
-                    xi,
-                    yi,
-                    crate::domain::world::TerrainType::Grass,
-                    crate::domain::world::WallType::None,
-                )
-            })
-            .collect();
+        {
+            use crate::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS};
+            use crate::domain::world::WallType;
+            let db = builtin_terrain_db();
+            map.tiles = (0..(300 * 300))
+                .map(|i| {
+                    let xi = i % 300;
+                    let yi = i / 300;
+                    crate::domain::world::Tile::new(xi, yi, TERRAIN_GRASS, WallType::None, &db)
+                })
+                .collect();
+        }
         let mut errors = Vec::new();
         validate_structure(&map, &mut errors);
         assert!(
@@ -895,11 +895,13 @@ mod tests {
 
     /// Build the smallest valid map: 2×2, 4 tiles, non-zero ID, no events.
     fn make_minimal_map() -> Map {
-        use crate::domain::world::{TerrainType, Tile, WallType};
+        use crate::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS};
+        use crate::domain::world::{Tile, WallType};
         use std::collections::BTreeMap;
 
+        let db = builtin_terrain_db();
         let tiles = (0..4)
-            .map(|i| Tile::new(i % 2, i / 2, TerrainType::Grass, WallType::None))
+            .map(|i| Tile::new(i % 2, i / 2, TERRAIN_GRASS, WallType::None, &db))
             .collect();
 
         Map {
@@ -924,15 +926,17 @@ mod tests {
     /// Build a map that contains one instance of every MapEvent variant, all
     /// at valid (distinct) positions within a 16×16 grid.
     fn make_map_with_all_event_variants() -> Map {
-        use crate::domain::world::{TerrainType, Tile, WallType};
+        use crate::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS};
+        use crate::domain::world::{Tile, WallType};
         use std::collections::BTreeMap;
 
         let size: u32 = 16;
+        let db = builtin_terrain_db();
         let tiles: Vec<Tile> = (0..(size * size) as usize)
             .map(|i| {
                 let xi = (i as u32 % size) as i32;
                 let yi = (i as u32 / size) as i32;
-                Tile::new(xi, yi, TerrainType::Grass, WallType::None)
+                Tile::new(xi, yi, TERRAIN_GRASS, WallType::None, &db)
             })
             .collect();
 

@@ -30,6 +30,7 @@ use crate::domain::visual::creature_database::CreatureDatabase;
 use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
 use crate::domain::world::object_mesh::ObjectMeshDatabase;
+use crate::domain::world::terrain::TerrainDatabase;
 use crate::domain::world::wind::CampaignWindConfig;
 
 /// Campaign validation errors
@@ -83,6 +84,7 @@ pub enum CampaignError {
 /// use antares::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
 /// use antares::domain::world::object_mesh::ObjectMeshDatabase;
 /// use antares::domain::world::wind::CampaignWindConfig;
+/// use antares::domain::world::terrain::TerrainDatabase;
 ///
 /// let game_data = GameData {
 ///     creatures: CreatureDatabase::new(),
@@ -94,6 +96,7 @@ pub enum CampaignError {
 ///     object_meshes: ObjectMeshDatabase::new(),
 ///     levels: None,
 ///     wind: CampaignWindConfig::default(),
+///     terrain: TerrainDatabase::new(),
 /// };
 ///
 /// assert!(game_data.creatures.is_empty());
@@ -133,6 +136,13 @@ pub struct GameData {
     ///
     /// Absent file → [`CampaignWindConfig::default()`] (no wind animation).
     pub wind: CampaignWindConfig,
+
+    /// Terrain definition database — built-in and campaign-defined terrain types.
+    ///
+    /// Seeded with base terrain from `data/terrain.ron` (falling back to the
+    /// 12 built-in definitions if absent), with an optional per-campaign
+    /// `data/terrain.ron` merged on top (new IDs add, existing IDs override).
+    pub terrain: TerrainDatabase,
 }
 
 impl GameData {
@@ -158,6 +168,7 @@ impl GameData {
             object_meshes: ObjectMeshDatabase::new(),
             levels: None,
             wind: CampaignWindConfig::default(),
+            terrain: TerrainDatabase::new(),
         }
     }
 
@@ -299,6 +310,9 @@ impl CampaignLoader {
 
         // Load wind configuration (opt-in per campaign; missing file is OK)
         game_data.wind = self.load_wind_config()?;
+
+        // Load terrain definitions (base + optional campaign override/extension)
+        game_data.terrain = self.load_terrain()?;
 
         // Validate all loaded data
         game_data.validate()?;
@@ -618,6 +632,47 @@ impl CampaignLoader {
             .unwrap_or_default())
     }
 
+    /// Loads terrain definitions from base and campaign paths.
+    ///
+    /// Loading order:
+    /// 1. Base terrain: loads `terrain.ron` from `self.base_data_path`, falling
+    ///    back to [`crate::domain::world::terrain::builtin_terrain_db()`] if the
+    ///    file is absent.
+    /// 2. Campaign terrain: loads `data/terrain.ron` from `self.campaign_path`
+    ///    if present and merges it on top (new IDs add, existing IDs override).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ReadError` if a terrain file exists but cannot
+    /// be read or parsed.
+    fn load_terrain(&self) -> Result<TerrainDatabase, CampaignError> {
+        // Step 1: load base terrain (data/terrain.ron → fallback to builtin)
+        let base_path = self.base_data_path.join("terrain.ron");
+        let mut terrain = if base_path.exists() {
+            TerrainDatabase::load_from_file(&base_path).map_err(|e| {
+                CampaignError::ReadError(format!("terrain.ron '{}': {}", base_path.display(), e))
+            })?
+        } else {
+            crate::domain::world::terrain::builtin_terrain_db()
+        };
+
+        // Step 2: merge campaign-specific terrain if present (opt-in, not an error if absent)
+        let campaign_path = self.campaign_path.join("data/terrain.ron");
+        if campaign_path.exists() {
+            let campaign_terrain =
+                TerrainDatabase::load_from_file(&campaign_path).map_err(|e| {
+                    CampaignError::ReadError(format!(
+                        "campaign terrain.ron '{}': {}",
+                        campaign_path.display(),
+                        e
+                    ))
+                })?;
+            terrain.merge(campaign_terrain);
+        }
+
+        Ok(terrain)
+    }
+
     /// Gets the campaign path
     pub fn campaign_path(&self) -> &PathBuf {
         &self.campaign_path
@@ -828,6 +883,69 @@ mod tests {
 
     /// Loads `data/test_campaign` and asserts `levels` is `Some`
     /// with the expected knight and sorcerer entries.
+    /// Missing terrain.ron in campaign path uses builtin fallback.
+    #[test]
+    fn test_campaign_loader_missing_terrain_ron_uses_builtin_only() {
+        // Use a temp dir as campaign path — it has NO terrain.ron — so the loader
+        // falls back to the 12 built-in definitions from data/terrain.ron.
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let base_path = std::path::PathBuf::from(manifest_dir).join("data");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut loader = CampaignLoader::new(base_path, tmp.path().to_path_buf());
+        let game_data = loader
+            .load_game_data()
+            .expect("load_game_data should succeed");
+
+        assert!(
+            game_data.terrain.len() >= 12,
+            "Expected >= 12 terrain entries (all built-ins), got {}",
+            game_data.terrain.len()
+        );
+        use crate::domain::world::terrain::{TERRAIN_MOUNTAIN, TERRAIN_WATER};
+        assert!(game_data.terrain.has_definition(TERRAIN_WATER));
+        assert!(game_data.terrain.has_definition(TERRAIN_MOUNTAIN));
+        assert!(game_data.terrain.get_by_id(TERRAIN_WATER).unwrap().blocked);
+        assert!(
+            game_data
+                .terrain
+                .get_by_id(TERRAIN_MOUNTAIN)
+                .unwrap()
+                .blocked
+        );
+    }
+
+    /// Campaign terrain.ron is merged on top of base terrain.
+    #[test]
+    fn test_campaign_loader_terrain_merge_from_fixture() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let base = std::path::PathBuf::from(manifest_dir).join("data");
+        let campaign = base.join("test_campaign");
+
+        let mut loader = CampaignLoader::new(base, campaign);
+        let game_data = loader.load_game_data().expect("load_game_data failed");
+
+        // Base 12 built-ins + 1 new campaign entry (13100 Volcanic Ash) = >= 13
+        assert!(
+            game_data.terrain.len() >= 13,
+            "Expected >= 13 terrain entries after campaign merge, got {}",
+            game_data.terrain.len()
+        );
+        // Campaign-specific Volcanic Ash (id 13100) must be present
+        assert!(
+            game_data.terrain.has_definition(13100),
+            "Expected campaign terrain id 13100 (Volcanic Ash) to be present"
+        );
+        // Campaign override of Grass (id 13001) must use the campaign name
+        let grass = game_data
+            .terrain
+            .get_by_id(13001)
+            .expect("terrain id 13001 must exist");
+        assert_eq!(
+            grass.name, "Campaign Grass",
+            "Grass terrain should be overridden by campaign fixture"
+        );
+    }
+
     #[test]
     fn test_campaign_loader_loads_levels_from_fixture() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");

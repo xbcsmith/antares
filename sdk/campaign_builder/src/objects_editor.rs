@@ -48,8 +48,10 @@
 //! `load_objects()` again and switches to `EditorTab::Objects`, so a freshly
 //! imported mesh shows up here immediately, with no save-and-reopen cycle.
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::visual::{CreatureDefinition, MaterialDefinition};
 use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
@@ -180,43 +182,62 @@ impl ObjectsEditorState {
     ///
     /// On the first call after a campaign change (`needs_initial_load`),
     /// rebuilds `entries` from `data/object_mesh_registry.ron` if
-    /// `campaign_dir` is `Some` (`sdk/AGENTS.md` Rule 13 auto-load guard).
-    /// With `campaign_dir: None` this guard is a no-op and `entries` is left
-    /// untouched — this is what keeps isolated-fixture testing valid.
+    /// `ctx.campaign_dir` is `Some` (`sdk/AGENTS.md` Rule 13 auto-load guard).
+    /// With `ctx.campaign_dir: None` this guard is a no-op and `entries` is
+    /// left untouched — this is what keeps isolated-fixture testing valid.
     ///
     /// # Examples
     ///
     /// ```ignore
     /// use campaign_builder::objects_editor::ObjectsEditorState;
     ///
-    /// # fn render(ui: &mut eframe::egui::Ui) {
+    /// # fn render(ui: &mut eframe::egui::Ui, ctx: &mut campaign_builder::editor_context::EditorContext<'_>) {
     /// let mut state = ObjectsEditorState::new();
     /// let mut entries = Vec::new();
-    /// let mut unsaved = false;
-    /// state.show(ui, &mut entries, None, &mut unsaved);
+    /// state.show(ui, &mut entries, ctx);
     /// # }
     /// ```
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         entries: &mut Vec<ObjectEntry>,
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         if self.needs_initial_load {
-            if let Some(dir) = campaign_dir {
+            if let Some(dir) = ctx.campaign_dir {
                 *entries = load_object_entries_from_registry(dir);
             }
             self.needs_initial_load = false;
         }
 
-        ui.heading("📦 Objects");
-        ui.separator();
+        let toolbar_action = EditorToolbar::new("Objects")
+            .with_search(&mut self.search_query)
+            .with_total_count(entries.len())
+            .with_id_salt("objects_toolbar")
+            .show(ui);
+
+        match toolbar_action {
+            ToolbarAction::New => {
+                self.requested_signal = Some(ObjectsEditorSignal::OpenInObjImporter);
+                ui.ctx().request_repaint();
+            }
+            ToolbarAction::Reload => {
+                if let Some(dir) = ctx.campaign_dir {
+                    *entries = load_object_entries_from_registry(dir);
+                    *ctx.status_message = format!("Reloaded {} objects", entries.len());
+                }
+            }
+            ToolbarAction::Save => {
+                *ctx.unsaved_changes = true;
+                *ctx.status_message = "Objects will be saved with 💾 Save Campaign".to_string();
+            }
+            _ => {}
+        }
 
         if self.mode == ObjectsEditorMode::Edit {
-            self.show_edit(ui, entries, campaign_dir, unsaved_changes);
+            self.show_edit(ui, entries, ctx);
         } else {
-            self.show_list(ui, entries, campaign_dir, unsaved_changes);
+            self.show_list(ui, entries, ctx);
         }
     }
 
@@ -294,23 +315,9 @@ impl ObjectsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         entries: &mut Vec<ObjectEntry>,
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
-        // SDK Rule 12: more than two controls on one row must wrap.
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Search:");
-            if ui.text_edit_singleline(&mut self.search_query).changed() {
-                ui.ctx().request_repaint();
-            }
-            ui.separator();
-            ui.label(format!("{} object(s)", entries.len()));
-            ui.separator();
-            if ui.button("📥 Import Object Mesh").clicked() {
-                self.requested_signal = Some(ObjectsEditorSignal::OpenInObjImporter);
-                ui.ctx().request_repaint();
-            }
-        });
+        let campaign_dir = ctx.campaign_dir.map(|p| p.as_path());
 
         // SDK Rule 10: pre-compute shared state before multi-closure calls.
         let filtered_rows = self.filtered_rows(entries);
@@ -389,7 +396,7 @@ impl ObjectsEditorState {
                     _ => {}
                 }
                 let _ = campaign_dir; // reserved for a future immediate-delete sync, if ever needed
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
                 ui.ctx().request_repaint();
             }
         }
@@ -447,9 +454,9 @@ impl ObjectsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         entries: &mut [ObjectEntry],
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
+        let campaign_dir = ctx.campaign_dir.map(|p| p.as_path());
         let Some(buf) = self.edit_buffer.as_mut() else {
             // Shouldn't happen — guard and fall back to list mode.
             self.mode = ObjectsEditorMode::List;
@@ -635,7 +642,7 @@ impl ObjectsEditorState {
                     .map(|e| e.file_path.clone());
 
                 if self.apply_edit(entries) {
-                    *unsaved_changes = true;
+                    *ctx.unsaved_changes = true;
                     if let (Some(dir), Some(idx), Some(path), Some(id)) =
                         (campaign_dir, idx_before, &file_path, entry_id)
                     {
@@ -817,6 +824,7 @@ fn sync_object_mesh_registry_entry(campaign_dir: &Path, id: u32, new_name: &str,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor_context::EditorContext;
 
     fn object_entry(name: &str, def_name: &str) -> ObjectEntry {
         ObjectEntry {
@@ -1141,9 +1149,18 @@ mod tests {
         assert!(state.needs_initial_load);
         let mut entries = vec![object_entry("fixture_only", "Fixture Only")];
         let mut unsaved = false;
+        let mut status = String::new();
+        let mut merge = false;
 
         with_test_ui(|ui| {
-            state.show(ui, &mut entries, None, &mut unsaved);
+            let mut ctx = EditorContext::new(
+                None,
+                "data/object_mesh_registry.ron",
+                &mut unsaved,
+                &mut status,
+                &mut merge,
+            );
+            state.show(ui, &mut entries, &mut ctx);
         });
 
         assert!(!state.needs_initial_load);
@@ -1161,9 +1178,18 @@ mod tests {
             object_entry("treasure_chest", "Treasure Chest"),
         ];
         let mut unsaved = false;
+        let mut status = String::new();
+        let mut merge = false;
 
         with_test_ui(|ui| {
-            state.show(ui, &mut entries, None, &mut unsaved);
+            let mut ctx = EditorContext::new(
+                None,
+                "data/object_mesh_registry.ron",
+                &mut unsaved,
+                &mut status,
+                &mut merge,
+            );
+            state.show(ui, &mut entries, &mut ctx);
         });
 
         assert_eq!(entries.len(), 2);
@@ -1197,9 +1223,18 @@ mod tests {
         let mut entries = vec![entry];
         state.enter_edit(0, &entries);
         let mut unsaved = false;
+        let mut status = String::new();
+        let mut merge = false;
 
         with_test_ui(|ui| {
-            state.show(ui, &mut entries, None, &mut unsaved);
+            let mut ctx = EditorContext::new(
+                None,
+                "data/object_mesh_registry.ron",
+                &mut unsaved,
+                &mut status,
+                &mut merge,
+            );
+            state.show(ui, &mut entries, &mut ctx);
         });
 
         // No Save click occurred (this is a single render pass with no

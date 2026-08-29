@@ -15,6 +15,7 @@
 //! Card count is dynamic and matches party size (1-6 members).
 //! Each card displays portrait, HP bar with overlay text, and conditions.
 
+use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
 use crate::domain::combat::types::CombatantId;
@@ -1139,6 +1140,7 @@ fn update_mini_map(
     mut images: ResMut<Assets<Image>>,
     mut mini_map_root_query: Query<&mut Node, With<MiniMapRoot>>,
     mut last_painted_state: Local<Option<u64>>,
+    content: Option<Res<GameContent>>,
 ) {
     let show_minimap = global_state.0.config.graphics.show_minimap;
 
@@ -1240,7 +1242,7 @@ fn update_mini_map(
                 } else if tile.is_blocked() {
                     MINI_MAP_WALL
                 } else {
-                    automap_tile_color(tile)
+                    automap_tile_color(tile, content.as_deref().map(|c| &c.0.terrain))
                 }
             } else {
                 MINI_MAP_UNVISITED
@@ -1593,6 +1595,7 @@ fn update_automap_image(
     mut images: ResMut<Assets<Image>>,
     mut canvas_query: Query<&mut Node, With<AutomapCanvas>>,
     mut last_painted_state: Local<Option<u64>>,
+    content: Option<Res<GameContent>>,
 ) {
     let Some(map) = global_state.0.world.get_current_map() else {
         return;
@@ -1673,7 +1676,7 @@ fn update_automap_image(
                 continue;
             };
 
-            let color = automap_tile_color(tile);
+            let color = automap_tile_color(tile, content.as_deref().map(|c| &c.0.terrain));
             fill_automap_tile(data, x, y, color, image_width, tile_px);
         }
     }
@@ -2565,11 +2568,22 @@ pub fn fill_mini_map_poi_dot(
 
 /// Returns the color used for an automap tile based on visit state and terrain.
 ///
+/// When `terrain_db` is supplied the color is determined by the `TerrainDefinition`
+/// for the tile's terrain ID: water-mesh tiles use [`AUTOMAP_VISITED_WATER`], tiles
+/// with any vegetation use [`AUTOMAP_VISITED_FOREST`], and all others fall back to
+/// [`AUTOMAP_VISITED_FLOOR`].  When `terrain_db` is `None` (e.g. content not yet
+/// loaded) every non-wall, non-door tile renders as [`AUTOMAP_VISITED_FLOOR`].
+///
 /// # Arguments
 ///
 /// * `tile` - Tile to classify for automap rendering
-pub fn automap_tile_color(tile: &crate::domain::world::Tile) -> [u8; 4] {
-    use crate::domain::world::{TerrainType, WallType};
+/// * `terrain_db` - Optional terrain database used to look up mesh style and vegetation
+pub fn automap_tile_color(
+    tile: &crate::domain::world::Tile,
+    terrain_db: Option<&crate::domain::world::terrain::TerrainDatabase>,
+) -> [u8; 4] {
+    use crate::domain::world::terrain::{TerrainMeshStyle, TerrainVegetation};
+    use crate::domain::world::WallType;
 
     if !tile.visited {
         return AUTOMAP_UNVISITED;
@@ -2578,11 +2592,16 @@ pub fn automap_tile_color(tile: &crate::domain::world::Tile) -> [u8; 4] {
     match tile.wall_type {
         WallType::Door => AUTOMAP_VISITED_DOOR,
         WallType::Normal | WallType::Torch => AUTOMAP_VISITED_WALL,
-        WallType::None => match tile.terrain {
-            TerrainType::Water => AUTOMAP_VISITED_WATER,
-            TerrainType::Grass | TerrainType::Forest => AUTOMAP_VISITED_FOREST,
-            _ => AUTOMAP_VISITED_FLOOR,
-        },
+        WallType::None => {
+            let def = terrain_db.and_then(|db| db.get_by_id(tile.terrain));
+            if def.is_some_and(|d| d.mesh_style == TerrainMeshStyle::Water) {
+                AUTOMAP_VISITED_WATER
+            } else if def.is_some_and(|d| d.vegetation != TerrainVegetation::None) {
+                AUTOMAP_VISITED_FOREST
+            } else {
+                AUTOMAP_VISITED_FLOOR
+            }
+        }
     }
 }
 
@@ -4720,7 +4739,8 @@ mod automap_tests {
     use super::*;
     use crate::application::GameState;
     use crate::domain::types::Position;
-    use crate::domain::world::{Map, TerrainType};
+    use crate::domain::world::terrain::TERRAIN_GROUND;
+    use crate::domain::world::Map;
 
     fn setup_automap_test_app() -> App {
         let mut app = App::new();
@@ -4807,6 +4827,63 @@ mod automap_tests {
     }
 
     #[test]
+    fn test_automap_color_buckets_by_mesh_style_and_vegetation() {
+        use crate::domain::world::terrain::{
+            builtin_terrain_db, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_WATER,
+        };
+        use crate::domain::world::{Tile, WallType};
+
+        let db = builtin_terrain_db();
+
+        // Helper: make a visited tile with a specific terrain and no walls
+        let make_tile = |terrain_id| {
+            let mut t = Tile::new(0, 0, terrain_id, WallType::None, &db);
+            t.mark_visited();
+            t
+        };
+
+        // Water tile → water color
+        let water_tile = make_tile(TERRAIN_WATER);
+        assert_eq!(
+            automap_tile_color(&water_tile, Some(&db)),
+            AUTOMAP_VISITED_WATER,
+            "Water terrain must show water color"
+        );
+
+        // Grass tile → forest/vegetation color
+        let grass_tile = make_tile(TERRAIN_GRASS);
+        assert_eq!(
+            automap_tile_color(&grass_tile, Some(&db)),
+            AUTOMAP_VISITED_FOREST,
+            "Grass terrain (vegetation=GrassCover) must show vegetation color"
+        );
+
+        // Forest tile → forest/vegetation color
+        let forest_tile = make_tile(TERRAIN_FOREST);
+        assert_eq!(
+            automap_tile_color(&forest_tile, Some(&db)),
+            AUTOMAP_VISITED_FOREST,
+            "Forest terrain (vegetation=Forest) must show vegetation color"
+        );
+
+        // Ground tile → floor color
+        let ground_tile = make_tile(TERRAIN_GROUND);
+        assert_eq!(
+            automap_tile_color(&ground_tile, Some(&db)),
+            AUTOMAP_VISITED_FLOOR,
+            "Ground terrain (no vegetation, no water mesh) must show floor color"
+        );
+
+        // No DB (None) → floor for all (graceful fallback)
+        let water_tile_no_db = make_tile(TERRAIN_WATER);
+        assert_eq!(
+            automap_tile_color(&water_tile_no_db, None),
+            AUTOMAP_VISITED_FLOOR,
+            "Without DB, all terrain shows as floor (safe fallback)"
+        );
+    }
+
+    #[test]
     fn test_automap_image_visited_floor_is_gray() {
         let mut app = setup_automap_test_app();
 
@@ -4814,7 +4891,7 @@ mod automap_tests {
         let mut map = Map::new(1, "Automap".to_string(), "Test".to_string(), 8, 8);
         let floor_pos = Position::new(1, 1);
         if let Some(tile) = map.get_tile_mut(floor_pos) {
-            tile.terrain = TerrainType::Ground;
+            tile.terrain = TERRAIN_GROUND;
             tile.mark_visited();
         }
         state.world.add_map(map);

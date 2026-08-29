@@ -1,8 +1,14 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::domain::types::{MapId, Position};
-use crate::domain::world::{Map, MapEvent, NpcPlacement, TerrainType, Tile, WallType};
+use crate::domain::types::MapId;
+use crate::domain::types::Position;
+use crate::domain::types::TerrainId;
+use crate::domain::world::terrain::{
+    TerrainDatabase, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_LAVA,
+    TERRAIN_MOUNTAIN, TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
+};
+use crate::domain::world::{Map, MapEvent, NpcPlacement, Tile, WallType};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -43,6 +49,9 @@ pub enum EnvironmentType {
     Cave,
 }
 
+/// Authoring shorthand for built-in terrain only. Custom campaign terrain
+/// must be authored via full map RON (e.g. `terrain: 13105`), not via
+/// `TileCode`.
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
 pub enum TileCode {
     Floor,
@@ -116,38 +125,59 @@ pub struct ExitBlueprint {
     pub target_position: Position,
 }
 
-impl From<MapBlueprint> for Map {
-    fn from(bp: MapBlueprint) -> Self {
+impl MapBlueprint {
+    /// Converts this blueprint into a [`Map`], seeding tile blocked flags from
+    /// the supplied [`TerrainDatabase`].
+    ///
+    /// Pass [`builtin_terrain_db()`] when working with the standard built-in
+    /// terrain set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::blueprint::{MapBlueprint, TileBlueprint, TileCode, EnvironmentType};
+    /// use antares::domain::world::terrain::builtin_terrain_db;
+    /// use antares::domain::types::Position;
+    ///
+    /// let bp = MapBlueprint {
+    ///     id: 1,
+    ///     name: "Test".to_string(),
+    ///     description: String::new(),
+    ///     width: 2,
+    ///     height: 2,
+    ///     environment: EnvironmentType::Indoor,
+    ///     tiles: vec![],
+    ///     events: vec![],
+    ///     npc_placements: vec![],
+    ///     exits: vec![],
+    ///     starting_position: Position::new(0, 0),
+    /// };
+    /// let db = builtin_terrain_db();
+    /// let map = bp.into_map(&db);
+    /// assert_eq!(map.id, 1);
+    /// ```
+    pub fn into_map(self, db: &TerrainDatabase) -> Map {
+        let bp = self;
         let mut tiles = Vec::with_capacity((bp.width * bp.height) as usize);
-
-        // Sort tiles by y then x to ensure row-major order if needed,
-        // but Map struct expects a flat vector.
-        // If the input is sparse or unordered, we might need to be careful.
-        // For now, assuming the input vector covers all tiles or we just push them.
-        // However, Map::new initializes tiles. Here we are creating a Map from scratch.
-        // If bp.tiles is not in order, the index calculation in Map::get_tile might be wrong
-        // if we just push them.
-        // But Map stores tiles as Vec<Tile>.
-        // Let's assume bp.tiles contains all tiles.
 
         for tile_bp in bp.tiles {
             match tile_bp {
                 TileBlueprint::Code { x, y, code } => {
-                    let (terrain, wall_type) = match code {
-                        TileCode::Floor => (TerrainType::Ground, WallType::None),
-                        TileCode::Wall => (TerrainType::Ground, WallType::Normal),
-                        TileCode::Door => (TerrainType::Ground, WallType::Door),
-                        TileCode::Forest => (TerrainType::Forest, WallType::None),
-                        TileCode::Grass => (TerrainType::Grass, WallType::None),
-                        TileCode::Water => (TerrainType::Water, WallType::None),
-                        TileCode::Lava => (TerrainType::Lava, WallType::None),
-                        TileCode::Swamp => (TerrainType::Swamp, WallType::None),
-                        TileCode::Stone => (TerrainType::Stone, WallType::None),
-                        TileCode::Dirt => (TerrainType::Dirt, WallType::None),
-                        TileCode::Mountain => (TerrainType::Mountain, WallType::None),
-                        TileCode::Torch => (TerrainType::Ground, WallType::Torch),
+                    let (terrain, wall_type): (TerrainId, WallType) = match code {
+                        TileCode::Floor => (TERRAIN_GROUND, WallType::None),
+                        TileCode::Wall => (TERRAIN_GROUND, WallType::Normal),
+                        TileCode::Door => (TERRAIN_GROUND, WallType::Door),
+                        TileCode::Forest => (TERRAIN_FOREST, WallType::None),
+                        TileCode::Grass => (TERRAIN_GRASS, WallType::None),
+                        TileCode::Water => (TERRAIN_WATER, WallType::None),
+                        TileCode::Lava => (TERRAIN_LAVA, WallType::None),
+                        TileCode::Swamp => (TERRAIN_SWAMP, WallType::None),
+                        TileCode::Stone => (TERRAIN_STONE, WallType::None),
+                        TileCode::Dirt => (TERRAIN_DIRT, WallType::None),
+                        TileCode::Mountain => (TERRAIN_MOUNTAIN, WallType::None),
+                        TileCode::Torch => (TERRAIN_GROUND, WallType::Torch),
                     };
-                    tiles.push(Tile::new(x, y, terrain, wall_type));
+                    tiles.push(Tile::new(x, y, terrain, wall_type, db));
                 }
                 TileBlueprint::Full(tile) => {
                     // Full tile provided by blueprint (engine-style map). Use it verbatim.
@@ -257,6 +287,7 @@ impl From<MapBlueprint> for Map {
 mod tests {
     use super::*;
     use crate::domain::types::Direction;
+    use crate::domain::world::terrain::builtin_terrain_db;
 
     #[test]
     fn test_npc_placement_blueprint_conversion() {
@@ -293,7 +324,7 @@ mod tests {
         };
 
         // Act
-        let map: Map = bp.into();
+        let map = bp.into_map(&builtin_terrain_db());
 
         // Assert
         assert_eq!(map.npc_placements.len(), 2);
@@ -326,7 +357,7 @@ mod tests {
         };
 
         // Act
-        let map: Map = bp.into();
+        let map = bp.into_map(&builtin_terrain_db());
 
         // Assert
         assert_eq!(map.npc_placements.len(), 0);
@@ -355,7 +386,7 @@ mod tests {
         };
 
         // Act
-        let map: Map = bp.into();
+        let map = bp.into_map(&builtin_terrain_db());
 
         // Assert
         assert_eq!(map.npc_placements.len(), 1);
@@ -367,8 +398,38 @@ mod tests {
     }
 
     #[test]
+    fn test_tile_code_maps_to_builtin_terrain_ids() {
+        use crate::domain::world::terrain::{
+            builtin_terrain_db, TERRAIN_FOREST, TERRAIN_GROUND, TERRAIN_MOUNTAIN, TERRAIN_WATER,
+        };
+        let db = builtin_terrain_db();
+        let make_tile = |code: TileCode| {
+            let bp = MapBlueprint {
+                id: 1,
+                name: "t".to_string(),
+                description: String::new(),
+                width: 1,
+                height: 1,
+                environment: EnvironmentType::Indoor,
+                tiles: vec![TileBlueprint::Code { x: 0, y: 0, code }],
+                events: vec![],
+                npc_placements: vec![],
+                exits: vec![],
+                starting_position: crate::domain::types::Position::new(0, 0),
+            };
+            bp.into_map(&db).tiles.into_iter().next().unwrap()
+        };
+        assert_eq!(make_tile(TileCode::Floor).terrain, TERRAIN_GROUND);
+        assert_eq!(make_tile(TileCode::Water).terrain, TERRAIN_WATER);
+        assert_eq!(make_tile(TileCode::Mountain).terrain, TERRAIN_MOUNTAIN);
+        assert_eq!(make_tile(TileCode::Forest).terrain, TERRAIN_FOREST);
+        assert!(make_tile(TileCode::Water).blocked);
+        assert!(make_tile(TileCode::Mountain).blocked);
+        assert!(!make_tile(TileCode::Floor).blocked);
+    }
+
+    #[test]
     fn test_integration_npc_blueprint_to_resolution() {
-        // This integration test demonstrates the complete workflow:
         // 1. Define NPCs in database
         // 2. Create map blueprint with NPC placements
         // 3. Convert blueprint to Map
@@ -470,7 +531,7 @@ mod tests {
         };
 
         // Act - Convert blueprint to Map
-        let map: Map = blueprint.into();
+        let map = blueprint.into_map(&builtin_terrain_db());
 
         // Assert - Map has correct placements
         assert_eq!(map.npc_placements.len(), 2);

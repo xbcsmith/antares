@@ -8,6 +8,7 @@ use crate::domain::world::mark_visible_area;
 use crate::domain::world::CreatureBound;
 use crate::domain::world::SpriteReference;
 use crate::game::components::creature::{CreatureVisual, LodState};
+use crate::game::components::furniture::{FurnitureEntity, Interactable, InteractionType};
 use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
@@ -24,6 +25,10 @@ use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use crate::game::systems::{advanced_trees, procedural_meshes, vegetation_placement};
 
 const DEFAULT_NPC_SPRITE_PATH: &str = "sprites/placeholders/npc_placeholder.png";
+use crate::domain::world::terrain::{
+    TerrainDefinition, TerrainMeshStyle, TerrainVegetation, TERRAIN_GRASS, TERRAIN_GROUND,
+    TERRAIN_WATER,
+};
 use bevy::prelude::*;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
@@ -47,16 +52,9 @@ fn should_spawn_extra_forest_shrub(is_forest: bool, spawned_center_vegetation: b
     is_forest && !spawned_center_vegetation
 }
 
-/// Returns whether a terrain tile should receive procedural grass ground cover.
-fn should_spawn_grass_cover(terrain: world::TerrainType) -> bool {
-    matches!(
-        terrain,
-        world::TerrainType::Forest | world::TerrainType::Grass
-    )
-}
-
-fn should_spawn_procedural_vegetation(tile: &world::Tile) -> bool {
-    tile.wall_type == world::WallType::None && should_spawn_grass_cover(tile.terrain)
+fn should_spawn_procedural_vegetation(tile: &world::Tile, def: Option<&TerrainDefinition>) -> bool {
+    tile.wall_type == world::WallType::None
+        && def.is_some_and(|d| d.vegetation != TerrainVegetation::None)
 }
 
 fn vegetation_anchor_tile_offset(
@@ -1052,7 +1050,7 @@ fn get_or_create_mesh(
 /// they are part of the dynamic despawn/spawn lifecycle.
 #[allow(clippy::too_many_arguments)]
 fn terrain_material_with_optional_tint(
-    terrain: world::TerrainType,
+    terrain: crate::domain::types::TerrainId,
     tint: Option<(f32, f32, f32)>,
     terrain_cache: &TerrainMaterialCache,
     source_material: Option<StandardMaterial>,
@@ -1236,6 +1234,148 @@ fn spawn_landscape_placements(
     }
 }
 
+/// Spawns an imported furniture mesh from a [`crate::domain::visual::CreatureDefinition`]
+/// asset, bypassing the procedural `spawn_furniture` path.
+///
+/// Used when a [`crate::domain::world::furniture::FurnitureDefinition`] carries
+/// `mesh_id: Some(_)` pointing to an entry in the
+/// [`crate::domain::world::ObjectMeshDatabase`].  The imported mesh is rendered
+/// using the same [`landscape_material`] path as landscape and event objects so
+/// that `texture_path` entries in the [`crate::domain::visual::MeshDefinition`]
+/// are resolved through the asset server.
+///
+/// Every spawned root entity receives:
+/// - [`MapEntity`] — map-ownership for despawn on map unload
+/// - [`TileCoord`] — grid position for interaction raycasting
+/// - [`FurnitureEntity`] — type/blocking metadata consumed by the interaction system
+/// - [`Interactable`] — when `resolved_type` has a mapped interaction (chests,
+///   chairs, torches, bookshelves, doors)
+///
+/// # Arguments
+///
+/// * `world_pos` — final world-space spawn position; the caller is responsible for
+///   computing tile-centre X/Z and applying
+///   [`crate::domain::visual::CreatureDefinition::foot_ground_offset`] for Y
+/// * `rotation_y` — optional Y-axis rotation in degrees from the map event
+/// * `scale` — effective scale resolved by [`resolve_furniture_fields`]
+/// * `resolved_type` — effective [`world::FurnitureType`] from
+///   [`resolve_furniture_fields`]; drives [`FurnitureEntity`] and [`Interactable`]
+/// * `flags` — effective flags (blocking, lit, locked) from the furniture definition
+///
+/// # Returns
+///
+/// The root entity ID of the spawned furniture hierarchy.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_imported_furniture_mesh(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    world_pos: Vec3,
+    rotation_y: Option<f32>,
+    scale: f32,
+    map_id: types::MapId,
+    position: types::Position,
+    creature_def: &crate::domain::visual::CreatureDefinition,
+    tint: Option<[f32; 3]>,
+    resolved_type: world::FurnitureType,
+    flags: &world::FurnitureFlags,
+) -> Entity {
+    let root = commands
+        .spawn((
+            Name::new(format!("FurnitureMesh: {:?}", resolved_type)),
+            Transform::from_translation(world_pos)
+                .with_rotation(Quat::from_rotation_y(
+                    rotation_y.unwrap_or(0.0).to_radians(),
+                ))
+                .with_scale(Vec3::splat(scale)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+        ))
+        .id();
+
+    for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+        let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
+        // landscape_material resolves texture_path via the asset server;
+        // it is the same path used by landscape placements and event meshes.
+        let material_handle = materials.add(landscape_material(mesh_def, tint, asset_server));
+
+        let transform = creature_def
+            .mesh_transforms
+            .get(mesh_index)
+            .map(|mt| {
+                Transform::from_translation(Vec3::from(mt.translation))
+                    .with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        mt.rotation[0],
+                        mt.rotation[1],
+                        mt.rotation[2],
+                    ))
+                    .with_scale(Vec3::from(mt.scale))
+            })
+            .unwrap_or_default();
+
+        let mut lod_mesh_handles = vec![mesh_handle.clone()];
+        let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
+            for lod_mesh_def in lod_levels {
+                lod_mesh_handles.push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
+            }
+            mesh_def.lod_distances.clone()
+        } else {
+            None
+        };
+
+        let mut child_entity = commands.spawn((
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(material_handle),
+            transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            Name::new(format!("FurnitureMesh Part {}", mesh_index)),
+        ));
+
+        if let Some(distances) = lod_distances {
+            child_entity.insert(LodState::new(lod_mesh_handles, distances));
+        }
+
+        let child = child_entity.id();
+        commands.entity(root).add_child(child);
+    }
+
+    // Attach interaction components identical to the procedural path so the
+    // interaction and cleanup systems treat imported furniture identically.
+    commands
+        .entity(root)
+        .insert(FurnitureEntity::new(resolved_type, flags.blocking));
+
+    let interaction = match resolved_type {
+        world::FurnitureType::Chest | world::FurnitureType::Barrel => {
+            Some((InteractionType::OpenChest, 1.5_f32))
+        }
+        world::FurnitureType::Chair | world::FurnitureType::Throne => {
+            Some((InteractionType::SitOnChair, 1.5_f32))
+        }
+        world::FurnitureType::Torch => Some((InteractionType::LightTorch, 2.0_f32)),
+        world::FurnitureType::Bookshelf => Some((InteractionType::ReadBookshelf, 2.0_f32)),
+        world::FurnitureType::Door => Some((InteractionType::OpenDoor, 1.5_f32)),
+        world::FurnitureType::Table | world::FurnitureType::Bench => None,
+    };
+
+    if let Some((interaction_type, distance)) = interaction {
+        commands
+            .entity(root)
+            .insert(Interactable::with_distance(interaction_type, distance));
+    }
+
+    root
+}
+
 /// Spawns mesh entities for all map events that carry a `mesh_id`.
 ///
 /// Iterates `map.events` and, for each event variant whose `mesh_id` field is `Some`
@@ -1261,12 +1401,10 @@ fn spawn_event_meshes(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    _asset_server: &AssetServer,
+    asset_server: &AssetServer,
     map: &world::Map,
     object_meshes: &world::ObjectMeshDatabase,
 ) {
-    use crate::game::systems::creature_spawning::spawn_creature;
-
     for (position, event) in map.events.iter() {
         let mesh_id_str: &str = match event {
             world::MapEvent::Treasure {
@@ -1289,21 +1427,85 @@ fn spawn_event_meshes(
 
         let x = position.x as f32;
         let y = position.y as f32;
-        let world_pos = bevy::math::Vec3::new(x + TILE_CENTER_OFFSET, 0.5, y + TILE_CENTER_OFFSET);
 
         let resolved = object_meshes.lookup(mesh_id_str);
 
         let root = if let Some(creature_def) = resolved {
-            spawn_creature(
-                commands,
-                creature_def,
-                meshes,
-                materials,
-                world_pos,
-                None,
-                None,
-                None,
-            )
+            // Lift the spawn position so the object's lowest vertex rests on the
+            // ground plane (Y = 0), matching the NPC/encounter spawning convention.
+            // The old hardcoded Y = 0.5 caused all event-mesh objects to float.
+            let ground_y = creature_def.foot_ground_offset();
+            let world_pos = Vec3::new(x + TILE_CENTER_OFFSET, ground_y, y + TILE_CENTER_OFFSET);
+
+            let root = commands
+                .spawn((
+                    Name::new(format!("EventMesh: {}", mesh_id_str)),
+                    Transform::from_translation(world_pos)
+                        .with_scale(Vec3::splat(creature_def.scale)),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                ))
+                .id();
+
+            for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+                let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
+                // Use landscape_material so texture_path is loaded via the asset
+                // server. spawn_creature only called material_definition_to_bevy /
+                // create_material_from_color, both of which ignore texture_path,
+                // which is why imported object meshes were rendering without textures.
+                // landscape_material expects an RGB tint ([f32; 3]); strip the alpha
+                // channel from the creature definition's RGBA color_tint.
+                let tint_rgb = creature_def.color_tint.map(|[r, g, b, _a]| [r, g, b]);
+                let material_handle =
+                    materials.add(landscape_material(mesh_def, tint_rgb, asset_server));
+
+                let transform = creature_def
+                    .mesh_transforms
+                    .get(mesh_index)
+                    .map(|mt| {
+                        Transform::from_translation(Vec3::from(mt.translation))
+                            .with_rotation(Quat::from_euler(
+                                EulerRot::XYZ,
+                                mt.rotation[0],
+                                mt.rotation[1],
+                                mt.rotation[2],
+                            ))
+                            .with_scale(Vec3::from(mt.scale))
+                    })
+                    .unwrap_or_default();
+
+                let mut lod_mesh_handles = vec![mesh_handle.clone()];
+                let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
+                    for lod_mesh_def in lod_levels {
+                        lod_mesh_handles.push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
+                    }
+                    mesh_def.lod_distances.clone()
+                } else {
+                    None
+                };
+
+                let mut child_entity = commands.spawn((
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(material_handle),
+                    transform,
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    Name::new(format!("EventMesh Part {}", mesh_index)),
+                ));
+
+                if let Some(distances) = lod_distances {
+                    child_entity.insert(LodState::new(lod_mesh_handles, distances));
+                }
+
+                let child = child_entity.id();
+                commands.entity(root).add_child(child);
+            }
+
+            root
         } else {
             if !mesh_id_str.is_empty() {
                 warn!(
@@ -1319,6 +1521,9 @@ fn spawn_event_meshes(
                 perceptual_roughness: 0.7,
                 ..default()
             });
+            // Place the centre of the 0.8-tall placeholder cube at Y = 0.4 so its
+            // bottom face sits flush with the ground plane (Y = 0).
+            let world_pos = Vec3::new(x + TILE_CENTER_OFFSET, 0.4, y + TILE_CENTER_OFFSET);
             commands
                 .spawn((
                     Mesh3d(placeholder_mesh),
@@ -1638,28 +1843,20 @@ fn spawn_map(
         let mut mesh_cache: MeshCache = HashMap::new();
 
         // Materials (base colors)
-        // RGB tuples are kept to allow per-tile tinting of walls based on terrain
+        // floor_rgb is kept as the fallback for the def-driven wall tint.
         let floor_rgb = (0.3_f32, 0.3_f32, 0.3_f32);
         let wall_base_rgb = (0.6_f32, 0.6_f32, 0.6_f32);
-        let water_rgb = (0.2_f32, 0.4_f32, 0.8_f32); // Blue
-        let mountain_rgb = (0.5_f32, 0.5_f32, 0.5_f32); // Gray rock
-        let forest_rgb = (0.2_f32, 0.6_f32, 0.2_f32); // Green
-        let grass_rgb = (0.3_f32, 0.5_f32, 0.2_f32); // Darker green floor
-        let stone_rgb = (0.5_f32, 0.5_f32, 0.55_f32);
-        let dirt_rgb = (0.4_f32, 0.3_f32, 0.2_f32);
 
         let floor_color = Color::srgb(floor_rgb.0, floor_rgb.1, floor_rgb.2);
         let wall_base_color = Color::srgb(wall_base_rgb.0, wall_base_rgb.1, wall_base_rgb.2);
-        let water_color = Color::srgb(water_rgb.0, water_rgb.1, water_rgb.2);
-        let mountain_color = Color::srgb(mountain_rgb.0, mountain_rgb.1, mountain_rgb.2);
-        let _forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
-        let grass_color = Color::srgb(grass_rgb.0, grass_rgb.1, grass_rgb.2);
+        let water_color = Color::srgb(0.2_f32, 0.4_f32, 0.8_f32);
+        let grass_color = Color::srgb(0.3_f32, 0.5_f32, 0.2_f32);
 
         // Look up cached textured materials, falling back to flat-colour
         // materials if the cache is not yet populated (e.g. in tests that do
         // not run the terrain-materials startup system).
         let floor_material = terrain_cache
-            .get(world::TerrainType::Ground)
+            .get(TERRAIN_GROUND)
             .cloned()
             .unwrap_or_else(|| {
                 materials.add(StandardMaterial {
@@ -1670,7 +1867,7 @@ fn spawn_map(
             });
 
         let water_material = terrain_cache
-            .get(world::TerrainType::Water)
+            .get(TERRAIN_WATER)
             .cloned()
             .unwrap_or_else(|| {
                 materials.add(StandardMaterial {
@@ -1681,7 +1878,7 @@ fn spawn_map(
             });
 
         let grass_material = terrain_cache
-            .get(world::TerrainType::Grass)
+            .get(TERRAIN_GRASS)
             .cloned()
             .unwrap_or_else(|| {
                 materials.add(StandardMaterial {
@@ -1700,13 +1897,25 @@ fn spawn_map(
             for x in 0..map.width {
                 let pos = types::Position::new(x as i32, y as i32);
                 if let Some(tile) = map.get_tile(pos) {
-                    // Render based on terrain type
-                    match tile.terrain {
-                        world::TerrainType::Water => {
+                    // Render based on terrain type: look up TerrainDefinition once per tile
+                    // to drive mesh style, height, and vegetation dispatch.
+                    let def = content.0.terrain.get_by_id(tile.terrain);
+                    let mesh_style = def.map(|d| d.mesh_style).unwrap_or(TerrainMeshStyle::Flat);
+                    let terrain_height = def.map(|d| d.height).unwrap_or(0.0);
+                    let has_vegetation =
+                        def.is_some_and(|d| d.vegetation != TerrainVegetation::None);
+                    let is_forest = def.is_some_and(|d| d.vegetation == TerrainVegetation::Forest);
+                    match mesh_style {
+                        TerrainMeshStyle::Water => {
                             // Render water slightly below at y = -0.1
                             commands.spawn((
                                 Mesh3d(water_mesh.clone()),
-                                MeshMaterial3d(water_material.clone()),
+                                MeshMaterial3d(
+                                    terrain_cache
+                                        .get(tile.terrain)
+                                        .cloned()
+                                        .unwrap_or_else(|| water_material.clone()),
+                                ),
                                 Transform::from_xyz(
                                     x as f32 + TILE_CENTER_OFFSET,
                                     -0.1,
@@ -1718,10 +1927,10 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
                         }
-                        world::TerrainType::Mountain => {
-                            // Use per-tile visual metadata for dimensions
+                        TerrainMeshStyle::Mountain => {
+                            // Use terrain_height from TerrainDefinition
                             let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                                tile.visual.mesh_dimensions(tile.wall_type, terrain_height);
                             let mesh = get_or_create_mesh(
                                 &mut meshes,
                                 &mut mesh_cache,
@@ -1729,24 +1938,28 @@ fn spawn_map(
                                 height,
                                 width_z,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+                            let y_pos = tile.visual.mesh_y_position(tile.wall_type, terrain_height);
 
                             // Apply color tint if specified while preserving
                             // the cached textured source material when
                             // available. Cached material assets are never
                             // mutated in place.
                             let source_material = terrain_cache
-                                .get(world::TerrainType::Mountain)
+                                .get(tile.terrain)
                                 .and_then(|handle| materials.get(handle))
                                 .cloned();
                             let material = terrain_material_with_optional_tint(
-                                world::TerrainType::Mountain,
+                                tile.terrain,
                                 tile.visual.color_tint,
                                 terrain_cache,
                                 source_material,
                                 &mut materials,
-                                mountain_color,
-                                0.85,
+                                Color::srgb(
+                                    def.map(|d| d.color[0]).unwrap_or(0.5),
+                                    def.map(|d| d.color[1]).unwrap_or(0.5),
+                                    def.map(|d| d.color[2]).unwrap_or(0.5),
+                                ),
+                                def.map(|d| d.roughness).unwrap_or(0.85),
                             );
 
                             // Apply rotation if specified
@@ -1770,17 +1983,24 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
                         }
-                        terrain if should_spawn_grass_cover(terrain) => {
-                            let is_forest = tile.terrain == world::TerrainType::Forest;
-                            let vegetation_plan =
-                                vegetation_placement::tile_vegetation_plan(tile, map.id, pos);
-                            let should_spawn_procedural_vegetation =
-                                should_spawn_procedural_vegetation(tile);
+                        TerrainMeshStyle::Flat if has_vegetation => {
+                            let vegetation_plan = vegetation_placement::tile_vegetation_plan(
+                                tile,
+                                map.id,
+                                pos,
+                                &content.0.terrain,
+                            );
+                            let should_spawn_procedural =
+                                should_spawn_procedural_vegetation(tile, def);
 
-                            // Render grass floor
+                            // Render vegetation floor using the terrain's cached material
+                            let tile_material = terrain_cache
+                                .get(tile.terrain)
+                                .cloned()
+                                .unwrap_or_else(|| grass_material.clone());
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
-                                MeshMaterial3d(grass_material.clone()),
+                                MeshMaterial3d(tile_material),
                                 Transform::from_xyz(
                                     x as f32 + TILE_CENTER_OFFSET,
                                     0.0,
@@ -1799,7 +2019,7 @@ fn spawn_map(
                             // matching landscape definitions; procedural trees are the fallback for
                             // missing definitions, missing meshes, Birch, and Willow.
                             let tree_type = tile.visual.tree_type;
-                            if should_spawn_procedural_vegetation {
+                            if should_spawn_procedural {
                                 if let Some(t) = tree_type {
                                     let rendered_t = rendered_tree_type_from_domain(t);
 
@@ -1909,7 +2129,7 @@ fn spawn_map(
                             // They are placed outside tree trunk exclusion radii instead of using
                             // runtime randomness at the tile center.
                             // Prefer imported brush/shrub landscape meshes; fall back to procedural.
-                            if should_spawn_procedural_vegetation
+                            if should_spawn_procedural
                                 && should_spawn_extra_forest_shrub(is_forest, false)
                                 && tree_type != Some(world::TreeType::Shrub)
                             {
@@ -1949,7 +2169,7 @@ fn spawn_map(
 
                             // Always spawn grass ground cover for these terrains, avoiding known
                             // tree and shrub exclusion zones from the deterministic vegetation plan.
-                            if should_spawn_procedural_vegetation {
+                            if should_spawn_procedural {
                                 if let Some(ref mut gm) = grass_materials {
                                     super::advanced_grass::spawn_grass_cached_with_exclusions(
                                         &mut commands,
@@ -1968,9 +2188,8 @@ fn spawn_map(
                                 }
                             }
                         }
-                        _ => {
-                            // Spawn regular floor for Ground, Stone, Dirt, Lava,
-                            // Swamp and any future terrain types.  Use the cached
+                        TerrainMeshStyle::Flat => {
+                            // Spawn regular floor for any flat terrain type.  Use the cached
                             // textured material when available; fall back to the
                             // flat-colour floor material otherwise.
                             let tile_material = terrain_cache
@@ -1999,23 +2218,15 @@ fn spawn_map(
                         world::WallType::Normal => {
                             // Tint/darken the wall material to match the underlying terrain color
                             // so a Forest Normal wall appears greenish while a Stone Normal wall remains grey.
-                            let (tr, tg, tb) = match tile.terrain {
-                                world::TerrainType::Ground => floor_rgb,
-                                world::TerrainType::Grass => grass_rgb,
-                                world::TerrainType::Water => water_rgb,
-                                world::TerrainType::Lava => (0.8_f32, 0.3_f32, 0.2_f32),
-                                world::TerrainType::Swamp => (0.35_f32, 0.3_f32, 0.2_f32),
-                                world::TerrainType::Stone => stone_rgb,
-                                world::TerrainType::Dirt => dirt_rgb,
-                                world::TerrainType::Forest => forest_rgb,
-                                world::TerrainType::Mountain => mountain_rgb,
-                            };
+                            let (tr, tg, tb) = def
+                                .map(|d| (d.color[0], d.color[1], d.color[2]))
+                                .unwrap_or(floor_rgb);
                             // Darken a bit to make the wall distinct from the floor
                             let darken = 0.6_f32;
 
                             // Use per-tile visual metadata for dimensions
                             let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                                tile.visual.mesh_dimensions(tile.wall_type, terrain_height);
                             let mesh = get_or_create_mesh(
                                 &mut meshes,
                                 &mut mesh_cache,
@@ -2023,9 +2234,7 @@ fn spawn_map(
                                 height,
                                 width_z,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
-
-                            // Apply base terrain tint, then per-tile color tint if specified.
+                            let y_pos = tile.visual.mesh_y_position(tile.wall_type, terrain_height);
                             // In Bevy's PBR, base_color is a multiplier on top of
                             // base_color_texture, so setting it to a darkened value
                             // darkens the texture without replacing it.
@@ -2084,7 +2293,7 @@ fn spawn_map(
                         world::WallType::Torch => {
                             // Use per-tile visual metadata for dimensions
                             let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                                tile.visual.mesh_dimensions(tile.wall_type, terrain_height);
                             let mesh = get_or_create_mesh(
                                 &mut meshes,
                                 &mut mesh_cache,
@@ -2092,7 +2301,7 @@ fn spawn_map(
                                 height,
                                 width_z,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+                            let y_pos = tile.visual.mesh_y_position(tile.wall_type, terrain_height);
 
                             // Apply color tint if specified
                             let mut base_color = wall_base_color;
@@ -2456,7 +2665,51 @@ fn spawn_map(
                         &content.0.furniture,
                     );
 
-                    {
+                    // When the resolved furniture definition carries a custom `mesh_id`,
+                    // use the imported mesh from the object mesh registry instead of
+                    // spawning a procedural mesh.  Falls back to procedural when the
+                    // definition has no mesh_id or the mesh cannot be resolved.
+                    let used_imported_mesh = (*furniture_id)
+                        .and_then(|id| content.0.furniture.get_by_id(id))
+                        .and_then(|def| def.mesh_id)
+                        .and_then(|mesh_id| {
+                            let resolved = content.0.object_meshes.lookup(&mesh_id.to_string());
+                            if resolved.is_none() {
+                                warn!(
+                                    mesh_id,
+                                    "Furniture mesh_id not found in object mesh registry; \
+                                     falling back to procedural"
+                                );
+                            }
+                            resolved
+                        })
+                        .map(|creature_def| {
+                            let x = position.x as f32;
+                            let y = position.y as f32;
+                            let world_pos = Vec3::new(
+                                x + TILE_CENTER_OFFSET,
+                                creature_def.foot_ground_offset(),
+                                y + TILE_CENTER_OFFSET,
+                            );
+                            spawn_imported_furniture_mesh(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &asset_server,
+                                world_pos,
+                                *rotation_y,
+                                resolved_scale,
+                                map.id,
+                                *position,
+                                creature_def,
+                                resolved_tint,
+                                resolved_type,
+                                &resolved_flags,
+                            );
+                        })
+                        .is_some();
+
+                    if !used_imported_mesh {
                         let mut ctx = procedural_meshes::MeshSpawnContext {
                             commands: &mut commands,
                             materials: &mut materials,
@@ -2912,6 +3165,11 @@ pub fn spawn_event_marker(
 mod tests {
     use super::*;
     use crate::domain::types::Position;
+    use crate::domain::world::terrain::{
+        builtin_terrain_db, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND,
+        TERRAIN_ICE, TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_SAND, TERRAIN_SNOW, TERRAIN_STONE,
+        TERRAIN_SWAMP, TERRAIN_WATER,
+    };
     use crate::domain::world::SpriteAnimation;
     use crate::game::components::dialogue::NpcDialogue;
     use crate::game::resources::GlobalState;
@@ -3004,50 +3262,107 @@ mod tests {
     }
 
     #[test]
-    fn test_should_spawn_grass_cover_for_grass_terrain() {
-        assert!(should_spawn_grass_cover(world::TerrainType::Grass));
+    fn test_terrain_grass_has_vegetation_in_builtin_db() {
+        use crate::domain::world::terrain::TerrainVegetation;
+        let db = builtin_terrain_db();
+        let def = db
+            .get_by_id(TERRAIN_GRASS)
+            .expect("Grass must be in builtin DB");
+        assert_ne!(
+            def.vegetation,
+            TerrainVegetation::None,
+            "Grass must have vegetation"
+        );
     }
 
     #[test]
-    fn test_should_spawn_grass_cover_for_forest_terrain() {
-        assert!(should_spawn_grass_cover(world::TerrainType::Forest));
+    fn test_terrain_forest_has_forest_vegetation_in_builtin_db() {
+        use crate::domain::world::terrain::TerrainVegetation;
+        let db = builtin_terrain_db();
+        let def = db
+            .get_by_id(TERRAIN_FOREST)
+            .expect("Forest must be in builtin DB");
+        assert_eq!(
+            def.vegetation,
+            TerrainVegetation::Forest,
+            "Forest must have Forest vegetation"
+        );
     }
 
     #[test]
-    fn test_should_not_spawn_grass_cover_for_non_vegetated_terrain() {
-        for terrain in [
-            world::TerrainType::Ground,
-            world::TerrainType::Water,
-            world::TerrainType::Lava,
-            world::TerrainType::Swamp,
-            world::TerrainType::Stone,
-            world::TerrainType::Dirt,
-            world::TerrainType::Mountain,
+    fn test_terrain_non_vegetated_has_no_vegetation_in_builtin_db() {
+        use crate::domain::world::terrain::TerrainVegetation;
+        let db = builtin_terrain_db();
+        for terrain_id in [
+            TERRAIN_GROUND,
+            TERRAIN_WATER,
+            TERRAIN_STONE,
+            TERRAIN_MOUNTAIN,
         ] {
-            assert!(
-                !should_spawn_grass_cover(terrain),
-                "terrain {terrain:?} should not spawn procedural grass cover"
+            let def = db
+                .get_by_id(terrain_id)
+                .unwrap_or_else(|| panic!("Terrain {terrain_id} must be in builtin DB"));
+            assert_eq!(
+                def.vegetation,
+                TerrainVegetation::None,
+                "Terrain {terrain_id} must have no vegetation"
             );
         }
     }
 
     #[test]
+    fn test_terrain_height_from_terrain_definition() {
+        let db = builtin_terrain_db();
+
+        let mountain = db.get_by_id(TERRAIN_MOUNTAIN).unwrap();
+        assert!(
+            (mountain.height - 3.0).abs() < f32::EPSILON,
+            "Mountain height must be 3.0"
+        );
+
+        let forest = db.get_by_id(TERRAIN_FOREST).unwrap();
+        assert!(
+            (forest.height - 2.2).abs() < f32::EPSILON,
+            "Forest height must be 2.2"
+        );
+
+        let ground = db.get_by_id(TERRAIN_GROUND).unwrap();
+        assert!(
+            ground.height.abs() < f32::EPSILON,
+            "Ground height must be 0.0"
+        );
+    }
+
+    #[test]
+    fn test_terrain_color_from_terrain_definition() {
+        let db = builtin_terrain_db();
+        let water = db.get_by_id(TERRAIN_WATER).unwrap();
+        // Water is blue: color[2] (blue channel) should exceed color[0] (red channel)
+        assert!(
+            water.color[2] > water.color[0],
+            "Water must be more blue than red"
+        );
+    }
+
+    #[test]
     fn test_forest_vegetation_plan_same_tile_is_deterministic() {
-        let tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let db = builtin_terrain_db();
+        let tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
         let position = Position::new(4, 5);
 
-        let first = vegetation_placement::tile_vegetation_plan(&tile, 1, position);
-        let second = vegetation_placement::tile_vegetation_plan(&tile, 1, position);
+        let first = vegetation_placement::tile_vegetation_plan(&tile, 1, position, &db);
+        let second = vegetation_placement::tile_vegetation_plan(&tile, 1, position, &db);
 
         assert_eq!(first, second);
     }
 
     #[test]
     fn test_forest_default_tree_and_extra_shrubs_have_non_overlapping_positions() {
-        let mut tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let db = builtin_terrain_db();
+        let mut tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
         tile.visual.foliage_density = Some(1.0);
 
-        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0), &db);
         let tree = plan
             .tree_anchor
             .expect("forest tile should plan a default tree");
@@ -3072,10 +3387,11 @@ mod tests {
 
     #[test]
     fn test_explicit_shrub_tile_does_not_plan_full_size_default_tree() {
-        let mut tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let db = builtin_terrain_db();
+        let mut tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
         tile.visual.tree_type = Some(world::TreeType::Shrub);
 
-        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0), &db);
 
         assert!(plan.tree_anchor.is_none());
         assert_eq!(plan.explicit_tree_type, Some(world::TreeType::Shrub));
@@ -3085,8 +3401,9 @@ mod tests {
 
     #[test]
     fn test_grass_cover_avoids_planned_tree_trunk_exclusion_zone() {
-        let tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
-        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let db = builtin_terrain_db();
+        let tile = world::Tile::new(0, 0, TERRAIN_FOREST, world::WallType::None, &db);
+        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0), &db);
         let tree = plan
             .tree_anchor
             .expect("forest tile should plan a default tree");
@@ -3201,6 +3518,127 @@ mod tests {
     }
 
     #[test]
+    fn test_map_spawns_mountain_mesh_for_mountain_style() {
+        // Verify that the Mountain terrain in the built-in DB has TerrainMeshStyle::Mountain
+        // — this is the property that drives map.rs to take the mountain mesh-spawn branch.
+        let db = builtin_terrain_db();
+        let mountain = db
+            .get_by_id(TERRAIN_MOUNTAIN)
+            .expect("Mountain must be in builtin DB");
+        assert_eq!(
+            mountain.mesh_style,
+            TerrainMeshStyle::Mountain,
+            "Mountain terrain must use Mountain mesh style"
+        );
+        // Non-mountain terrains must NOT use Mountain mesh style.
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_GRASS,
+            TERRAIN_WATER,
+            TERRAIN_STONE,
+            TERRAIN_FOREST,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_ne!(
+                def.mesh_style,
+                TerrainMeshStyle::Mountain,
+                "terrain {} must NOT use Mountain mesh style",
+                def.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_map_spawns_water_mesh_for_water_style() {
+        // Verify that only the Water terrain in the built-in DB has TerrainMeshStyle::Water
+        // — this is the property that drives map.rs to take the water mesh-spawn branch.
+        let db = builtin_terrain_db();
+        let water = db
+            .get_by_id(TERRAIN_WATER)
+            .expect("Water must be in builtin DB");
+        assert_eq!(
+            water.mesh_style,
+            TerrainMeshStyle::Water,
+            "Water terrain must use Water mesh style"
+        );
+        // All other built-in terrains must NOT use Water mesh style.
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_GRASS,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_FOREST,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_ne!(
+                def.mesh_style,
+                TerrainMeshStyle::Water,
+                "terrain {} must NOT use Water mesh style",
+                def.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_grass_cover_spawns_for_vegetation_terrains() {
+        // The map spawner enables grass-cover for any tile whose TerrainDefinition has
+        // vegetation != TerrainVegetation::None.  Verify the built-in DB partitions
+        // the 12 terrain IDs correctly: Grass and Forest have vegetation; all others don't.
+        use crate::domain::world::terrain::TerrainVegetation;
+        let db = builtin_terrain_db();
+
+        // IDs expected to have vegetation (drives grass-cover spawning).
+        for id in [TERRAIN_GRASS, TERRAIN_FOREST] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_ne!(
+                def.vegetation,
+                TerrainVegetation::None,
+                "terrain {} must have vegetation (drives grass-cover spawning)",
+                def.name
+            );
+        }
+
+        // All remaining built-in IDs must have NO vegetation.
+        for id in [
+            TERRAIN_GROUND,
+            TERRAIN_WATER,
+            TERRAIN_LAVA,
+            TERRAIN_SWAMP,
+            TERRAIN_STONE,
+            TERRAIN_DIRT,
+            TERRAIN_MOUNTAIN,
+            TERRAIN_SAND,
+            TERRAIN_SNOW,
+            TERRAIN_ICE,
+        ] {
+            let def = db
+                .get_by_id(id)
+                .unwrap_or_else(|| panic!("terrain {id} must be in builtin DB"));
+            assert_eq!(
+                def.vegetation,
+                TerrainVegetation::None,
+                "terrain {} must NOT have vegetation",
+                def.name
+            );
+        }
+    }
+
+    #[test]
     fn test_tile_sprite_spawning() {
         // Test that TileSprite component can be created with correct fields
         let sprite_ref = SpriteReference {
@@ -3288,10 +3726,10 @@ mod tests {
             perceptual_roughness: 0.85,
             ..default()
         });
-        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+        cache.set(TERRAIN_MOUNTAIN, cached_handle.clone());
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             None,
             &cache,
             None,
@@ -3318,10 +3756,10 @@ mod tests {
             .get(&cached_handle)
             .expect("cached material should exist")
             .clone();
-        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+        cache.set(TERRAIN_MOUNTAIN, cached_handle.clone());
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             Some(source_material),
@@ -3348,10 +3786,10 @@ mod tests {
             .get(&cached_handle)
             .expect("cached material should exist")
             .clone();
-        cache.set(world::TerrainType::Mountain, cached_handle);
+        cache.set(TERRAIN_MOUNTAIN, cached_handle);
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             Some(source_material),
@@ -3372,7 +3810,7 @@ mod tests {
         let mut materials = Assets::<StandardMaterial>::default();
 
         let result = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             None,
@@ -3404,10 +3842,10 @@ mod tests {
             .expect("cached material should exist")
             .clone();
         let source_material = original_cached_material.clone();
-        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+        cache.set(TERRAIN_MOUNTAIN, cached_handle.clone());
 
         let _ = terrain_material_with_optional_tint(
-            world::TerrainType::Mountain,
+            TERRAIN_MOUNTAIN,
             Some((0.8, 0.7, 0.6)),
             &cache,
             Some(source_material),
@@ -6494,7 +6932,7 @@ mod tests {
             ..default()
         });
         let mut cache = TerrainMaterialCache::default();
-        cache.set(world::TerrainType::Stone, stone_cached.clone());
+        cache.set(TERRAIN_STONE, stone_cached.clone());
 
         // Simulate the wall material creation logic from spawn_map.
         let stone_rgb = (0.55_f32, 0.55_f32, 0.55_f32);
@@ -6505,7 +6943,7 @@ mod tests {
             stone_rgb.2 * darken,
         );
         let source_material = cache
-            .get(world::TerrainType::Stone)
+            .get(TERRAIN_STONE)
             .and_then(|handle| materials.get(handle))
             .cloned();
         let tile_wall_material = if let Some(mut src) = source_material {
@@ -6556,7 +6994,7 @@ mod tests {
 
         let wall_color = Color::srgb(0.33, 0.33, 0.33);
         let source_material = cache
-            .get(world::TerrainType::Stone)
+            .get(TERRAIN_STONE)
             .and_then(|handle| materials.get(handle))
             .cloned();
         let tile_wall_material = if let Some(mut src) = source_material {
@@ -6621,7 +7059,7 @@ mod tests {
             .expect("tile (1,1) must exist in a 4×4 map");
         {
             let tile = &mut map.tiles[oak_tile_idx];
-            tile.terrain = world::TerrainType::Forest;
+            tile.terrain = TERRAIN_FOREST;
             tile.wall_type = world::WallType::None;
             tile.blocked = false;
             tile.visual.tree_type = Some(world::TreeType::Oak);
@@ -6839,6 +7277,182 @@ mod tests {
         assert!(
             app.world().get_entity(marker_entity).is_err(),
             "Entity should be despawned after the backing event is removed"
+        );
+    }
+
+    /// Furniture with a furniture_id whose FurnitureDefinition has a mesh_id
+    /// matching an ObjectMeshDatabase entry must spawn with a FurnitureEntity
+    /// component (i.e. it uses the imported-mesh path, not the placeholder path).
+    #[test]
+    fn test_spawn_map_uses_imported_mesh_for_furniture_with_mesh_id() {
+        use crate::domain::types::Position;
+        use crate::domain::world::furniture::FurnitureDefinition;
+        use crate::domain::world::{
+            FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType, Map, MapEvent,
+        };
+        use crate::game::components::furniture::FurnitureEntity;
+        use crate::sdk::database::ContentDatabase;
+        use std::io::Write;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        // Build a ContentDatabase with a furniture definition referencing mesh_id 10099
+        // and an ObjectMeshDatabase entry for "10099" loaded via a temp registry file.
+        let mut db = ContentDatabase::new();
+
+        db.furniture
+            .add(FurnitureDefinition {
+                id: 99,
+                name: "Custom Workbench".to_string(),
+                category: FurnitureCategory::Utility,
+                base_type: FurnitureType::Table,
+                material: FurnitureMaterial::Wood,
+                scale: 1.0,
+                color_tint: None,
+                flags: FurnitureFlags::default(),
+                icon: None,
+                tags: vec![],
+                mesh_id: Some(10099),
+                description: None,
+            })
+            .unwrap();
+
+        // insert_for_test is not available — build ObjectMeshDatabase via temp files.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset_dir = tmp.path().join("assets/meshes/objects");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+        let asset_path = asset_dir.join("custom_workbench.ron");
+        std::fs::File::create(&asset_path)
+            .unwrap()
+            .write_all(
+                br#"(
+    id: 10099,
+    name: "Custom Workbench Mesh",
+    meshes: [],
+    mesh_transforms: [],
+)"#,
+            )
+            .unwrap();
+
+        let registry_path = tmp.path().join("data/object_mesh_registry.ron");
+        std::fs::create_dir_all(tmp.path().join("data")).unwrap();
+        std::fs::File::create(&registry_path)
+            .unwrap()
+            .write_all(
+                br#"[
+    (
+        id: 10099,
+        name: "Custom Workbench Mesh",
+        filepath: "assets/meshes/objects/custom_workbench.ron",
+    ),
+]"#,
+            )
+            .unwrap();
+
+        db.object_meshes =
+            world::ObjectMeshDatabase::load_from_registry(&registry_path, tmp.path()).unwrap();
+
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let map_id: crate::domain::types::MapId = 1;
+        let pos = Position::new(3, 4);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            pos,
+            MapEvent::Furniture {
+                name: "Custom Workbench".to_string(),
+                furniture_id: Some(99),
+                furniture_type: FurnitureType::Table,
+                rotation_y: None,
+                scale: 1.0,
+                material: FurnitureMaterial::Wood,
+                flags: FurnitureFlags::default(),
+                color_tint: None,
+                key_item_id: None,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        app.update();
+
+        // The imported-mesh path must produce a FurnitureEntity component on the root.
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<&FurnitureEntity>();
+        let count = query.iter(&*world_ref).count();
+        assert!(
+            count >= 1,
+            "Expected at least one FurnitureEntity for furniture with mesh_id, got 0"
+        );
+    }
+
+    /// Furniture without a mesh_id must still spawn via the procedural path.
+    #[test]
+    fn test_spawn_map_falls_back_to_procedural_for_furniture_without_mesh_id() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{
+            FurnitureFlags, FurnitureMaterial, FurnitureType, Map, MapEvent,
+        };
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        let db = ContentDatabase::new(); // empty — no furniture definitions
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let map_id: crate::domain::types::MapId = 1;
+        let pos = Position::new(2, 2);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            pos,
+            MapEvent::Furniture {
+                name: "Plain Table".to_string(),
+                furniture_id: None,
+                furniture_type: FurnitureType::Table,
+                rotation_y: None,
+                scale: 1.0,
+                material: FurnitureMaterial::Wood,
+                flags: FurnitureFlags::default(),
+                color_tint: None,
+                key_item_id: None,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        app.update();
+
+        // Procedural furniture does not add FurnitureEntity for a plain Table
+        // (only Doors get FurnitureEntity in the procedural path at map-load time).
+        // What matters is that no panic occurs and the map renders.
+        let world_ref = app.world_mut();
+        let mut tile_query = world_ref.query::<&MapEntity>();
+        let entity_count = tile_query.iter(&*world_ref).count();
+        assert!(
+            entity_count > 0,
+            "Expected at least one MapEntity after map spawn with procedural furniture"
         );
     }
 }

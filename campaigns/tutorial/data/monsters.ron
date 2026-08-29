@@ -1791,7 +1791,7 @@
             ],
             experience: 5000,
         ),
-        creature_id: Some(1021),
+        creature_id: Some(21),
         conditions: Normal,
         active_conditions: [],
         has_acted: false,

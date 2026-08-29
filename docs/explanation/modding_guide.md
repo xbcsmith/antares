@@ -865,6 +865,83 @@ Validation notes:
 
 ---
 
+## Terrain Definitions
+
+### What is a TerrainDefinition?
+
+Terrain types are now fully data-driven via `TerrainDefinition`. Each definition
+describes one tile surface: its texture, mesh style, procedural vegetation,
+movement blocking, and visual properties.
+
+### Built-in Terrain IDs (13000–13011)
+
+| ID | Name | Blocked | Vegetation | Mesh Style |
+|----|------|---------|------------|------------|
+| 13000 | Ground | No | None | Flat |
+| 13001 | Grass | No | GrassCover | Flat |
+| 13002 | Water | Yes | None | Water |
+| 13003 | Lava | No | None | Flat |
+| 13004 | Swamp | No | None | Flat |
+| 13005 | Stone | No | None | Flat |
+| 13006 | Dirt | No | None | Flat |
+| 13007 | Forest | No | Forest | Flat |
+| 13008 | Mountain | Yes | None | Mountain |
+| 13009 | Sand | No | None | Flat |
+| 13010 | Snow | No | None | Flat |
+| 13011 | Ice | No | None | Flat |
+
+### Custom Terrain (ID >= 13100)
+
+Campaign-defined terrain starts at `13100` by convention. Add entries to
+your campaign's `data/terrain.ron`:
+
+```ron
+// campaigns/my_campaign/data/terrain.ron
+[
+    TerrainDefinition(
+        id: 13100,
+        name: "Volcanic Ash",
+        texture_path: "assets/textures/terrain/ash.png",
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        roughness: 0.85,
+        height: 0.0,
+    ),
+]
+```
+
+### Referencing Terrain in Maps
+
+Map tiles reference terrain by numeric ID:
+
+```ron
+// In your map RON file
+(
+    terrain: 13100,   // Volcanic Ash (custom)
+    wall_type: None,
+    blocked: false,
+    ...
+)
+```
+
+### Rust Constants (for SDK use)
+
+```rust
+use antares::domain::world::terrain::{
+    TERRAIN_GROUND, TERRAIN_GRASS, TERRAIN_WATER, TERRAIN_FOREST,
+    TERRAIN_MOUNTAIN, TERRAIN_STONE, TERRAIN_DIRT, TERRAIN_LAVA,
+    TERRAIN_SWAMP, TERRAIN_SAND, TERRAIN_SNOW, TERRAIN_ICE,
+    builtin_terrain_db,
+};
+```
+
+The `builtin_terrain_db()` function returns a `TerrainDatabase` populated with
+all 12 built-in terrain definitions. Campaign data is loaded on top of this base
+by the `CampaignLoader`.
+
+---
+
 ## Advanced Techniques
 
 ### Technique 1: Dynamic Stat Bonuses

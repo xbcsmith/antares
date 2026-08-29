@@ -1,67 +1,79 @@
-# Terrain
+# Terrain Textures
 
-The 64×64 size is just the placeholder generator's output — not a Bevy limit
+Terrain textures are now **per-definition**, not fixed filenames. Each
+`TerrainDefinition` in `data/terrain.ron` (or a campaign's `data/terrain.ron`)
+carries a `texture_path` field that points to the PNG asset used by the
+rendering pipeline.
 
-The terrain textures (ground, grass, stone, etc.) come from the `antares_sdk textures generate` CLI command. That command is explicitly documented as a **placeholder generator**:
+## How Texture Loading Works
 
-```antares/src/sdk/cli/texture_generator.rs#L84-91
-#[command(
-    about = "Generate placeholder terrain textures",
-    long_about = "Generates deterministic placeholder textures for terrain tiles, grass, and trees.\n\n\
-                  Output sub-directories (`terrain/`, `grass/`, `trees/`) are created inside\n\
-                  the specified --output-dir. Existing files are overwritten."
-)]
+The `TerrainMaterialCache` loads materials on demand:
+
+```antares/src/game/resources/terrain_material_cache.rs#L51-80
+/// Cache for terrain PBR materials indexed by TerrainId.
+pub struct TerrainMaterialCache { ... }
 ```
 
-The 64×64 size is hardcoded into the generator's terrain constants:
+When a tile with `terrain: 13001` (Grass) is spawned, the renderer calls
+`TerrainMaterialCache::get_or_load(13001)`, which looks up the
+`TerrainDefinition` for ID 13001, reads its `texture_path`, and loads it as a
+Bevy `StandardMaterial`.
 
-```antares/src/sdk/cli/texture_generator.rs#L252-256
-/// Output image width in pixels.
-const IMAGE_WIDTH: u32 = 64;
-/// Output image height in pixels.
-const IMAGE_HEIGHT: u32 = 64;
-/// Maximum per-channel noise magnitude (±NOISE_RANGE).
-const NOISE_RANGE: i32 = 10;
+## Built-in Terrain Texture Paths
+
+| ID | Name | Default texture path |
+|----|------|---------------------|
+| 13000 | Ground | `assets/textures/terrain/ground.png` |
+| 13001 | Grass | `assets/textures/terrain/grass.png` |
+| 13002 | Water | `assets/textures/terrain/water.png` |
+| 13003 | Lava | `assets/textures/terrain/lava.png` |
+| 13004 | Swamp | `assets/textures/terrain/swamp.png` |
+| 13005 | Stone | `assets/textures/terrain/stone.png` |
+| 13006 | Dirt | `assets/textures/terrain/dirt.png` |
+| 13007 | Forest | `assets/textures/terrain/forest_floor.png` |
+| 13008 | Mountain | `assets/textures/terrain/mountain.png` |
+| 13009 | Sand | `assets/textures/terrain/sand.png` |
+| 13010 | Snow | `assets/textures/terrain/snow.png` |
+| 13011 | Ice | `assets/textures/terrain/ice.png` |
+
+## Placeholder vs. Final Art
+
+The `antares_sdk textures generate` CLI command (see `src/sdk/cli/texture_generator.rs`)
+generates deterministic 64×64 placeholder PNGs for the built-in terrain types. These
+are placeholder stubs — replace them with your own art at the same paths for better
+visual quality.
+
+## Using Custom Terrain Textures
+
+To override a built-in texture or define a new terrain with a custom texture,
+add a `TerrainDefinition` entry to your campaign's `data/terrain.ron`:
+
+```ron
+// campaigns/my_campaign/data/terrain.ron
+[
+    TerrainDefinition(
+        id: 13100,
+        name: "Cobblestone",
+        texture_path: "assets/textures/terrain/cobblestone.png",
+        mesh_style: Flat,
+        vegetation: None,
+        blocked: false,
+        roughness: 0.9,
+        height: 0.0,
+    ),
+]
 ```
 
-These constants only apply to the terrain tile textures. The generator was designed for minimum viable noise-colored placeholders, not final art.
+Any `TerrainId` >= 13100 is reserved for campaign-defined terrain (by convention).
+Built-in IDs 13000–13099 are reserved for the engine.
 
-## You can use any size you want
+## Texture Size
 
-The rendering pipeline loads these as Bevy `StandardMaterial`s (PBR materials), one PNG per terrain type:
+Bevy loads the PNG at whatever resolution it is — there is no engine-imposed
+size constraint for terrain tiles. Common choices:
 
-```antares/src/game/systems/terrain_materials.rs#L140-150
-    for terrain in terrain_types {
-        let texture_path = texture_path_for(terrain);
-        let texture_handle: Handle<Image> = asset_server.load(texture_path);
+- **64×64** — placeholder quality (what the generator produces)
+- **256×256** — noticeably better for seamless tiling
+- **512×512** or **1024×1024** — high quality, reasonable VRAM cost
 
-        let material_handle = materials.add(StandardMaterial {
-            base_color_texture: Some(texture_handle),
-            perceptual_roughness: roughness_for(terrain),
-            ..default()
-        });
-
-        cache.set(terrain, material_handle);
-```
-
-There's no dimension check anywhere in that path. Bevy just loads whatever PNG lives at `assets/textures/terrain/ground.png`, `grass.png`, etc. The SDK's dimension validation only covers `assets/textures/trees/` and `assets/textures/grass/grass_blade.png` — **not** terrain tiles.
-
-## What to do
-
-Replace the placeholder files with your own higher-resolution art at the same paths:
-
-```/dev/null/paths.txt#L1-10
-assets/textures/terrain/ground.png
-assets/textures/terrain/grass.png
-assets/textures/terrain/stone.png
-assets/textures/terrain/mountain.png
-assets/textures/terrain/dirt.png
-assets/textures/terrain/water.png
-assets/textures/terrain/lava.png
-assets/textures/terrain/swamp.png
-assets/textures/terrain/forest_floor.png
-```
-
-Common sensible sizes for a seamlessly-tiling PBR terrain texture are **256×256**, **512×512**, or **1024×1024** — all totally fine for Bevy. Modern GPUs typically support up to 8192×8192 or 16384×16384. The only practical limit is VRAM. For a tiled terrain material (which is what these are), 256×256 looks considerably better than 64×64 without being expensive.
-
-If you'd like, I can update `IMAGE_WIDTH` / `IMAGE_HEIGHT` in the generator to produce larger placeholders by default — though the better long-term move is to drop in real art assets.
+The texture is applied as a `base_color_texture` on a `StandardMaterial` (PBR).

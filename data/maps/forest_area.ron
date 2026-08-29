@@ -6,7 +6,7 @@
     description: "A dense forest.",
     tiles: [
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -17,7 +17,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28,7 +28,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -39,7 +39,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -50,7 +50,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -61,7 +61,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -72,7 +72,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -83,7 +83,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -94,7 +94,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -105,7 +105,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -116,7 +116,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -127,7 +127,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -138,7 +138,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -149,7 +149,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -160,7 +160,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -171,7 +171,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -182,7 +182,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -193,7 +193,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -204,7 +204,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -215,7 +215,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -226,7 +226,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -237,7 +237,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -248,7 +248,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -259,7 +259,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -270,7 +270,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -281,7 +281,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -292,7 +292,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -303,7 +303,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -314,7 +314,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -325,7 +325,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -336,7 +336,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -347,7 +347,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -358,7 +358,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -369,7 +369,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -380,7 +380,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -391,7 +391,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -402,7 +402,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -413,7 +413,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -424,7 +424,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -435,7 +435,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -446,7 +446,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -457,7 +457,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -468,7 +468,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -479,7 +479,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -490,7 +490,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -501,7 +501,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -513,7 +513,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -525,7 +525,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -537,7 +537,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -548,7 +548,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -559,7 +559,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -570,7 +570,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -581,7 +581,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -592,7 +592,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -603,7 +603,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -614,7 +614,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -625,7 +625,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -636,7 +636,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -647,7 +647,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -658,7 +658,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -669,7 +669,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -680,7 +680,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -691,7 +691,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -702,7 +702,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -713,7 +713,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -724,7 +724,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -736,7 +736,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -748,7 +748,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -760,7 +760,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -771,7 +771,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -782,7 +782,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -793,7 +793,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -804,7 +804,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -815,7 +815,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -826,7 +826,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -837,7 +837,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -848,7 +848,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -859,7 +859,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -870,7 +870,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -881,7 +881,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -892,7 +892,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -903,7 +903,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -914,7 +914,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -925,7 +925,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -936,7 +936,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -947,7 +947,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -959,7 +959,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -971,7 +971,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -983,7 +983,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -994,7 +994,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1005,7 +1005,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1016,7 +1016,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1027,7 +1027,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1038,7 +1038,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1049,7 +1049,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1060,7 +1060,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1071,7 +1071,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1082,7 +1082,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1093,7 +1093,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1104,7 +1104,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1115,7 +1115,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1126,7 +1126,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1137,7 +1137,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1148,7 +1148,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1159,7 +1159,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1170,7 +1170,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1181,7 +1181,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1192,7 +1192,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1203,7 +1203,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1214,7 +1214,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1225,7 +1225,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1236,7 +1236,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1247,7 +1247,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1258,7 +1258,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1269,7 +1269,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1280,7 +1280,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1291,7 +1291,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1302,7 +1302,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1313,7 +1313,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1324,7 +1324,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1335,7 +1335,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1346,7 +1346,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1357,7 +1357,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1368,7 +1368,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1379,7 +1379,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1390,7 +1390,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1401,7 +1401,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1412,7 +1412,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1423,7 +1423,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1434,7 +1434,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1445,7 +1445,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1456,7 +1456,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1467,7 +1467,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1478,7 +1478,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1489,7 +1489,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1500,7 +1500,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1511,7 +1511,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1522,7 +1522,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1533,7 +1533,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1544,7 +1544,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1555,7 +1555,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1566,7 +1566,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1577,7 +1577,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1588,7 +1588,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1599,7 +1599,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1610,7 +1610,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1621,7 +1621,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1632,7 +1632,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1643,7 +1643,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1654,7 +1654,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1665,7 +1665,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1676,7 +1676,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1687,7 +1687,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1698,7 +1698,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1709,7 +1709,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1720,7 +1720,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1731,7 +1731,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1742,7 +1742,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1753,7 +1753,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1764,7 +1764,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1775,7 +1775,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1786,7 +1786,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1797,7 +1797,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1808,7 +1808,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1819,7 +1819,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1830,7 +1830,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1841,7 +1841,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1852,7 +1852,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1863,7 +1863,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1874,7 +1874,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1885,7 +1885,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1896,7 +1896,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1907,7 +1907,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1918,7 +1918,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1929,7 +1929,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1940,7 +1940,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1952,7 +1952,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -1964,7 +1964,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1976,7 +1976,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1987,7 +1987,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -1998,7 +1998,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2009,7 +2009,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2020,7 +2020,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2031,7 +2031,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2042,7 +2042,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2053,7 +2053,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2064,7 +2064,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2075,7 +2075,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2086,7 +2086,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2097,7 +2097,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2108,7 +2108,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2119,7 +2119,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2130,7 +2130,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2141,7 +2141,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2152,7 +2152,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2163,7 +2163,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2175,7 +2175,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2187,7 +2187,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2199,7 +2199,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2210,7 +2210,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2221,7 +2221,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2232,7 +2232,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2243,7 +2243,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2255,7 +2255,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2267,7 +2267,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2279,7 +2279,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2291,7 +2291,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2302,7 +2302,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2313,7 +2313,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2324,7 +2324,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2335,7 +2335,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2346,7 +2346,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2357,7 +2357,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2368,7 +2368,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2379,7 +2379,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2390,7 +2390,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2402,7 +2402,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2414,7 +2414,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2426,7 +2426,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2437,7 +2437,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2448,7 +2448,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2459,7 +2459,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2470,7 +2470,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2481,7 +2481,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2492,7 +2492,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2503,7 +2503,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2514,7 +2514,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2525,7 +2525,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2536,7 +2536,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2547,7 +2547,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2558,7 +2558,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2569,7 +2569,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2580,7 +2580,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2591,7 +2591,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2602,7 +2602,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2613,7 +2613,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2624,7 +2624,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2635,7 +2635,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2646,7 +2646,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2657,7 +2657,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2668,7 +2668,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2679,7 +2679,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2690,7 +2690,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2701,7 +2701,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2712,7 +2712,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2723,7 +2723,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2734,7 +2734,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2745,7 +2745,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2756,7 +2756,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2767,7 +2767,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2778,7 +2778,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2789,7 +2789,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2800,7 +2800,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2811,7 +2811,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2822,7 +2822,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2833,7 +2833,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2844,7 +2844,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2855,7 +2855,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2866,7 +2866,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2877,7 +2877,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2888,7 +2888,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -2899,7 +2899,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2910,7 +2910,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2921,7 +2921,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2932,7 +2932,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2943,7 +2943,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2954,7 +2954,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2965,7 +2965,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2976,7 +2976,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2987,7 +2987,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -2998,7 +2998,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3009,7 +3009,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3020,7 +3020,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3031,7 +3031,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3042,7 +3042,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3053,7 +3053,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3064,7 +3064,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3075,7 +3075,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3086,7 +3086,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3097,7 +3097,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3108,7 +3108,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3119,7 +3119,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3130,7 +3130,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3141,7 +3141,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3152,7 +3152,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3163,7 +3163,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3174,7 +3174,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3185,7 +3185,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3196,7 +3196,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3207,7 +3207,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3218,7 +3218,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3229,7 +3229,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3240,7 +3240,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3251,7 +3251,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3262,7 +3262,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3273,7 +3273,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3284,7 +3284,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Water,
+            terrain: 13002,
             wall_type: r#None,
             blocked: true,
             is_special: false,
@@ -3295,7 +3295,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3306,7 +3306,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3317,7 +3317,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3328,7 +3328,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3339,7 +3339,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3350,7 +3350,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3361,7 +3361,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3372,7 +3372,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3383,7 +3383,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3394,7 +3394,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3405,7 +3405,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3416,7 +3416,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3427,7 +3427,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3438,7 +3438,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3449,7 +3449,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3460,7 +3460,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3471,7 +3471,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3482,7 +3482,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3493,7 +3493,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3504,7 +3504,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3515,7 +3515,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3526,7 +3526,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3537,7 +3537,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3548,7 +3548,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3559,7 +3559,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3570,7 +3570,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3581,7 +3581,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3592,7 +3592,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3603,7 +3603,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3614,7 +3614,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3625,7 +3625,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3636,7 +3636,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3647,7 +3647,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3658,7 +3658,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3669,7 +3669,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3680,7 +3680,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3691,7 +3691,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3702,7 +3702,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3713,7 +3713,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3724,7 +3724,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3735,7 +3735,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3746,7 +3746,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3757,7 +3757,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3768,7 +3768,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3779,7 +3779,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3790,7 +3790,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3801,7 +3801,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3812,7 +3812,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3823,7 +3823,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3834,7 +3834,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3845,7 +3845,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3856,7 +3856,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3867,7 +3867,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3878,7 +3878,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3889,7 +3889,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3900,7 +3900,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3911,7 +3911,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3922,7 +3922,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3933,7 +3933,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3944,7 +3944,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3955,7 +3955,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3966,7 +3966,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3977,7 +3977,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3988,7 +3988,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -3999,7 +3999,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4010,7 +4010,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4021,7 +4021,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4032,7 +4032,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4043,7 +4043,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4054,7 +4054,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4065,7 +4065,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4076,7 +4076,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4087,7 +4087,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4098,7 +4098,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4110,7 +4110,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4122,7 +4122,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4134,7 +4134,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4145,7 +4145,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4156,7 +4156,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4167,7 +4167,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4178,7 +4178,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Grass,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4189,7 +4189,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4200,7 +4200,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4211,7 +4211,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4222,7 +4222,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4233,7 +4233,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4244,7 +4244,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4255,7 +4255,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4266,7 +4266,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4277,7 +4277,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4288,7 +4288,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4299,7 +4299,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4310,7 +4310,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4321,7 +4321,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4333,7 +4333,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4345,7 +4345,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4357,7 +4357,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4368,7 +4368,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4379,7 +4379,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4390,7 +4390,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4401,7 +4401,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4412,7 +4412,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4423,7 +4423,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: Normal,
             blocked: true,
             is_special: false,

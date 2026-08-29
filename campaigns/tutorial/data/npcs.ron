@@ -25,6 +25,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_elder_village2",
@@ -52,6 +54,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_goblin_dying",
@@ -79,6 +83,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_innkeeper_town",
@@ -104,6 +110,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_innkeeper_town2",
@@ -129,6 +137,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_lich_eonir",
@@ -136,7 +146,7 @@
         description: "The Architect of Stillness, once mortal king Eonir Xavian Stalix, now rules Vaelgrim as the Sovereign of Stillness. He claimed the jade icosahedron from Jyeshtha and uses it to freeze all of existence—spreading deathless cold across the Frostspire Peaks as the fraying Cosmic Weave pulls everything he once loved toward ruin.",
         portrait_id: "eonir",
         dialogue_id: Some(1004),
-        creature_id: Some(1021),
+        creature_id: Some(1003),
         sprite: None,
         quest_ids: [],
         faction: Some("Sovereign of Stillness"),
@@ -154,13 +164,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
-        combat_switch: Some((
-            trigger_flag: "eonir_combat_triggered",
-            monster_id: 137,
-            defeat_flag: Some("eonir_defeated"),
-            combat_type: Boss,
-        )),
-        suppress_flag: Some("eonir_relic_returned"),
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_merchant_town",
@@ -168,7 +173,7 @@
         description: "A traveling merchant offering goods and supplies to adventurers.",
         portrait_id: "merchant_1",
         dialogue_id: Some(5),
-        creature_id: Some(1003),
+        creature_id: Some(1021),
         sprite: None,
         quest_ids: [],
         faction: Some("Merchants Guild"),
@@ -186,6 +191,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_merchant_town2",
@@ -211,6 +218,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_mystic_astronomer",
@@ -238,6 +247,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_priest_town2",
@@ -263,6 +274,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_priestess_town",
@@ -288,6 +301,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_ranger_lost",
@@ -315,6 +330,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_ranger_training",
@@ -345,6 +362,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_wizard_arcturus",
@@ -373,6 +392,8 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
     (
         id: "tutorial_wizard_arcturus_brother",
@@ -380,7 +401,7 @@
         description: "The Void-Drifter, Echo of the Weave, is a displaced incarnation of Arcturus who brings unpredictable and powerful astral magic to the battlefield, seeking to find his lost relics among the stars.",
         portrait_id: "aetheris",
         dialogue_id: Some(2),
-        creature_id: None,
+        creature_id: Some(1008),
         sprite: None,
         quest_ids: [
             1,
@@ -401,5 +422,7 @@
         skill_training_fee_base: None,
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
+        combat_switch: None,
+        suppress_flag: None,
     ),
 ]

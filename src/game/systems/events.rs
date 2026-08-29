@@ -9,7 +9,9 @@ use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
 use crate::game::systems::furniture_rendering::{
     resolve_furniture_fields, spawn_furniture_with_rendering,
 };
-use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
+use crate::game::systems::map::{
+    spawn_imported_furniture_mesh, EventTrigger, MapChangeEvent, NpcMarker, TileCoord,
+};
 use crate::game::systems::procedural_meshes::{
     FurnitureSpawnParams, MeshSpawnContext, ProceduralMeshCache,
 };
@@ -178,7 +180,7 @@ fn handle_events(
     )>,
     // Transform query used to inspect candidate speaker entity's world Y position.
     // We use this to prefer fallback visuals when the speaker is a low-lying marker.
-    _query_transform: Query<&Transform>,
+    asset_server: Res<AssetServer>,
     mut pending_recruitment: Option<
         ResMut<crate::game::systems::dialogue::PendingRecruitmentContext>,
     >,
@@ -761,26 +763,69 @@ fn handle_events(
                     &content.db().furniture,
                 );
 
-                let mut ctx = MeshSpawnContext {
-                    commands,
-                    materials: materials_res,
-                    meshes: meshes_res,
-                    cache: &mut furniture_cache,
-                };
-                spawn_furniture_with_rendering(
-                    &mut ctx,
-                    trigger.position,
-                    map_id,
-                    &FurnitureSpawnParams {
-                        furniture_type: resolved_type,
-                        rotation_y: *rotation_y,
-                        scale: resolved_scale,
-                        material_type: resolved_material,
-                        flags: resolved_flags,
-                        color_tint: resolved_tint,
-                        key_item_id: *key_item_id,
-                    },
-                );
+                // When the resolved furniture definition carries a custom mesh_id,
+                // use the imported mesh from the object mesh registry instead of
+                // spawning a procedural mesh.  Falls back to procedural when the
+                // definition has no mesh_id or the mesh cannot be resolved.
+                let used_imported = furniture_id
+                    .and_then(|id| content.db().furniture.get_by_id(id))
+                    .and_then(|def| def.mesh_id)
+                    .and_then(|mesh_id| {
+                        let resolved = content.db().object_meshes.lookup(&mesh_id.to_string());
+                        if resolved.is_none() {
+                            warn!(
+                                mesh_id,
+                                "Furniture mesh_id not found in object mesh registry; \
+                                 falling back to procedural"
+                            );
+                        }
+                        resolved
+                    })
+                    .map(|creature_def| {
+                        let x = trigger.position.x as f32;
+                        let z = trigger.position.y as f32;
+                        let world_pos =
+                            Vec3::new(x + 0.5, creature_def.foot_ground_offset(), z + 0.5);
+                        spawn_imported_furniture_mesh(
+                            commands,
+                            meshes_res,
+                            materials_res,
+                            &asset_server,
+                            world_pos,
+                            *rotation_y,
+                            resolved_scale,
+                            map_id,
+                            trigger.position,
+                            creature_def,
+                            resolved_tint,
+                            resolved_type,
+                            &resolved_flags,
+                        );
+                    })
+                    .is_some();
+
+                if !used_imported {
+                    let mut ctx = MeshSpawnContext {
+                        commands,
+                        materials: materials_res,
+                        meshes: meshes_res,
+                        cache: &mut furniture_cache,
+                    };
+                    spawn_furniture_with_rendering(
+                        &mut ctx,
+                        trigger.position,
+                        map_id,
+                        &FurnitureSpawnParams {
+                            furniture_type: resolved_type,
+                            rotation_y: *rotation_y,
+                            scale: resolved_scale,
+                            material_type: resolved_material,
+                            flags: resolved_flags,
+                            color_tint: resolved_tint,
+                            key_item_id: *key_item_id,
+                        },
+                    );
+                }
             }
             MapEvent::Container {
                 id,

@@ -37706,6 +37706,6 @@
             scale: (1.0, 1.0, 1.0),
         ),
     ],
-    scale: 1.0,
+    scale: 0.75,
     color_tint: None,
 )

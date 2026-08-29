@@ -7,8 +7,10 @@
 //! environment definitions loaded from `data/landscape.ron`. Imported OBJ/GLB
 //! meshes are created through the Importer tab and upserted into this list.
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
+    handle_reload, handle_toolbar_action, show_standard_list_item, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::types::LandscapeId;
 use antares::domain::visual::{CreatureDefinition, CreatureReference};
@@ -97,6 +99,10 @@ pub struct LandscapeEditorState {
     /// once a delete with zero map placements has already gone through
     /// (those are removed immediately without a confirmation step).
     pending_delete_confirm: Option<PendingDeleteConfirm>,
+    /// Whether the editor should auto-load landscape definitions on the next
+    /// `show()` call. Set to `true` by `reset_for_new_campaign()` so that the
+    /// first render after opening a campaign populates `defs` from disk.
+    pub needs_initial_load: bool,
 }
 
 /// State for a landscape-definition delete that requires confirmation
@@ -128,45 +134,112 @@ impl LandscapeEditorState {
     /// assert!(state.search_query.is_empty());
     /// ```
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            needs_initial_load: true,
+            ..Self::default()
+        }
+    }
+
+    /// Reset editor state for a new or freshly-opened campaign.
+    ///
+    /// Clears all transient state and sets `needs_initial_load = true` so that
+    /// `show()` performs an auto-load the first time the Landscape tab is
+    /// rendered after opening a campaign.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::landscape_editor::LandscapeEditorState;
+    ///
+    /// let mut state = LandscapeEditorState::new();
+    /// state.needs_initial_load = false;
+    /// state.reset_for_new_campaign();
+    /// assert!(state.needs_initial_load);
+    /// ```
+    pub fn reset_for_new_campaign(&mut self) {
+        self.search_query.clear();
+        self.category_filter = None;
+        self.selected_landscape = None;
+        self.mode = LandscapeEditorMode::List;
+        self.edit_index = None;
+        self.edit_buffer = None;
+        self.tags_buffer.clear();
+        self.description_buffer.clear();
+        self.icon_buffer.clear();
+        self.texture_validation_cache = None;
+        self.mesh_scale_preview_cache = None;
+        self.available_meshes.clear();
+        self.mesh_scale_buffer = 1.0;
+        self.pending_delete_confirm = None;
+        self.needs_initial_load = true;
     }
 
     /// Renders the landscape definition list and selected definition preview.
+    ///
+    /// On the first call after a campaign change (`needs_initial_load`),
+    /// auto-loads `defs` from disk if `ctx.campaign_dir` is `Some`.
     ///
     /// # Examples
     ///
     /// ```ignore
     /// use campaign_builder::landscape_editor::LandscapeEditorState;
     ///
-    /// # fn render(ui: &mut eframe::egui::Ui) {
+    /// # fn render(ui: &mut eframe::egui::Ui, ctx: &mut campaign_builder::editor_context::EditorContext<'_>) {
     /// let mut state = LandscapeEditorState::new();
     /// let mut definitions = Vec::new();
-    /// let mut unsaved = false;
-    /// state.show(ui, &mut definitions, None, &mut unsaved);
+    /// state.show(ui, &mut definitions, ctx);
     /// # }
     /// ```
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<LandscapeDefinition>,
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
-        ui.horizontal(|ui| {
-            ui.heading("🌳 Landscape");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Import Landscape Mesh").clicked() {
-                    self.requested_signal = Some(LandscapeEditorSignal::OpenInObjImporter);
-                    ui.ctx().request_repaint();
+        if self.needs_initial_load {
+            if let Some(dir) = ctx.campaign_dir {
+                let path = dir.join(ctx.data_file);
+                if path.exists() {
+                    if let Ok(contents) = std::fs::read_to_string(&path) {
+                        if let Ok(loaded) = ron::from_str::<Vec<LandscapeDefinition>>(&contents) {
+                            *defs = loaded;
+                        }
+                    }
                 }
-            });
-        });
-        ui.separator();
+            }
+            self.needs_initial_load = false;
+        }
+
+        let toolbar_action = EditorToolbar::new("Landscape")
+            .with_search(&mut self.search_query)
+            .with_merge_mode(ctx.file_load_merge_mode)
+            .with_total_count(defs.len())
+            .with_id_salt("landscape_toolbar")
+            .show(ui);
+
+        match toolbar_action {
+            ToolbarAction::New => {
+                self.requested_signal = Some(LandscapeEditorSignal::OpenInObjImporter);
+                ui.ctx().request_repaint();
+            }
+            ToolbarAction::Reload => {
+                handle_reload(defs, ctx.campaign_dir, ctx.data_file, ctx.status_message);
+            }
+            other => handle_toolbar_action(
+                other,
+                defs,
+                |d: &LandscapeDefinition| d.id,
+                &mut false,
+                ctx,
+                "landscape.ron",
+                "landscape definitions",
+            ),
+        }
 
         if self.mode == LandscapeEditorMode::Edit {
-            self.show_edit(ui, defs, campaign_dir, unsaved_changes);
+            self.show_edit(ui, defs, ctx);
         } else {
-            self.show_list(ui, defs, campaign_dir, unsaved_changes);
+            self.show_list(ui, defs, ctx);
         }
     }
 
@@ -178,17 +251,12 @@ impl LandscapeEditorState {
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<LandscapeDefinition>,
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
+        let campaign_dir = ctx.campaign_dir.map(|p| p.as_path());
         // SDK Rule 12: use horizontal_wrapped for filter rows so they reflow
         // rather than clip when the window is narrow.
         ui.horizontal_wrapped(|ui| {
-            ui.label("Search:");
-            if ui.text_edit_singleline(&mut self.search_query).changed() {
-                ui.ctx().request_repaint();
-            }
-            ui.separator();
             ui.label("Category:");
             egui::ComboBox::from_id_salt("landscape_editor_category_filter")
                 .selected_text(
@@ -355,7 +423,7 @@ impl LandscapeEditorState {
             if idx < defs.len() {
                 let usage_count = count_landscape_placements(campaign_dir, defs[idx].id);
                 if usage_count == 0 {
-                    self.remove_landscape_definition(idx, defs, campaign_dir, unsaved_changes);
+                    self.remove_landscape_definition(idx, defs, campaign_dir, ctx.unsaved_changes);
                     ui.ctx().request_repaint();
                 } else {
                     // Still placed on at least one map — deleting now would leave
@@ -370,7 +438,7 @@ impl LandscapeEditorState {
             }
         }
 
-        self.show_delete_confirmation(ui, defs, campaign_dir, unsaved_changes);
+        self.show_delete_confirmation(ui, defs, campaign_dir, ctx.unsaved_changes);
     }
 
     /// Removes `defs[idx]` and its associated mesh registry entry (if any).
@@ -509,8 +577,7 @@ impl LandscapeEditorState {
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut [LandscapeDefinition],
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         let Some(buf) = self.edit_buffer.as_mut() else {
             // Shouldn't happen — guard and fall back to list mode.
@@ -669,12 +736,12 @@ impl LandscapeEditorState {
                 let mesh_scale = self.mesh_scale_buffer;
 
                 self.apply_edit(defs);
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
 
                 // Write landscape.ron immediately so changes persist even if
                 // the user exits without doing File > Save Campaign.
-                if let Some(dir) = campaign_dir {
-                    let landscape_path = dir.join("data/landscape.ron");
+                if let Some(dir) = ctx.campaign_dir {
+                    let landscape_path = dir.join(ctx.data_file);
                     let ron_config = ron::ser::PrettyConfig::new()
                         .struct_names(false)
                         .enumerate_arrays(false);

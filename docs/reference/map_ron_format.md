@@ -91,6 +91,41 @@ Map `landscape_placements` reference reusable definitions from
 `data/landscape_mesh_registry.ron`. SDK/importer-created landscape mesh IDs
 start at `11000`.
 
+### Terrain IDs (TerrainId = u32)
+
+Valid range: 13000–13099 built-in; 13100+ campaign-defined.
+
+**Built-in terrain IDs:**
+
+| ID | Name | Blocked | Procedural Vegetation |
+|----|------|---------|----------------------|
+| 13000 | Ground | No | None |
+| 13001 | Grass | No | GrassCover (grass blades) |
+| 13002 | Water | Yes | None |
+| 13003 | Lava | No | None |
+| 13004 | Swamp | No | None |
+| 13005 | Stone | No | None |
+| 13006 | Dirt | No | None |
+| 13007 | Forest | No | Forest (procedural trees) |
+| 13008 | Mountain | Yes | None (procedural rocks) |
+| 13009 | Sand | No | None |
+| 13010 | Snow | No | None |
+| 13011 | Ice | No | None |
+
+Campaign terrain IDs start at 13100 by convention (not enforced). Define custom
+terrain in your campaign's `data/terrain.ron`.
+
+**Usage in tile RON:**
+
+```ron
+(
+    terrain: 13001,   // Grass
+    wall_type: None,
+    blocked: false,
+    ...
+)
+```
+
 ## RON Format Specification
 
 ### Complete Map Structure
@@ -196,17 +231,20 @@ tiles: [
 ],
 ```
 
-**Tile Type IDs**:
+**Terrain Field**:
 
-- `0` - Floor (walkable, no special properties)
-- `1` - Wall (blocked, impassable)
-- `2` - Door (walkable, transition/barrier)
-- `3` - Water (special terrain, may require swimming)
-- `4` - Lava (damaging terrain)
-- `5` - Forest (outdoor terrain, blocks line of sight)
-- `6` - Mountain (impassable outdoor terrain)
-- `7` - Stairs Up (transition to different level)
-- `8` - Stairs Down (transition to different level)
+Each tile has a `terrain: TerrainId` field specifying the surface type. Use numeric
+IDs from the Terrain IDs table above (e.g. `terrain: 13001` for Grass). The `blocked`
+flag is set automatically based on the `TerrainDefinition` when creating tiles via the
+SDK; you can override it in the RON file.
+
+**Wall Type**:
+
+The `wall_type` field controls mesh geometry independently of terrain:
+- `None` — open floor (terrain surface only)
+- `Normal` — wall mesh rendered at this tile
+- `Door` — door mesh (passable when unlocked)
+- `Torch` — wall with torch light source
 
 **Important**:
 

@@ -9,7 +9,8 @@
 #[cfg(test)]
 mod visual_quality_validation_tests {
 
-    use antares::domain::world::{GrassDensity, Map, TerrainType, TreeType};
+    use antares::domain::world::terrain::{TERRAIN_FOREST, TERRAIN_GRASS};
+    use antares::domain::world::{GrassDensity, Map, TreeType};
     use std::collections::BTreeSet;
     use std::path::PathBuf;
 
@@ -441,7 +442,7 @@ mod visual_quality_validation_tests {
         let map = load_vegetation_validation_map();
 
         let has_tree_metadata_stress = map.tiles.iter().any(|tile| {
-            tile.terrain == TerrainType::Forest
+            tile.terrain == TERRAIN_FOREST
                 && tile.visual.tree_type.is_some()
                 && tile.visual.width_x.is_some()
                 && tile.visual.width_z.is_some()
@@ -451,7 +452,7 @@ mod visual_quality_validation_tests {
         });
 
         let has_grass_metadata_stress = map.tiles.iter().any(|tile| {
-            tile.terrain == TerrainType::Grass
+            tile.terrain == TERRAIN_GRASS
                 && tile.visual.grass_density.is_some()
                 && tile.visual.grass_blade_config.is_some()
                 && tile.visual.color_tint.is_some()

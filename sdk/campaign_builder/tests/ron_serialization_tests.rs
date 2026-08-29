@@ -55,6 +55,7 @@ fn test_ron_serialization() {
         stock_templates_file: "data/npc_stock_templates.ron".to_string(),
         furniture_file: "data/furniture.ron".to_string(),
         landscape_file: "data/landscape.ron".to_string(),
+        terrain_file: "data/terrain.ron".to_string(),
         levels_file: "data/levels.ron".to_string(),
         level_up_mode: LevelUpMode::Auto,
         base_xp: 1000,

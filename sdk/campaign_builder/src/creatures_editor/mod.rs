@@ -140,6 +140,14 @@ pub struct CreaturesEditorState {
     pub validation_warnings: Vec<String>,
     pub validation_info: Vec<String>,
     pub last_validated_mesh_index: Option<usize>,
+    /// Guard flag: `true` once creatures have been successfully loaded from disk
+    /// during this session.  Used by `do_save_campaign` to prevent an empty
+    /// default `Vec` from overwriting a valid `creatures.ron` file before any
+    /// load has occurred.  Reset to `false` by `CreaturesEditorState::new()`
+    /// so that a new-campaign or app-restart state never triggers a premature
+    /// save.
+    pub loaded_from_file: bool,
+
     /// Two-step delete confirmation flag for the registry preview panel.
     ///
     /// When `true` the Delete button shows "⚠ Confirm Delete"; a second click
@@ -289,6 +297,7 @@ impl Default for CreaturesEditorState {
             show_save_as_dialog: false,
             save_as_path_buffer: String::new(),
 
+            loaded_from_file: false,
             registry_delete_confirm_pending: false,
 
             // Register Asset Dialog

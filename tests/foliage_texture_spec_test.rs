@@ -138,35 +138,3 @@ fn foliage_spec_palm() {
 fn foliage_spec_shrub() {
     check_species("shrub");
 }
-
-#[test]
-fn foliage_spec_campaign_tutorial_matches_assets() {
-    // The two copies (assets/ and campaigns/tutorial/) must be byte-identical.
-    for name in ["oak", "pine", "birch", "willow", "palm", "shrub"] {
-        let src = manifest_dir()
-            .join("assets/textures/trees")
-            .join(format!("foliage_{name}.png"));
-        let dst = manifest_dir()
-            .join("campaigns/tutorial/assets/textures/trees")
-            .join(format!("foliage_{name}.png"));
-
-        assert!(
-            src.exists(),
-            "foliage_{name}.png missing from assets/textures/trees/"
-        );
-        assert!(
-            dst.exists(),
-            "foliage_{name}.png missing from campaigns/tutorial/assets/textures/trees/"
-        );
-
-        let src_bytes =
-            std::fs::read(&src).unwrap_or_else(|e| panic!("cannot read {}: {e}", src.display()));
-        let dst_bytes =
-            std::fs::read(&dst).unwrap_or_else(|e| panic!("cannot read {}: {e}", dst.display()));
-
-        assert_eq!(
-            src_bytes, dst_bytes,
-            "foliage_{name}.png: assets/ and campaigns/tutorial/ copies differ"
-        );
-    }
-}

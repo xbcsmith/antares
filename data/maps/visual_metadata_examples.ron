@@ -22,7 +22,7 @@
         // ===== Section 1: Wall Height Variations (x: 0-4) =====
         // Castle walls - tall imposing fortifications
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -41,7 +41,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -61,7 +61,7 @@
         ),
         // Garden walls - short decorative borders
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: false,
             is_special: false,
@@ -80,7 +80,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: false,
             is_special: false,
@@ -102,7 +102,7 @@
         // ===== Section 2: Mountain Height Variations (x: 5-9) =====
         // Small hill
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: None,
             blocked: true,
             is_special: false,
@@ -122,7 +122,7 @@
         ),
         // Medium mountain
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: None,
             blocked: true,
             is_special: false,
@@ -142,7 +142,7 @@
         ),
         // Tall mountain
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: None,
             blocked: true,
             is_special: false,
@@ -162,7 +162,7 @@
         ),
         // Towering peak
         (
-            terrain: Mountain,
+            terrain: 13008,
             wall_type: None,
             blocked: true,
             is_special: false,
@@ -184,7 +184,7 @@
         // ===== Section 3: Color-Tinted Walls (x: 10-14) =====
         // Sandstone wall
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -204,7 +204,7 @@
         ),
         // Granite wall
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -224,7 +224,7 @@
         ),
         // Marble wall
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -244,7 +244,7 @@
         ),
         // Copper wall
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -266,7 +266,7 @@
         // ===== Section 4: Scaled Trees (x: 15-19) =====
         // Small sapling
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -286,7 +286,7 @@
         ),
         // Normal tree
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -306,7 +306,7 @@
         ),
         // Large ancient tree
         (
-            terrain: Forest,
+            terrain: 13007,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -328,7 +328,7 @@
         // ===== Section 5: Vertical Offset Variations (x: 20-24) =====
         // Sunken pit
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -348,7 +348,7 @@
         ),
         // Ground level
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -368,7 +368,7 @@
         ),
         // Raised platform
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -389,7 +389,7 @@
 
         // Fill remaining tiles with default ground
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -400,7 +400,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -411,7 +411,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -422,7 +422,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -433,7 +433,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -444,7 +444,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -455,7 +455,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -466,7 +466,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,
@@ -477,7 +477,7 @@
             event_trigger: None,
         ),
         (
-            terrain: Ground,
+            terrain: 13000,
             wall_type: None,
             blocked: false,
             is_special: false,

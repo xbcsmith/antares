@@ -1975,6 +1975,116 @@ impl CampaignBuilderApp {
         Ok(())
     }
 
+    /// Load custom terrain definitions from the campaign terrain RON file.
+    ///
+    /// Missing file is not an error — custom terrain support is opt-in per
+    /// campaign. When absent, only built-in terrain (IDs 13 000–13 011) is
+    /// available.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.load_terrain();
+    /// ```
+    pub fn load_terrain(&mut self) {
+        if let Some(defs) = read_ron_collection::<antares::domain::world::TerrainDefinition>(
+            &self.campaign_dir,
+            &self.campaign.terrain_file,
+            "terrain",
+            &mut self.ui_state.status_message,
+        ) {
+            let count = defs.len();
+            self.campaign_data.terrain_definitions = defs;
+            // Rebuild the merged DB: start from builtins, then overlay campaign entries.
+            let mut db = antares::domain::world::terrain::builtin_terrain_db();
+            let mut campaign_db = antares::domain::world::terrain::TerrainDatabase::new();
+            for def in &self.campaign_data.terrain_definitions {
+                let _ = campaign_db.add(def.clone());
+            }
+            db.merge(campaign_db);
+            self.campaign_data.terrain_db = db;
+            self.editor_registry
+                .terrain_editor_state
+                .reset_for_new_campaign();
+            self.editor_registry.terrain_editor_state.needs_initial_load = false;
+            self.editor_registry.terrain_editor_state.loaded_from_file = true;
+            self.logger.info(
+                category::FILE_IO,
+                &format!("Loaded {} custom terrain definitions", count),
+            );
+            self.ui_state.status_message = format!("Loaded {} custom terrain definitions", count);
+        } else {
+            self.campaign_data.terrain_definitions.clear();
+            // Reset to built-in terrain only.
+            self.campaign_data.terrain_db = antares::domain::world::terrain::builtin_terrain_db();
+            self.editor_registry
+                .terrain_editor_state
+                .reset_for_new_campaign();
+            self.editor_registry.terrain_editor_state.needs_initial_load = false;
+            self.logger
+                .debug(category::FILE_IO, "No terrain.ron found (opt-in)");
+        }
+    }
+
+    /// Save custom terrain definitions to the campaign terrain RON file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CampaignIoError`] when the terrain RON file cannot be
+    /// written or serialized.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.save_terrain()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn save_terrain(&mut self) -> Result<(), CampaignIoError> {
+        // Normalize texture_path entries to campaign-relative paths before
+        // writing.  This is the final safety net: it sanitizes any absolute
+        // paths that may exist in terrain_definitions (e.g. loaded from an
+        // older terrain.ron before the Browse-button fix was applied).
+        let normalized: Vec<antares::domain::world::terrain::TerrainDefinition>;
+        let defs_to_write: &[antares::domain::world::terrain::TerrainDefinition] =
+            if let Some(ref campaign_dir) = self.campaign_dir {
+                normalized = self
+                    .campaign_data
+                    .terrain_definitions
+                    .iter()
+                    .map(|def| antares::domain::world::terrain::TerrainDefinition {
+                        texture_path: terrain_editor::make_relative(
+                            std::path::Path::new(&def.texture_path),
+                            Some(campaign_dir),
+                        ),
+                        ..def.clone()
+                    })
+                    .collect();
+                &normalized
+            } else {
+                &self.campaign_data.terrain_definitions
+            };
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.terrain_file,
+            defs_to_write,
+            "terrain",
+        )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!(
+                "Saved {} custom terrain definitions",
+                self.campaign_data.terrain_definitions.len()
+            ),
+        );
+        Ok(())
+    }
+
     /// Save furniture definitions to the campaign furniture RON file.
     ///
     /// Returns an `Err` on failure so the caller can aggregate warnings.
@@ -2006,9 +2116,13 @@ impl CampaignBuilderApp {
                         // Step 1: Parse registry file as Vec<CreatureReference>
                         match ron::from_str::<Vec<CreatureReference>>(&contents) {
                             Ok(references) => {
-                                // Step 2: Load full definitions for each reference
+                                // Step 2: Load full definitions for each reference.
+                                // Entries whose asset file is missing or fails to parse
+                                // are skipped with a warning rather than aborting the
+                                // whole load — one bad reference must not prevent the
+                                // rest from loading.
                                 let mut creatures = Vec::new();
-                                let mut load_errors = Vec::new();
+                                let mut skip_count = 0usize;
 
                                 for reference in references {
                                     let creature_path = dir.join(&reference.filepath);
@@ -2029,54 +2143,53 @@ impl CampaignBuilderApp {
                                                     creatures.push(creature);
                                                 }
                                                 Err(e) => {
-                                                    load_errors.push(format!(
-                                                        "Failed to parse {}: {}",
-                                                        reference.filepath, e
-                                                    ));
+                                                    skip_count += 1;
+                                                    self.logger.warn(
+                                                        category::FILE_IO,
+                                                        &format!(
+                                                            "Skipping creature '{}': parse error: {}",
+                                                            reference.name, e
+                                                        ),
+                                                    );
                                                 }
                                             }
                                         }
                                         Err(e) => {
-                                            load_errors.push(format!(
-                                                "Failed to read {}: {}",
-                                                reference.filepath, e
-                                            ));
+                                            skip_count += 1;
+                                            self.logger.warn(
+                                                category::FILE_IO,
+                                                &format!(
+                                                    "Skipping creature '{}': file not found: {}",
+                                                    reference.name, e
+                                                ),
+                                            );
                                         }
                                     }
                                 }
 
-                                if load_errors.is_empty() {
-                                    let count = creatures.len();
-                                    self.campaign_data.creatures = creatures;
+                                // Always update creatures even if some entries were
+                                // skipped — a partial load is better than no load.
+                                let count = creatures.len();
+                                self.campaign_data.creatures = creatures;
+                                self.editor_registry.creatures_editor_state.loaded_from_file = true;
 
-                                    if let Some(ref mut manager) = self.asset_manager {
-                                        manager.mark_data_file_loaded(&creatures_file, count);
-                                    }
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_loaded(&creatures_file, count);
+                                }
 
+                                if skip_count == 0 {
                                     self.ui_state.status_message =
                                         format!("Loaded {} creatures", count);
                                 } else {
-                                    if let Some(ref mut manager) = self.asset_manager {
-                                        manager.mark_data_file_error(
-                                            &creatures_file,
-                                            &format!(
-                                                "{} errors loading creatures",
-                                                load_errors.len()
-                                            ),
-                                        );
-                                    }
-
                                     self.ui_state.status_message = format!(
-                                        "Loaded {} creatures with {} errors:\n{}",
-                                        creatures.len(),
-                                        load_errors.len(),
-                                        load_errors.join("\n")
+                                        "Loaded {} creatures ({} skipped — see log)",
+                                        count, skip_count
                                     );
-                                    self.logger.error(
+                                    self.logger.warn(
                                         category::FILE_IO,
                                         &format!(
-                                            "Creature loading errors: {}",
-                                            load_errors.join("\n")
+                                            "Loaded {} creatures, skipped {} due to errors",
+                                            count, skip_count
                                         ),
                                     );
                                 }
@@ -2301,7 +2414,7 @@ impl CampaignBuilderApp {
 
             let registry_ron_config = ron::ser::PrettyConfig::new()
                 .struct_names(false)
-                .enumerate_arrays(true)
+                .enumerate_arrays(false)
                 .separate_tuple_members(true)
                 .depth_limit(2);
 
@@ -3013,7 +3126,14 @@ impl CampaignBuilderApp {
         self.campaign_data.furniture_definitions.clear();
         self.editor_registry.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
         self.campaign_data.landscape_definitions.clear();
-        self.editor_registry.landscape_editor_state = landscape_editor::LandscapeEditorState::new();
+        self.editor_registry
+            .landscape_editor_state
+            .reset_for_new_campaign();
+        self.campaign_data.terrain_definitions.clear();
+        self.campaign_data.terrain_db = antares::domain::world::terrain::builtin_terrain_db();
+        self.editor_registry
+            .terrain_editor_state
+            .reset_for_new_campaign();
 
         self.editor_registry
             .objects_editor_state
@@ -3091,8 +3211,20 @@ impl CampaignBuilderApp {
             save_warnings.push(format!("Monsters: {}", e));
         }
 
-        if let Err(e) = self.save_creatures() {
-            save_warnings.push(format!("Creatures: {}", e));
+        // Guard: only write creatures if they were successfully loaded from
+        // disk during this session OR the user made explicit in-editor changes.
+        // An empty Vec that was never backed by a real file must NOT overwrite
+        // an existing file with `[]` — same root cause as the stock-template
+        // and levels wipe bugs.
+        let should_save_creatures = self.editor_registry.creatures_editor_state.loaded_from_file
+            || self
+                .editor_registry
+                .creatures_editor_state
+                .has_unsaved_changes();
+        if should_save_creatures {
+            if let Err(e) = self.save_creatures() {
+                save_warnings.push(format!("Creatures: {}", e));
+            }
         }
 
         if let Err(e) = self.save_conditions() {
@@ -3158,6 +3290,20 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_landscape() {
             save_warnings.push(format!("Landscape: {}", e));
+        }
+
+        // Guard: only write terrain if it was successfully loaded from disk
+        // during this session OR the user made explicit in-editor changes.
+        // An empty Vec that was never backed by a real file must NOT overwrite
+        // an existing terrain.ron with `[]` — same root cause as the creatures,
+        // stock-template, and levels wipe bugs.  The loaded_from_file flag is
+        // set by load_terrain() on success and cleared by reset_for_new_campaign().
+        let should_save_terrain = self.editor_registry.terrain_editor_state.loaded_from_file
+            || !self.campaign_data.terrain_definitions.is_empty();
+        if should_save_terrain {
+            if let Err(e) = self.save_terrain() {
+                save_warnings.push(format!("Terrain: {}", e));
+            }
         }
 
         if let Err(e) = self.save_objects() {
@@ -3344,7 +3490,16 @@ impl CampaignBuilderApp {
                     self.load_maps();
                     self.load_conditions();
                     self.load_furniture();
+                    self.editor_registry
+                        .landscape_editor_state
+                        .reset_for_new_campaign();
+                    self.campaign_data.landscape_definitions.clear();
                     self.load_landscape();
+                    self.editor_registry
+                        .terrain_editor_state
+                        .reset_for_new_campaign();
+                    self.campaign_data.terrain_definitions.clear();
+                    self.load_terrain();
 
                     // Load quests and dialogues
                     if let Err(e) = self.load_quests() {

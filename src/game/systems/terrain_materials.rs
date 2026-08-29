@@ -3,97 +3,29 @@
 
 //! Terrain material loading startup system.
 //!
-//! This module creates one [`StandardMaterial`] per terrain type by loading a
-//! PNG texture from `assets/textures/terrain/` via Bevy's [`AssetServer`].
-//! All nine handles are stored in the [`TerrainMaterialCache`] resource that
-//! is inserted into the world so that [`spawn_map`](crate::game::systems::map)
-//! can look up a cached handle instead of creating redundant allocations for
-//! every tile.
+//! This module creates one [`StandardMaterial`] per terrain definition by
+//! loading a PNG texture from `assets/textures/terrain/` via Bevy's
+//! [`AssetServer`]. All handles are stored in the [`TerrainMaterialCache`]
+//! resource that is inserted into the world so that
+//! [`spawn_map`](crate::game::systems::map) can look up a cached handle
+//! instead of creating redundant allocations for every tile.
+//!
+//! Terrain definitions are read from all terrain definitions in the active
+//! campaign's [`TerrainDatabase`] (or the built-in 12-entry database when no
+//! [`GameContent`] resource is present), making the material-loading system
+//! data-driven and automatically extensible as new terrain types are added.
 //!
 //! The system is registered as a `Startup` system inside
 //! [`MapRenderingPlugin::build`](crate::game::systems::map::MapRenderingPlugin).
 
-use crate::domain::world::TerrainType;
+use crate::application::resources::GameContent;
+use crate::domain::types::TerrainId;
+use crate::domain::world::terrain::{
+    builtin_terrain_db, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_LAVA,
+    TERRAIN_MOUNTAIN, TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
+};
 use crate::game::resources::TerrainMaterialCache;
 use bevy::prelude::*;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Texture path constants
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Asset-server path for the ground terrain texture.
-pub const TEXTURE_GROUND: &str = "assets/textures/terrain/ground.png";
-/// Asset-server path for the grass terrain texture.
-pub const TEXTURE_GRASS: &str = "assets/textures/terrain/grass.png";
-/// Asset-server path for the stone terrain texture.
-pub const TEXTURE_STONE: &str = "assets/textures/terrain/stone.png";
-/// Asset-server path for the mountain terrain texture.
-pub const TEXTURE_MOUNTAIN: &str = "assets/textures/terrain/mountain.png";
-/// Asset-server path for the dirt terrain texture.
-pub const TEXTURE_DIRT: &str = "assets/textures/terrain/dirt.png";
-/// Asset-server path for the water terrain texture.
-pub const TEXTURE_WATER: &str = "assets/textures/terrain/water.png";
-/// Asset-server path for the lava terrain texture.
-pub const TEXTURE_LAVA: &str = "assets/textures/terrain/lava.png";
-/// Asset-server path for the swamp terrain texture.
-pub const TEXTURE_SWAMP: &str = "assets/textures/terrain/swamp.png";
-/// Asset-server path for the forest-floor terrain texture.
-pub const TEXTURE_FOREST_FLOOR: &str = "assets/textures/terrain/forest_floor.png";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Returns the asset-server texture path for each [`TerrainType`].
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::world::TerrainType;
-/// use antares::game::systems::terrain_materials::texture_path_for;
-///
-/// assert_eq!(texture_path_for(TerrainType::Grass), "assets/textures/terrain/grass.png");
-/// assert_eq!(texture_path_for(TerrainType::Water), "assets/textures/terrain/water.png");
-/// ```
-pub fn texture_path_for(terrain: TerrainType) -> &'static str {
-    match terrain {
-        TerrainType::Ground => TEXTURE_GROUND,
-        TerrainType::Grass => TEXTURE_GRASS,
-        TerrainType::Stone => TEXTURE_STONE,
-        TerrainType::Mountain => TEXTURE_MOUNTAIN,
-        TerrainType::Dirt => TEXTURE_DIRT,
-        TerrainType::Water => TEXTURE_WATER,
-        TerrainType::Lava => TEXTURE_LAVA,
-        TerrainType::Swamp => TEXTURE_SWAMP,
-        TerrainType::Forest => TEXTURE_FOREST_FLOOR,
-    }
-}
-
-/// Returns the `perceptual_roughness` value for each [`TerrainType`] per the
-/// implementation plan (Section 1.3).
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::world::TerrainType;
-/// use antares::game::systems::terrain_materials::roughness_for;
-///
-/// assert!((roughness_for(TerrainType::Water) - 0.10).abs() < f32::EPSILON);
-/// assert!((roughness_for(TerrainType::Ground) - 0.95).abs() < f32::EPSILON);
-/// ```
-pub fn roughness_for(terrain: TerrainType) -> f32 {
-    match terrain {
-        TerrainType::Ground => 0.95,
-        TerrainType::Grass => 0.90,
-        TerrainType::Stone => 0.75,
-        TerrainType::Mountain => 0.85,
-        TerrainType::Dirt => 0.92,
-        TerrainType::Water => 0.10,
-        TerrainType::Lava => 0.60,
-        TerrainType::Swamp => 0.88,
-        TerrainType::Forest => 0.90,
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Startup system
@@ -102,7 +34,9 @@ pub fn roughness_for(terrain: TerrainType) -> f32 {
 /// Bevy `Startup` system that loads terrain textures and inserts a fully
 /// populated [`TerrainMaterialCache`] resource into the world.
 ///
-/// For each of the nine [`TerrainType`] variants the system:
+/// For each terrain definition in the active campaign's [`TerrainDatabase`]
+/// (falling back to the built-in 12-entry database when no [`GameContent`]
+/// resource is present) the system:
 ///
 /// 1. **Synchronously** reads and decodes the PNG texture from disk (via
 ///    [`load_terrain_image_sync`]) and registers each image with the
@@ -112,7 +46,7 @@ pub fn roughness_for(terrain: TerrainType) -> f32 {
 ///    large terrain PNG files finish their async decode, permanently locking a
 ///    wrong texture slot into the material's GPU buffer.
 /// 2. Creates a [`StandardMaterial`] with `base_color_texture` set and the
-///    per-terrain `perceptual_roughness` value from the implementation plan.
+///    per-terrain `perceptual_roughness` value from the terrain definition.
 /// 3. Stores the material handle in [`TerrainMaterialCache`].
 ///
 /// The cache is then accessible to [`spawn_map`](crate::game::systems::map) so
@@ -123,43 +57,35 @@ pub fn roughness_for(terrain: TerrainType) -> f32 {
 /// * `commands`     - Used to insert the finished cache as a world resource.
 /// * `asset_server` - Bevy asset server; used as async-load fallback only.
 /// * `materials`    - Mutable access to the `Assets<StandardMaterial>` storage.
-/// * `images`       - Mutable access to `Assets<Image>` for synchronous insertion.
+/// * `content`      - Optional campaign content; falls back to builtin DB when absent.
 pub fn load_terrain_materials_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    content: Option<Res<GameContent>>,
 ) {
     let mut cache = TerrainMaterialCache::default();
+
+    let terrain_db = content
+        .as_deref()
+        .map(|c| c.0.terrain.clone())
+        .unwrap_or_else(builtin_terrain_db);
 
     // Determine the asset root that the AssetPlugin was configured to use.
     // This mirrors the logic in `main()` where BEVY_ASSET_ROOT is set to the
     // campaign root before the app is built.
     let asset_root = std::env::var("BEVY_ASSET_ROOT").unwrap_or_default();
 
-    // All nine terrain types in a single loop to avoid repetition.
-    let terrain_types = [
-        TerrainType::Ground,
-        TerrainType::Grass,
-        TerrainType::Stone,
-        TerrainType::Mountain,
-        TerrainType::Dirt,
-        TerrainType::Water,
-        TerrainType::Lava,
-        TerrainType::Swamp,
-        TerrainType::Forest,
-    ];
-
-    for terrain in terrain_types {
-        let texture_path = texture_path_for(terrain);
-        let texture_handle = load_terrain_image_sync(texture_path, &asset_root, &asset_server);
+    for def in terrain_db.all_definitions() {
+        let texture_handle = load_terrain_image_sync(&def.texture_path, &asset_root, &asset_server);
 
         let material_handle = materials.add(StandardMaterial {
             base_color_texture: Some(texture_handle),
-            perceptual_roughness: roughness_for(terrain),
+            perceptual_roughness: def.roughness,
             ..default()
         });
 
-        cache.set(terrain, material_handle);
+        cache.set(def.id, material_handle);
     }
 
     commands.insert_resource(cache);
@@ -178,17 +104,24 @@ pub fn load_terrain_materials_system(
 /// # System Parameters
 ///
 /// * `terrain_cache` - Cached terrain material handles created at startup.
-/// * `materials` - Mutable access to the terrain [`StandardMaterial`] assets.
+/// * `materials`     - Mutable access to the terrain [`StandardMaterial`] assets.
+/// * `content`       - Optional campaign content; falls back to builtin DB when absent.
 pub(crate) fn refresh_terrain_materials_after_startup_allocations_system(
     terrain_cache: Option<Res<TerrainMaterialCache>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    content: Option<Res<GameContent>>,
 ) {
     let Some(terrain_cache) = terrain_cache else {
         return;
     };
 
-    for terrain in all_terrain_types() {
-        let Some(material_handle) = terrain_cache.get(terrain) else {
+    let terrain_db = content
+        .as_deref()
+        .map(|c| c.0.terrain.clone())
+        .unwrap_or_else(builtin_terrain_db);
+
+    for def in terrain_db.all_definitions() {
+        let Some(material_handle) = terrain_cache.get(def.id) else {
             continue;
         };
         let Some(mut material) = materials.get_mut(material_handle) else {
@@ -202,7 +135,7 @@ pub(crate) fn refresh_terrain_materials_after_startup_allocations_system(
         if let Some(texture_handle) = material.base_color_texture.clone() {
             material.base_color_texture = Some(texture_handle);
         }
-        material.perceptual_roughness = roughness_for(terrain);
+        material.perceptual_roughness = def.roughness;
     }
 }
 
@@ -268,20 +201,6 @@ fn load_terrain_image_sync(
     }
 }
 
-fn all_terrain_types() -> [TerrainType; 9] {
-    [
-        TerrainType::Ground,
-        TerrainType::Grass,
-        TerrainType::Stone,
-        TerrainType::Mountain,
-        TerrainType::Dirt,
-        TerrainType::Water,
-        TerrainType::Lava,
-        TerrainType::Swamp,
-        TerrainType::Forest,
-    ]
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Diagnostics
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,7 +245,7 @@ pub fn debug_allocate_dummy_images_system(
 /// `base_color_texture` handle resolves to, a few seconds after startup.
 ///
 /// Used to diagnose intermittent wrong-texture-on-terrain reports: for every
-/// [`TerrainType`] it logs the texture's asset path, load state, and pixel
+/// terrain ID it logs the texture's asset path, load state, and pixel
 /// dimensions, and it also logs every `Image` asset that has **no** asset path
 /// (runtime-generated canvases such as the mini-map). Comparing the two lists
 /// identifies exactly which image a corrupted tile is bound to.
@@ -385,36 +304,36 @@ pub fn debug_terrain_texture_bindings_system(
         return;
     };
 
-    let terrain_types = [
-        TerrainType::Ground,
-        TerrainType::Grass,
-        TerrainType::Stone,
-        TerrainType::Mountain,
-        TerrainType::Dirt,
-        TerrainType::Water,
-        TerrainType::Lava,
-        TerrainType::Swamp,
-        TerrainType::Forest,
+    let terrain_ids: [TerrainId; 9] = [
+        TERRAIN_GROUND,
+        TERRAIN_GRASS,
+        TERRAIN_STONE,
+        TERRAIN_MOUNTAIN,
+        TERRAIN_DIRT,
+        TERRAIN_WATER,
+        TERRAIN_LAVA,
+        TERRAIN_SWAMP,
+        TERRAIN_FOREST,
     ];
 
-    for terrain in terrain_types {
+    for terrain in terrain_ids {
         let Some(material_handle) = cache.get(terrain) else {
-            tracing::info!("terrain-diag: {terrain:?}: no cached material");
+            tracing::info!("terrain-diag: {terrain}: no cached material");
             continue;
         };
         let Some(material) = materials.get(material_handle) else {
-            tracing::info!("terrain-diag: {terrain:?}: material asset missing");
+            tracing::info!("terrain-diag: {terrain}: material asset missing");
             continue;
         };
         match &material.base_color_texture {
-            None => tracing::info!("terrain-diag: {terrain:?}: no base_color_texture"),
+            None => tracing::info!("terrain-diag: {terrain}: no base_color_texture"),
             Some(texture_handle) => {
                 let id = texture_handle.id();
                 let path = asset_server.get_path(id);
                 let state = asset_server.get_load_state(id);
                 let dims = images.get(id).map(|image| image.texture_descriptor.size);
                 tracing::info!(
-                    "terrain-diag: {terrain:?}: frame={} id={id:?} path={path:?} state={state:?} dims={dims:?}",
+                    "terrain-diag: {terrain}: frame={} id={id:?} path={path:?} state={state:?} dims={dims:?}",
                     *frames
                 );
             }
@@ -440,116 +359,68 @@ pub fn debug_terrain_texture_bindings_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::world::terrain::{TERRAIN_ICE, TERRAIN_SAND, TERRAIN_SNOW};
 
-    /// All nine `TEXTURE_*` constants must be non-empty strings that start
-    /// with `"textures/terrain/"`.
+    /// All built-in terrain definitions must have non-empty texture paths pointing
+    /// at `assets/textures/terrain/`.
     #[test]
-    fn test_texture_path_constants_non_empty() {
-        let constants = [
-            TEXTURE_GROUND,
-            TEXTURE_GRASS,
-            TEXTURE_STONE,
-            TEXTURE_MOUNTAIN,
-            TEXTURE_DIRT,
-            TEXTURE_WATER,
-            TEXTURE_LAVA,
-            TEXTURE_SWAMP,
-            TEXTURE_FOREST_FLOOR,
-        ];
-
-        for constant in constants {
+    fn test_builtin_terrain_definitions_have_valid_texture_paths() {
+        let db = builtin_terrain_db();
+        for def in db.all_definitions() {
             assert!(
-                !constant.is_empty(),
-                "Texture path constant must not be empty: got empty string"
+                !def.texture_path.is_empty(),
+                "terrain {} has an empty texture path",
+                def.name
             );
             assert!(
-                constant.starts_with("assets/textures/terrain/"),
-                "Texture path constant '{constant}' must start with 'assets/textures/terrain/'"
+                def.texture_path.starts_with("assets/textures/terrain/"),
+                "terrain {} texture path '{}' must start with 'assets/textures/terrain/'",
+                def.name,
+                def.texture_path
             );
         }
     }
 
-    /// All nine `TEXTURE_*` constants must be unique.
+    /// All built-in terrain roughness values must be in the Bevy PBR-valid range [0, 1].
     #[test]
-    fn test_texture_path_constants_unique() {
-        let mut paths = vec![
-            TEXTURE_GROUND,
-            TEXTURE_GRASS,
-            TEXTURE_STONE,
-            TEXTURE_MOUNTAIN,
-            TEXTURE_DIRT,
-            TEXTURE_WATER,
-            TEXTURE_LAVA,
-            TEXTURE_SWAMP,
-            TEXTURE_FOREST_FLOOR,
-        ];
-        paths.sort_unstable();
-        paths.dedup();
-        assert_eq!(paths.len(), 9, "All TEXTURE_* constants must be unique");
-    }
-
-    /// `texture_path_for` must return the correct constant for every variant.
-    #[test]
-    fn test_texture_path_for_all_variants() {
-        assert_eq!(texture_path_for(TerrainType::Ground), TEXTURE_GROUND);
-        assert_eq!(texture_path_for(TerrainType::Grass), TEXTURE_GRASS);
-        assert_eq!(texture_path_for(TerrainType::Stone), TEXTURE_STONE);
-        assert_eq!(texture_path_for(TerrainType::Mountain), TEXTURE_MOUNTAIN);
-        assert_eq!(texture_path_for(TerrainType::Dirt), TEXTURE_DIRT);
-        assert_eq!(texture_path_for(TerrainType::Water), TEXTURE_WATER);
-        assert_eq!(texture_path_for(TerrainType::Lava), TEXTURE_LAVA);
-        assert_eq!(texture_path_for(TerrainType::Swamp), TEXTURE_SWAMP);
-        assert_eq!(texture_path_for(TerrainType::Forest), TEXTURE_FOREST_FLOOR);
-    }
-
-    /// `roughness_for` must return the values specified in the implementation
-    /// plan for every terrain variant.
-    #[test]
-    fn test_roughness_for_all_variants() {
-        let expected: &[(TerrainType, f32)] = &[
-            (TerrainType::Ground, 0.95),
-            (TerrainType::Grass, 0.90),
-            (TerrainType::Stone, 0.75),
-            (TerrainType::Mountain, 0.85),
-            (TerrainType::Dirt, 0.92),
-            (TerrainType::Water, 0.10),
-            (TerrainType::Lava, 0.60),
-            (TerrainType::Swamp, 0.88),
-            (TerrainType::Forest, 0.90),
-        ];
-
-        for (terrain, expected_roughness) in expected {
-            let actual = roughness_for(*terrain);
+    fn test_builtin_terrain_definitions_have_valid_roughness_values() {
+        let db = builtin_terrain_db();
+        for def in db.all_definitions() {
             assert!(
-                (actual - expected_roughness).abs() < f32::EPSILON,
-                "roughness_for({terrain:?}): expected {expected_roughness}, got {actual}"
+                (0.0..=1.0).contains(&def.roughness),
+                "terrain {} roughness {} is outside [0.0, 1.0]",
+                def.name,
+                def.roughness
             );
         }
     }
 
-    /// All roughness values must be in the physically plausible `[0.0, 1.0]`
-    /// range that Bevy's PBR pipeline accepts.
+    /// Sand, Snow, and Ice built-in definitions must be present and have
+    /// distinct texture paths (they were added in Phase 3).
     #[test]
-    fn test_roughness_for_values_in_valid_range() {
-        let variants = [
-            TerrainType::Ground,
-            TerrainType::Grass,
-            TerrainType::Stone,
-            TerrainType::Mountain,
-            TerrainType::Dirt,
-            TerrainType::Water,
-            TerrainType::Lava,
-            TerrainType::Swamp,
-            TerrainType::Forest,
-        ];
-
-        for terrain in variants {
-            let roughness = roughness_for(terrain);
-            assert!(
-                (0.0..=1.0).contains(&roughness),
-                "roughness_for({terrain:?}) = {roughness} is outside [0.0, 1.0]"
-            );
-        }
+    fn test_builtin_sand_snow_ice_have_distinct_texture_paths() {
+        let db = builtin_terrain_db();
+        let sand = db
+            .get_by_id(TERRAIN_SAND)
+            .expect("Sand must be in builtin DB");
+        let snow = db
+            .get_by_id(TERRAIN_SNOW)
+            .expect("Snow must be in builtin DB");
+        let ice = db
+            .get_by_id(TERRAIN_ICE)
+            .expect("Ice must be in builtin DB");
+        assert_ne!(
+            sand.texture_path, snow.texture_path,
+            "Sand and Snow must have different textures"
+        );
+        assert_ne!(
+            snow.texture_path, ice.texture_path,
+            "Snow and Ice must have different textures"
+        );
+        assert_ne!(
+            sand.texture_path, ice.texture_path,
+            "Sand and Ice must have different textures"
+        );
     }
 
     /// Build a minimal `App`, run the startup system, and assert that
@@ -575,7 +446,7 @@ mod tests {
             .expect("TerrainMaterialCache must be inserted by load_terrain_materials_system");
 
         assert!(
-            cache.is_fully_loaded(),
+            cache.is_fully_loaded(&builtin_terrain_db()),
             "TerrainMaterialCache must be fully loaded after the startup system runs"
         );
     }
@@ -602,22 +473,11 @@ mod tests {
             .get_resource::<TerrainMaterialCache>()
             .expect("TerrainMaterialCache must be present");
 
-        let variants = [
-            TerrainType::Ground,
-            TerrainType::Grass,
-            TerrainType::Stone,
-            TerrainType::Mountain,
-            TerrainType::Dirt,
-            TerrainType::Water,
-            TerrainType::Lava,
-            TerrainType::Swamp,
-            TerrainType::Forest,
-        ];
-
-        for terrain in variants {
+        for def in builtin_terrain_db().all_definitions() {
             assert!(
-                cache.get(terrain).is_some(),
-                "get({terrain:?}) must return Some after startup system runs"
+                cache.get(def.id).is_some(),
+                "get({}) must return Some after startup system runs",
+                def.id
             );
         }
     }
@@ -648,29 +508,18 @@ mod tests {
             .get_resource::<Assets<StandardMaterial>>()
             .expect("Assets<StandardMaterial> resource should exist");
 
-        let variants = [
-            TerrainType::Ground,
-            TerrainType::Grass,
-            TerrainType::Stone,
-            TerrainType::Mountain,
-            TerrainType::Dirt,
-            TerrainType::Water,
-            TerrainType::Lava,
-            TerrainType::Swamp,
-            TerrainType::Forest,
-        ];
-
-        for terrain in variants {
+        for def in builtin_terrain_db().all_definitions() {
             let handle = cache
-                .get(terrain)
-                .unwrap_or_else(|| panic!("Expected cached material handle for {terrain:?}"));
+                .get(def.id)
+                .unwrap_or_else(|| panic!("Expected cached material handle for {}", def.id));
             let material = materials
                 .get(handle)
-                .unwrap_or_else(|| panic!("Expected material asset for {terrain:?}"));
+                .unwrap_or_else(|| panic!("Expected material asset for {}", def.id));
 
             assert!(
                 material.base_color_texture.is_some(),
-                "Cached material for {terrain:?} must preserve base_color_texture"
+                "Cached material for {} must preserve base_color_texture",
+                def.id
             );
         }
     }
@@ -689,7 +538,7 @@ mod tests {
             ..default()
         });
         let mut cache = TerrainMaterialCache::default();
-        cache.set(TerrainType::Water, material_handle.clone());
+        cache.set(TERRAIN_WATER, material_handle.clone());
 
         app.add_plugins(bevy::app::PluginGroup::set(
             bevy::MinimalPlugins,
@@ -714,7 +563,12 @@ mod tests {
 
         assert_eq!(material.base_color_texture, Some(texture_handle));
         assert!(
-            (material.perceptual_roughness - roughness_for(TerrainType::Water)).abs()
+            (material.perceptual_roughness
+                - builtin_terrain_db()
+                    .get_by_id(TERRAIN_WATER)
+                    .unwrap()
+                    .roughness)
+                .abs()
                 < f32::EPSILON
         );
     }
@@ -743,5 +597,35 @@ mod tests {
                 .is_some(),
             "refresh without TerrainMaterialCache should leave material storage intact"
         );
+    }
+
+    /// Sand, Snow, and Ice must be present in the cache after the startup system runs.
+    #[test]
+    fn test_load_terrain_materials_system_loads_sand_snow_ice() {
+        let mut app = App::new();
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .add_systems(Startup, load_terrain_materials_system);
+
+        app.update();
+
+        let cache = app
+            .world()
+            .get_resource::<TerrainMaterialCache>()
+            .expect("TerrainMaterialCache must be inserted");
+
+        // Sand, Snow, and Ice must now be in the cache (Phase 3 added them to builtin DB)
+        for id in [TERRAIN_SAND, TERRAIN_SNOW, TERRAIN_ICE] {
+            assert!(
+                cache.get(id).is_some(),
+                "Cache must have handle for built-in terrain ID {id}"
+            );
+        }
+        assert!(cache.is_fully_loaded(&builtin_terrain_db()));
     }
 }

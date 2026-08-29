@@ -1222,7 +1222,7 @@ mod tests {
             version: "1.0.0".to_string(),
             author: "Test Author".to_string(),
             description: "Test desc".to_string(),
-            engine_version: "0.1.0".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
             starting_map: "mysterious_dungeon".to_string(),
             starting_position: (0, 0),
             starting_direction: "north".to_string(),

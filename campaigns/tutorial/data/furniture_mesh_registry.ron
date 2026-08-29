@@ -1,8 +1,8 @@
 [
     (
         id: 10001,
-        name: "Ancient Treasure Chest",
-        filepath: "assets/furniture/seating/ancient_treasure_chest.ron",
+        name: "Sandstone Throne",
+        filepath: "assets/furniture/seating/sandstone_throne.ron",
     ),
     (
         id: 10002,
@@ -38,5 +38,15 @@
         id: 10008,
         name: "Astronomer Alter",
         filepath: "assets/furniture/storage/astronomer_alter.ron",
+    ),
+    (
+        id: 10009,
+        name: "Stone Throne",
+        filepath: "assets/furniture/seating/stone_throne.ron",
+    ),
+    (
+        id: 10010,
+        name: "Frozen Crown Throne",
+        filepath: "assets/furniture/seating/frozen_crown_throne.ron",
     ),
 ]

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Focused state structs extracted from [`super::CampaignBuilderApp`].
@@ -23,7 +23,6 @@ use super::*;
 /// These are the authoritative in-memory copies of every serialisable
 /// collection. They are loaded from RON files by the methods in
 /// [`super::campaign_io`] and are written back to disk on every save.
-#[derive(Default)]
 pub struct CampaignData {
     /// Items loaded from `data/items.ron`.
     pub items: Vec<Item>,
@@ -69,6 +68,43 @@ pub struct CampaignData {
 
     /// Object entries resolved from `data/object_mesh_registry.ron`.
     pub objects: Vec<objects_editor::ObjectEntry>,
+
+    /// Custom terrain definitions loaded from `data/terrain.ron`.
+    ///
+    /// Built-in terrain (IDs 13 000–13 011) is NOT stored here; it is
+    /// baked into [`Self::terrain_db`] via [`builtin_terrain_db`]. Only
+    /// campaign-authored overrides and additions live here.
+    pub terrain_definitions: Vec<antares::domain::world::TerrainDefinition>,
+
+    /// Merged terrain database: built-in terrain + campaign overrides from
+    /// [`Self::terrain_definitions`]. Rebuilt by `load_terrain()` and by the
+    /// `EditorTab::Terrain` render arm every frame.
+    pub terrain_db: antares::domain::world::TerrainDatabase,
+}
+
+impl Default for CampaignData {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            spells: Vec::new(),
+            monsters: Vec::new(),
+            conditions: Vec::new(),
+            furniture_definitions: Vec::new(),
+            landscape_definitions: Vec::new(),
+            maps: Vec::new(),
+            quests: Vec::new(),
+            dialogues: Vec::new(),
+            stock_templates: Vec::new(),
+            proficiencies: Vec::new(),
+            skills: Vec::new(),
+            creatures: Vec::new(),
+            levels: Vec::new(),
+            objects: Vec::new(),
+            terrain_definitions: Vec::new(),
+            // Seed the merged DB with builtins so it is never empty.
+            terrain_db: antares::domain::world::terrain::builtin_terrain_db(),
+        }
+    }
 }
 
 // ─── EditorRegistry ──────────────────────────────────────────────────────────
@@ -111,6 +147,9 @@ pub struct EditorRegistry {
 
     /// Landscape editor state.
     pub landscape_editor_state: LandscapeEditorState,
+
+    /// Terrain editor state.
+    pub terrain_editor_state: terrain_editor::TerrainEditorState,
 
     /// Objects editor state.
     pub objects_editor_state: objects_editor::ObjectsEditorState,
@@ -157,6 +196,7 @@ impl Default for EditorRegistry {
             conditions_editor_state: ConditionsEditorState::new(),
             furniture_editor_state: furniture_editor::FurnitureEditorState::new(),
             landscape_editor_state: LandscapeEditorState::new(),
+            terrain_editor_state: terrain_editor::TerrainEditorState::new(),
             objects_editor_state: objects_editor::ObjectsEditorState::new(),
             maps_editor_state: MapsEditorState::new(),
             quest_editor_state: QuestEditorState::default(),

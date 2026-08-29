@@ -12,7 +12,8 @@
 use crate::application::resources::GameContent;
 use crate::application::{GameMode, GameState, MoveHandleError};
 use crate::domain::types::Position;
-use crate::domain::world::{self, MovementError, TerrainType, VISIBILITY_RADIUS};
+use crate::domain::world::terrain::TERRAIN_WATER;
+use crate::domain::world::{self, MovementError, VISIBILITY_RADIUS};
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::systems::combat::VictorySummaryRoot;
@@ -121,11 +122,13 @@ pub fn movement_blocked_by_cooldown(
 ///
 /// # Examples
 ///
-/// ```
-/// use antares::application::GameState;
-/// use antares::game::systems::input::{handle_exploration_movement, FrameInputIntent};
+/// ```no_run
+/// use antares::game::systems::input::FrameInputIntent;
 ///
-/// let _ = (handle_exploration_movement, FrameInputIntent::default(), GameState::new());
+/// // handle_exploration_movement is called each frame by the Bevy exploration
+/// // input system. It owns the movement/turn dispatch loop and returns true
+/// // when the frame input was consumed by a movement action.
+/// let _intent = FrameInputIntent::default();
 /// ```
 #[allow(clippy::too_many_arguments)]
 pub fn handle_exploration_movement(
@@ -175,15 +178,35 @@ pub fn handle_exploration_movement(
     true
 }
 
-/// Returns `true` if `target` is a water tile and the party's Walk on Water
+/// Returns `true` if `target` is a water-mesh tile and the party's Walk on Water
 /// buff is active (`active_spells.walk_on_water > 0`).
-fn should_override_water(game_state: &GameState, target: Position) -> bool {
+///
+/// The check uses `TerrainMeshStyle::Water` from the terrain database, so any
+/// campaign terrain authored with `mesh_style: Water` enables the buff — not only
+/// the built-in `TERRAIN_WATER` (ID 13002).
+///
+/// When `terrain_db` is `None` (e.g. tests without game content loaded), falls
+/// back to the built-in constant check `t.terrain == TERRAIN_WATER`.
+fn should_override_water(
+    game_state: &GameState,
+    target: Position,
+    terrain_db: Option<&crate::domain::world::terrain::TerrainDatabase>,
+) -> bool {
+    use crate::domain::world::terrain::TerrainMeshStyle;
+
     game_state.active_spells.walk_on_water > 0
         && game_state
             .world
             .get_current_map()
             .and_then(|m| m.get_tile(target))
-            .is_some_and(|t| matches!(t.terrain, TerrainType::Water))
+            .is_some_and(|t| {
+                if let Some(db) = terrain_db {
+                    db.get_by_id(t.terrain)
+                        .is_some_and(|d| d.mesh_style == TerrainMeshStyle::Water)
+                } else {
+                    t.terrain == TERRAIN_WATER
+                }
+            })
 }
 
 /// Temporarily unblocks the tile at `target` so the movement pipeline allows
@@ -243,7 +266,8 @@ fn handle_move_forward(
         return false;
     }
 
-    let water_override = should_override_water(game_state, target);
+    let terrain_db = game_content.map(|c| &c.0.terrain);
+    let water_override = should_override_water(game_state, target, terrain_db);
 
     let mut attempt = |gs: &mut GameState| {
         if let Some(content) = game_content {
@@ -295,7 +319,8 @@ fn handle_move_back(
 ) -> bool {
     let back_facing = game_state.world.party_facing.turn_left().turn_left();
     let target = back_facing.forward(game_state.world.party_position);
-    let water_override = should_override_water(game_state, target);
+    let terrain_db = game_content.map(|c| &c.0.terrain);
+    let water_override = should_override_water(game_state, target, terrain_db);
 
     let mut attempt = |gs: &mut GameState| {
         if let Some(content) = game_content {
@@ -459,7 +484,7 @@ mod tests {
     fn make_world_with_water_tile() -> (crate::domain::world::World, crate::domain::types::Position)
     {
         use crate::domain::types::{Direction, Position};
-        use crate::domain::world::{Map, TerrainType};
+        use crate::domain::world::{terrain::TERRAIN_WATER, Map};
 
         let mut map = Map::new(1, "Test".to_string(), "desc".to_string(), 5, 5);
         // Place a water tile at (2, 1) — directly north of (2, 2)
@@ -467,7 +492,7 @@ mod tests {
         // Mutate the existing tile in-place: set terrain to Water and blocked to
         // true (Water tiles auto-block, so this mirrors the in-game behaviour).
         if let Some(tile) = map.get_tile_mut(water_pos) {
-            tile.terrain = TerrainType::Water;
+            tile.terrain = TERRAIN_WATER;
             tile.blocked = true;
         }
 
@@ -488,7 +513,7 @@ mod tests {
         gs.world = world;
         gs.active_spells.walk_on_water = 0;
 
-        assert!(!should_override_water(&gs, water_pos));
+        assert!(!should_override_water(&gs, water_pos, None));
     }
 
     #[test]
@@ -498,7 +523,7 @@ mod tests {
         gs.world = world;
         gs.active_spells.walk_on_water = 10;
 
-        assert!(should_override_water(&gs, water_pos));
+        assert!(should_override_water(&gs, water_pos, None));
     }
 
     #[test]
@@ -509,7 +534,7 @@ mod tests {
         gs.world = world;
         gs.active_spells.walk_on_water = 10;
         // (2, 2) is a normal ground tile — Position is imported at module level
-        assert!(!should_override_water(&gs, Position::new(2, 2)));
+        assert!(!should_override_water(&gs, Position::new(2, 2), None));
     }
 
     #[test]
@@ -578,6 +603,87 @@ mod tests {
                 .iter()
                 .any(|message| message == "The door is locked."),
             "Expected the locked-door movement message to be recorded"
+        );
+    }
+
+    #[test]
+    fn test_walk_on_water_override_applies_to_any_water_mesh_style_terrain() {
+        use crate::domain::types::Position;
+        use crate::domain::world::terrain::{
+            builtin_terrain_db, TerrainDefinition, TerrainMeshStyle, TerrainVegetation,
+            TERRAIN_WATER,
+        };
+        use crate::domain::world::Map;
+
+        // Custom terrain with mesh_style: Water but NOT TERRAIN_WATER ID
+        let custom_water_id = 13_100u32;
+        let mut custom_db = builtin_terrain_db();
+        custom_db
+            .add(TerrainDefinition {
+                id: custom_water_id,
+                name: "Mystic Pool".to_string(),
+                texture_path: "assets/textures/terrain/water.png".to_string(),
+                roughness: 0.10,
+                mesh_style: TerrainMeshStyle::Water,
+                vegetation: TerrainVegetation::None,
+                blocked: true,
+                height: 0.0,
+                color: [0.3, 0.1, 0.8],
+            })
+            .unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "desc".to_string(), 5, 5);
+        let water_pos = Position::new(2, 1);
+
+        // Place the custom water terrain on the tile
+        if let Some(tile) = map.get_tile_mut(water_pos) {
+            tile.terrain = custom_water_id;
+            tile.blocked = true;
+        }
+
+        let mut world = crate::domain::world::World::new();
+        world.add_map(map);
+        world.set_current_map(1);
+        world.set_party_position(Position::new(2, 2));
+        world.party_facing = crate::domain::types::Direction::North;
+
+        let mut gs = crate::application::GameState::new();
+        gs.world = world;
+        gs.active_spells.walk_on_water = 10;
+
+        // With DB: custom water terrain triggers Walk on Water
+        assert!(
+            should_override_water(&gs, water_pos, Some(&custom_db)),
+            "Custom terrain with mesh_style:Water must trigger Walk on Water buff"
+        );
+
+        // Without DB (fallback to constant check): TERRAIN_WATER ID is NOT present
+        // (custom_water_id != TERRAIN_WATER), so fallback returns false
+        assert!(
+            !should_override_water(&gs, water_pos, None),
+            "Without DB, non-TERRAIN_WATER ID must not trigger Walk on Water"
+        );
+
+        // Verify the built-in TERRAIN_WATER ID still works with DB
+        let builtin_db = builtin_terrain_db();
+        let (world2, builtin_water_pos) = {
+            let mut map2 = Map::new(2, "Test2".to_string(), "desc".to_string(), 5, 5);
+            let pos = Position::new(2, 1);
+            if let Some(tile) = map2.get_tile_mut(pos) {
+                tile.terrain = TERRAIN_WATER;
+                tile.blocked = true;
+            }
+            let mut w = crate::domain::world::World::new();
+            w.add_map(map2);
+            w.set_current_map(2);
+            w.set_party_position(Position::new(2, 2));
+            w.party_facing = crate::domain::types::Direction::North;
+            (w, pos)
+        };
+        gs.world = world2;
+        assert!(
+            should_override_water(&gs, builtin_water_pos, Some(&builtin_db)),
+            "Built-in TERRAIN_WATER must still trigger Walk on Water with DB"
         );
     }
 }

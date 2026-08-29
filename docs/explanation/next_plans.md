@@ -260,7 +260,7 @@ In `sdk/campaign_builder/src/npc_editor/portrait_picker.rs`,
 
 Write a plan with a phased approach to update the training dialogues and sdk. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Fix Skill Trainer SDK Implementation Plan](./fix_skill_trainer_SDK_implementation_plan.md)
+✅ COMPLETED - [Fix Skill Trainer SDK Implementation Plan](./fix_skill_trainer_SDK_implementation_plan.md)
 
 ---
 
@@ -367,7 +367,7 @@ the classic separate-entity approach: the NPC handles all dialogue and the
 
 Write a plan with a phased approach to add the combat triggered NPC fight feature. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [NPC Combat Trigger Implementation Plan](./npc_combat_trigger_implementation_plan.md)
+✅ COMPLETED - [NPC Combat Trigger Implementation Plan](./npc_combat_trigger_implementation_plan.md)
 
 ---
 
@@ -589,7 +589,7 @@ ID range: **12000–12999** (object meshes).  Chosen to be above landscape
 
 Write a plan with a phased approach to refactor the object mesh registry. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Refactor Object Mesh Registry RON to ID-Based Format](./object_mesh_registry_refactor_implementation_plan.md)
+✅ COMPLETED - [Refactor Object Mesh Registry RON to ID-Based Format](./object_mesh_registry_refactor_implementation_plan.md)
 
 ---
 
@@ -602,3 +602,11 @@ We need to add a tray icon for the game like the ones we added for the SDK.
 ## Bugs
 
 Portraits should support jpg images.
+
+## Creatures
+
+@creatures.ron has the same stupid  /*[4]*/  that we removed from other RON files. And it is not loading into the SDK by default even though it exists in the campaign. 
+
+## Potions and Scrolls 
+
+Potions and Scrolls have no effect when used in or out of combat. 

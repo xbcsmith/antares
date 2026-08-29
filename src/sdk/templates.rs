@@ -33,7 +33,10 @@ use crate::domain::items::{
     WeaponClassification, WeaponData,
 };
 use crate::domain::types::{DiceRoll, ItemId, MapId};
-use crate::domain::world::{Map, TerrainType, Tile, WallType};
+use crate::domain::world::terrain::{
+    builtin_terrain_db, TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_STONE,
+};
+use crate::domain::world::{Map, Tile, WallType};
 
 // ===== Weapon Templates =====
 
@@ -758,11 +761,12 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
 /// assert_eq!(town.height, 20);
 /// ```
 pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
+    let db = builtin_terrain_db();
     let tiles = (0..(width * height))
         .map(|i| {
             let x = (i % width) as i32;
             let y = (i / width) as i32;
-            Tile::new(x, y, TerrainType::Grass, WallType::None)
+            Tile::new(x, y, TERRAIN_GRASS, WallType::None, &db)
         })
         .collect();
 
@@ -810,11 +814,12 @@ pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u3
 /// assert_eq!(dungeon.height, 30);
 /// ```
 pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
+    let db = builtin_terrain_db();
     let tiles = (0..(width * height))
         .map(|i| {
             let x = (i % width) as i32;
             let y = (i / width) as i32;
-            Tile::new(x, y, TerrainType::Stone, WallType::None)
+            Tile::new(x, y, TERRAIN_STONE, WallType::None, &db)
         })
         .collect();
 
@@ -850,11 +855,12 @@ pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height:
 /// assert_eq!(forest.height, 40);
 /// ```
 pub fn forest_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
+    let db = builtin_terrain_db();
     let tiles = (0..(width * height))
         .map(|i| {
             let x = (i % width) as i32;
             let y = (i / width) as i32;
-            Tile::new(x, y, TerrainType::Forest, WallType::None)
+            Tile::new(x, y, TERRAIN_FOREST, WallType::None, &db)
         })
         .collect();
 

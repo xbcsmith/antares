@@ -188,6 +188,8 @@ merges all registries at runtime using the numeric ID as a string key.
 | **10000–10999** | `furniture_mesh_registry.ron` | `FURNITURE_MESH_ID_MIN` *(TBC)* | 8    | Active                          |
 | **11000–11999** | `landscape_mesh_registry.ron` | `LANDSCAPE_MESH_ID_MIN`    | 7         | Active; constant exists in code |
 | **12000–12999** | `object_mesh_registry.ron`   | *(no named constant yet)*  | 4         | **Planned** — currently string-keyed (see next_plans.md) |
+| **13000–13099** | `data/terrain.ron` — Built-in terrain | `TERRAIN_ID_MIN` | 12 | Active; constants in `src/domain/types.rs` |
+| **13100+** | Campaign `data/terrain.ron` — Custom terrain | *(convention only)* | 0 | Open; 13100+ by convention |
 
 #### Item mesh sub-ranges (9000–9999)
 
@@ -241,6 +243,7 @@ RON files and are looked up by the domain layer at runtime.
 5. **Creature range 4000–8999** is theoretically open-ended (`4000..u32::MAX`
    in `CreatureIdManager`) but bleeds into the item mesh range (9000+) if a
    campaign creates enough custom creatures — there is no upper-bound guard.
+6. **Terrain ID range** (`13000+`) is now active: `TERRAIN_ID_MIN = 13_000` is defined in `src/domain/types.rs`. Built-in terrain occupies 13000–13011; campaign custom terrain starts at 13100 by convention.
 
 NPC `creature_id` values always fall in the 1000–1999 range. Monster `visual_id` values fall in the 1–999 range. The ranges are enforced by `CreatureIdManager` in the SDK.
 

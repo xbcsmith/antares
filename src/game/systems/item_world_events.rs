@@ -29,7 +29,8 @@
 use crate::application::resources::GameContent;
 use crate::domain::types::{ItemId, MapId, Position};
 use crate::domain::visual::item_mesh::ItemMeshDescriptor;
-use crate::domain::world::{MapEvent, TerrainType};
+use crate::domain::world::terrain::TERRAIN_GROUND;
+use crate::domain::world::MapEvent;
 use crate::game::components::billboard::Billboard;
 use crate::game::components::dropped_item::DroppedItem;
 use crate::game::resources::game_data::GameDataResource;
@@ -387,12 +388,17 @@ pub fn spawn_dropped_item_system(
             .and_then(|gs| gs.0.world.get_map(ev.map_id))
             .and_then(|m| m.get_tile(Position::new(ev.tile_x, ev.tile_y)))
             .map(|t| t.terrain)
-            .unwrap_or(TerrainType::Ground);
+            .unwrap_or(TERRAIN_GROUND);
 
-        let effective_floor_clearance = match tile_terrain {
-            TerrainType::Grass | TerrainType::Forest => DROPPED_ITEM_GRASS_FLOOR_CLEARANCE,
-            _ => DROPPED_ITEM_FLOOR_CLEARANCE,
-        };
+        let effective_floor_clearance =
+            if content.0.terrain.get_by_id(tile_terrain).is_some_and(|d| {
+                use crate::domain::world::terrain::TerrainVegetation;
+                d.vegetation != TerrainVegetation::None
+            }) {
+                DROPPED_ITEM_GRASS_FLOOR_CLEARANCE
+            } else {
+                DROPPED_ITEM_FLOOR_CLEARANCE
+            };
 
         // Compute the item's dynamic spawn Y so its lowest vertex clears the floor.
         //

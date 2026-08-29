@@ -2771,6 +2771,7 @@ mod tests {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         };
 
         manager.scan_references(&CampaignRefs {
@@ -2852,6 +2853,7 @@ mod tests {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         };
 
         manager.scan_references(&CampaignRefs {
@@ -3198,6 +3200,7 @@ mod tests {
                 skill_training_fee_multiplier: None,
                 skill_training_max_rank: None,
                 combat_switch: None,
+                suppress_flag: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_merchant_town".to_string(),
@@ -3224,6 +3227,7 @@ mod tests {
                 skill_training_fee_multiplier: None,
                 skill_training_max_rank: None,
                 combat_switch: None,
+                suppress_flag: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_wizard_arcturus_brother".to_string(),
@@ -3250,6 +3254,7 @@ mod tests {
                 skill_training_fee_multiplier: None,
                 skill_training_max_rank: None,
                 combat_switch: None,
+                suppress_flag: None,
             },
         ];
 
