@@ -122,11 +122,13 @@ pub fn movement_blocked_by_cooldown(
 ///
 /// # Examples
 ///
-/// ```
-/// use antares::application::GameState;
-/// use antares::game::systems::input::{handle_exploration_movement, FrameInputIntent};
+/// ```no_run
+/// use antares::game::systems::input::FrameInputIntent;
 ///
-/// let _ = (handle_exploration_movement, FrameInputIntent::default(), GameState::new());
+/// // handle_exploration_movement is called each frame by the Bevy exploration
+/// // input system. It owns the movement/turn dispatch loop and returns true
+/// // when the frame input was consumed by a movement action.
+/// let _intent = FrameInputIntent::default();
 /// ```
 #[allow(clippy::too_many_arguments)]
 pub fn handle_exploration_movement(

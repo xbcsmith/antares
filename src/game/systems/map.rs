@@ -8,6 +8,7 @@ use crate::domain::world::mark_visible_area;
 use crate::domain::world::CreatureBound;
 use crate::domain::world::SpriteReference;
 use crate::game::components::creature::{CreatureVisual, LodState};
+use crate::game::components::furniture::{FurnitureEntity, Interactable, InteractionType};
 use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
@@ -1233,6 +1234,148 @@ fn spawn_landscape_placements(
     }
 }
 
+/// Spawns an imported furniture mesh from a [`crate::domain::visual::CreatureDefinition`]
+/// asset, bypassing the procedural `spawn_furniture` path.
+///
+/// Used when a [`crate::domain::world::furniture::FurnitureDefinition`] carries
+/// `mesh_id: Some(_)` pointing to an entry in the
+/// [`crate::domain::world::ObjectMeshDatabase`].  The imported mesh is rendered
+/// using the same [`landscape_material`] path as landscape and event objects so
+/// that `texture_path` entries in the [`crate::domain::visual::MeshDefinition`]
+/// are resolved through the asset server.
+///
+/// Every spawned root entity receives:
+/// - [`MapEntity`] — map-ownership for despawn on map unload
+/// - [`TileCoord`] — grid position for interaction raycasting
+/// - [`FurnitureEntity`] — type/blocking metadata consumed by the interaction system
+/// - [`Interactable`] — when `resolved_type` has a mapped interaction (chests,
+///   chairs, torches, bookshelves, doors)
+///
+/// # Arguments
+///
+/// * `world_pos` — final world-space spawn position; the caller is responsible for
+///   computing tile-centre X/Z and applying
+///   [`crate::domain::visual::CreatureDefinition::foot_ground_offset`] for Y
+/// * `rotation_y` — optional Y-axis rotation in degrees from the map event
+/// * `scale` — effective scale resolved by [`resolve_furniture_fields`]
+/// * `resolved_type` — effective [`world::FurnitureType`] from
+///   [`resolve_furniture_fields`]; drives [`FurnitureEntity`] and [`Interactable`]
+/// * `flags` — effective flags (blocking, lit, locked) from the furniture definition
+///
+/// # Returns
+///
+/// The root entity ID of the spawned furniture hierarchy.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_imported_furniture_mesh(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    world_pos: Vec3,
+    rotation_y: Option<f32>,
+    scale: f32,
+    map_id: types::MapId,
+    position: types::Position,
+    creature_def: &crate::domain::visual::CreatureDefinition,
+    tint: Option<[f32; 3]>,
+    resolved_type: world::FurnitureType,
+    flags: &world::FurnitureFlags,
+) -> Entity {
+    let root = commands
+        .spawn((
+            Name::new(format!("FurnitureMesh: {:?}", resolved_type)),
+            Transform::from_translation(world_pos)
+                .with_rotation(Quat::from_rotation_y(
+                    rotation_y.unwrap_or(0.0).to_radians(),
+                ))
+                .with_scale(Vec3::splat(scale)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+        ))
+        .id();
+
+    for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+        let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
+        // landscape_material resolves texture_path via the asset server;
+        // it is the same path used by landscape placements and event meshes.
+        let material_handle = materials.add(landscape_material(mesh_def, tint, asset_server));
+
+        let transform = creature_def
+            .mesh_transforms
+            .get(mesh_index)
+            .map(|mt| {
+                Transform::from_translation(Vec3::from(mt.translation))
+                    .with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        mt.rotation[0],
+                        mt.rotation[1],
+                        mt.rotation[2],
+                    ))
+                    .with_scale(Vec3::from(mt.scale))
+            })
+            .unwrap_or_default();
+
+        let mut lod_mesh_handles = vec![mesh_handle.clone()];
+        let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
+            for lod_mesh_def in lod_levels {
+                lod_mesh_handles.push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
+            }
+            mesh_def.lod_distances.clone()
+        } else {
+            None
+        };
+
+        let mut child_entity = commands.spawn((
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(material_handle),
+            transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            Name::new(format!("FurnitureMesh Part {}", mesh_index)),
+        ));
+
+        if let Some(distances) = lod_distances {
+            child_entity.insert(LodState::new(lod_mesh_handles, distances));
+        }
+
+        let child = child_entity.id();
+        commands.entity(root).add_child(child);
+    }
+
+    // Attach interaction components identical to the procedural path so the
+    // interaction and cleanup systems treat imported furniture identically.
+    commands
+        .entity(root)
+        .insert(FurnitureEntity::new(resolved_type, flags.blocking));
+
+    let interaction = match resolved_type {
+        world::FurnitureType::Chest | world::FurnitureType::Barrel => {
+            Some((InteractionType::OpenChest, 1.5_f32))
+        }
+        world::FurnitureType::Chair | world::FurnitureType::Throne => {
+            Some((InteractionType::SitOnChair, 1.5_f32))
+        }
+        world::FurnitureType::Torch => Some((InteractionType::LightTorch, 2.0_f32)),
+        world::FurnitureType::Bookshelf => Some((InteractionType::ReadBookshelf, 2.0_f32)),
+        world::FurnitureType::Door => Some((InteractionType::OpenDoor, 1.5_f32)),
+        world::FurnitureType::Table | world::FurnitureType::Bench => None,
+    };
+
+    if let Some((interaction_type, distance)) = interaction {
+        commands
+            .entity(root)
+            .insert(Interactable::with_distance(interaction_type, distance));
+    }
+
+    root
+}
+
 /// Spawns mesh entities for all map events that carry a `mesh_id`.
 ///
 /// Iterates `map.events` and, for each event variant whose `mesh_id` field is `Some`
@@ -1258,12 +1401,10 @@ fn spawn_event_meshes(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    _asset_server: &AssetServer,
+    asset_server: &AssetServer,
     map: &world::Map,
     object_meshes: &world::ObjectMeshDatabase,
 ) {
-    use crate::game::systems::creature_spawning::spawn_creature;
-
     for (position, event) in map.events.iter() {
         let mesh_id_str: &str = match event {
             world::MapEvent::Treasure {
@@ -1286,21 +1427,85 @@ fn spawn_event_meshes(
 
         let x = position.x as f32;
         let y = position.y as f32;
-        let world_pos = bevy::math::Vec3::new(x + TILE_CENTER_OFFSET, 0.5, y + TILE_CENTER_OFFSET);
 
         let resolved = object_meshes.lookup(mesh_id_str);
 
         let root = if let Some(creature_def) = resolved {
-            spawn_creature(
-                commands,
-                creature_def,
-                meshes,
-                materials,
-                world_pos,
-                None,
-                None,
-                None,
-            )
+            // Lift the spawn position so the object's lowest vertex rests on the
+            // ground plane (Y = 0), matching the NPC/encounter spawning convention.
+            // The old hardcoded Y = 0.5 caused all event-mesh objects to float.
+            let ground_y = creature_def.foot_ground_offset();
+            let world_pos = Vec3::new(x + TILE_CENTER_OFFSET, ground_y, y + TILE_CENTER_OFFSET);
+
+            let root = commands
+                .spawn((
+                    Name::new(format!("EventMesh: {}", mesh_id_str)),
+                    Transform::from_translation(world_pos)
+                        .with_scale(Vec3::splat(creature_def.scale)),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                ))
+                .id();
+
+            for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+                let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
+                // Use landscape_material so texture_path is loaded via the asset
+                // server. spawn_creature only called material_definition_to_bevy /
+                // create_material_from_color, both of which ignore texture_path,
+                // which is why imported object meshes were rendering without textures.
+                // landscape_material expects an RGB tint ([f32; 3]); strip the alpha
+                // channel from the creature definition's RGBA color_tint.
+                let tint_rgb = creature_def.color_tint.map(|[r, g, b, _a]| [r, g, b]);
+                let material_handle =
+                    materials.add(landscape_material(mesh_def, tint_rgb, asset_server));
+
+                let transform = creature_def
+                    .mesh_transforms
+                    .get(mesh_index)
+                    .map(|mt| {
+                        Transform::from_translation(Vec3::from(mt.translation))
+                            .with_rotation(Quat::from_euler(
+                                EulerRot::XYZ,
+                                mt.rotation[0],
+                                mt.rotation[1],
+                                mt.rotation[2],
+                            ))
+                            .with_scale(Vec3::from(mt.scale))
+                    })
+                    .unwrap_or_default();
+
+                let mut lod_mesh_handles = vec![mesh_handle.clone()];
+                let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
+                    for lod_mesh_def in lod_levels {
+                        lod_mesh_handles.push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
+                    }
+                    mesh_def.lod_distances.clone()
+                } else {
+                    None
+                };
+
+                let mut child_entity = commands.spawn((
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(material_handle),
+                    transform,
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    Name::new(format!("EventMesh Part {}", mesh_index)),
+                ));
+
+                if let Some(distances) = lod_distances {
+                    child_entity.insert(LodState::new(lod_mesh_handles, distances));
+                }
+
+                let child = child_entity.id();
+                commands.entity(root).add_child(child);
+            }
+
+            root
         } else {
             if !mesh_id_str.is_empty() {
                 warn!(
@@ -1316,6 +1521,9 @@ fn spawn_event_meshes(
                 perceptual_roughness: 0.7,
                 ..default()
             });
+            // Place the centre of the 0.8-tall placeholder cube at Y = 0.4 so its
+            // bottom face sits flush with the ground plane (Y = 0).
+            let world_pos = Vec3::new(x + TILE_CENTER_OFFSET, 0.4, y + TILE_CENTER_OFFSET);
             commands
                 .spawn((
                     Mesh3d(placeholder_mesh),
@@ -2457,7 +2665,51 @@ fn spawn_map(
                         &content.0.furniture,
                     );
 
-                    {
+                    // When the resolved furniture definition carries a custom `mesh_id`,
+                    // use the imported mesh from the object mesh registry instead of
+                    // spawning a procedural mesh.  Falls back to procedural when the
+                    // definition has no mesh_id or the mesh cannot be resolved.
+                    let used_imported_mesh = (*furniture_id)
+                        .and_then(|id| content.0.furniture.get_by_id(id))
+                        .and_then(|def| def.mesh_id)
+                        .and_then(|mesh_id| {
+                            let resolved = content.0.object_meshes.lookup(&mesh_id.to_string());
+                            if resolved.is_none() {
+                                warn!(
+                                    mesh_id,
+                                    "Furniture mesh_id not found in object mesh registry; \
+                                     falling back to procedural"
+                                );
+                            }
+                            resolved
+                        })
+                        .map(|creature_def| {
+                            let x = position.x as f32;
+                            let y = position.y as f32;
+                            let world_pos = Vec3::new(
+                                x + TILE_CENTER_OFFSET,
+                                creature_def.foot_ground_offset(),
+                                y + TILE_CENTER_OFFSET,
+                            );
+                            spawn_imported_furniture_mesh(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &asset_server,
+                                world_pos,
+                                *rotation_y,
+                                resolved_scale,
+                                map.id,
+                                *position,
+                                creature_def,
+                                resolved_tint,
+                                resolved_type,
+                                &resolved_flags,
+                            );
+                        })
+                        .is_some();
+
+                    if !used_imported_mesh {
                         let mut ctx = procedural_meshes::MeshSpawnContext {
                             commands: &mut commands,
                             materials: &mut materials,
@@ -7025,6 +7277,182 @@ mod tests {
         assert!(
             app.world().get_entity(marker_entity).is_err(),
             "Entity should be despawned after the backing event is removed"
+        );
+    }
+
+    /// Furniture with a furniture_id whose FurnitureDefinition has a mesh_id
+    /// matching an ObjectMeshDatabase entry must spawn with a FurnitureEntity
+    /// component (i.e. it uses the imported-mesh path, not the placeholder path).
+    #[test]
+    fn test_spawn_map_uses_imported_mesh_for_furniture_with_mesh_id() {
+        use crate::domain::types::Position;
+        use crate::domain::world::furniture::FurnitureDefinition;
+        use crate::domain::world::{
+            FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType, Map, MapEvent,
+        };
+        use crate::game::components::furniture::FurnitureEntity;
+        use crate::sdk::database::ContentDatabase;
+        use std::io::Write;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        // Build a ContentDatabase with a furniture definition referencing mesh_id 10099
+        // and an ObjectMeshDatabase entry for "10099" loaded via a temp registry file.
+        let mut db = ContentDatabase::new();
+
+        db.furniture
+            .add(FurnitureDefinition {
+                id: 99,
+                name: "Custom Workbench".to_string(),
+                category: FurnitureCategory::Utility,
+                base_type: FurnitureType::Table,
+                material: FurnitureMaterial::Wood,
+                scale: 1.0,
+                color_tint: None,
+                flags: FurnitureFlags::default(),
+                icon: None,
+                tags: vec![],
+                mesh_id: Some(10099),
+                description: None,
+            })
+            .unwrap();
+
+        // insert_for_test is not available — build ObjectMeshDatabase via temp files.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let asset_dir = tmp.path().join("assets/meshes/objects");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+        let asset_path = asset_dir.join("custom_workbench.ron");
+        std::fs::File::create(&asset_path)
+            .unwrap()
+            .write_all(
+                br#"(
+    id: 10099,
+    name: "Custom Workbench Mesh",
+    meshes: [],
+    mesh_transforms: [],
+)"#,
+            )
+            .unwrap();
+
+        let registry_path = tmp.path().join("data/object_mesh_registry.ron");
+        std::fs::create_dir_all(tmp.path().join("data")).unwrap();
+        std::fs::File::create(&registry_path)
+            .unwrap()
+            .write_all(
+                br#"[
+    (
+        id: 10099,
+        name: "Custom Workbench Mesh",
+        filepath: "assets/meshes/objects/custom_workbench.ron",
+    ),
+]"#,
+            )
+            .unwrap();
+
+        db.object_meshes =
+            world::ObjectMeshDatabase::load_from_registry(&registry_path, tmp.path()).unwrap();
+
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let map_id: crate::domain::types::MapId = 1;
+        let pos = Position::new(3, 4);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            pos,
+            MapEvent::Furniture {
+                name: "Custom Workbench".to_string(),
+                furniture_id: Some(99),
+                furniture_type: FurnitureType::Table,
+                rotation_y: None,
+                scale: 1.0,
+                material: FurnitureMaterial::Wood,
+                flags: FurnitureFlags::default(),
+                color_tint: None,
+                key_item_id: None,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        app.update();
+
+        // The imported-mesh path must produce a FurnitureEntity component on the root.
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<&FurnitureEntity>();
+        let count = query.iter(&*world_ref).count();
+        assert!(
+            count >= 1,
+            "Expected at least one FurnitureEntity for furniture with mesh_id, got 0"
+        );
+    }
+
+    /// Furniture without a mesh_id must still spawn via the procedural path.
+    #[test]
+    fn test_spawn_map_falls_back_to_procedural_for_furniture_without_mesh_id() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{
+            FurnitureFlags, FurnitureMaterial, FurnitureType, Map, MapEvent,
+        };
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        let db = ContentDatabase::new(); // empty — no furniture definitions
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let map_id: crate::domain::types::MapId = 1;
+        let pos = Position::new(2, 2);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            pos,
+            MapEvent::Furniture {
+                name: "Plain Table".to_string(),
+                furniture_id: None,
+                furniture_type: FurnitureType::Table,
+                rotation_y: None,
+                scale: 1.0,
+                material: FurnitureMaterial::Wood,
+                flags: FurnitureFlags::default(),
+                color_tint: None,
+                key_item_id: None,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        app.update();
+
+        // Procedural furniture does not add FurnitureEntity for a plain Table
+        // (only Doors get FurnitureEntity in the procedural path at map-load time).
+        // What matters is that no panic occurs and the map renders.
+        let world_ref = app.world_mut();
+        let mut tile_query = world_ref.query::<&MapEntity>();
+        let entity_count = tile_query.iter(&*world_ref).count();
+        assert!(
+            entity_count > 0,
+            "Expected at least one MapEntity after map spawn with procedural furniture"
         );
     }
 }

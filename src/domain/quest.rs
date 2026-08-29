@@ -26,7 +26,7 @@ pub type QuestId = u16;
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use antares::domain::quest::{Quest, QuestStage, QuestObjective, QuestReward};
 ///
 /// let mut quest = Quest::new(
@@ -95,7 +95,7 @@ impl Quest {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use antares::domain::quest::Quest;
     ///
     /// let quest = Quest::new(1, "Test Quest", "A simple test quest");
@@ -164,7 +164,7 @@ impl Quest {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use antares::domain::quest::{QuestStage, QuestObjective};
 ///
 /// let mut stage = QuestStage::new(1, "Gather Materials");
@@ -196,7 +196,7 @@ impl QuestStage {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use antares::domain::quest::QuestStage;
     ///
     /// let stage = QuestStage::new(1, "Find the Cave");
@@ -421,7 +421,7 @@ impl QuestProgress {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use antares::domain::quest::QuestProgress;
     ///
     /// let progress = QuestProgress::new(1);

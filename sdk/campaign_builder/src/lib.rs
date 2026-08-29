@@ -1353,11 +1353,17 @@ impl eframe::App for CampaignBuilderApp {
                 }
             }
             EditorTab::Landscape => {
+                let mut landscape_ctx = EditorContext::new(
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.landscape_file,
+                    &mut self.unsaved_changes,
+                    &mut self.ui_state.status_message,
+                    &mut self.ui_state.file_load_merge_mode,
+                );
                 self.editor_registry.landscape_editor_state.show(
                     ui,
                     &mut self.campaign_data.landscape_definitions,
-                    self.campaign_dir.as_deref(),
-                    &mut self.unsaved_changes,
+                    &mut landscape_ctx,
                 );
                 if let Some(landscape_editor::LandscapeEditorSignal::OpenInObjImporter) =
                     self.editor_registry.landscape_editor_state.requested_signal.take()
@@ -1376,11 +1382,17 @@ impl eframe::App for CampaignBuilderApp {
                 }
             }
             EditorTab::Terrain => {
+                let mut terrain_ctx = EditorContext::new(
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.terrain_file,
+                    &mut self.unsaved_changes,
+                    &mut self.ui_state.status_message,
+                    &mut self.ui_state.file_load_merge_mode,
+                );
                 self.editor_registry.terrain_editor_state.show(
                     ui,
                     &mut self.campaign_data.terrain_definitions,
-                    self.campaign_dir.as_deref(),
-                    &mut self.unsaved_changes,
+                    &mut terrain_ctx,
                 );
                 // Rebuild the merged terrain DB from builtins + campaign overrides.
                 // O(12 + n) — negligible per frame.
@@ -1395,11 +1407,17 @@ impl eframe::App for CampaignBuilderApp {
                 self.campaign_data.terrain_db = db;
             }
             EditorTab::Objects => {
+                let mut objects_ctx = EditorContext::new(
+                    self.campaign_dir.as_ref(),
+                    "data/object_mesh_registry.ron",
+                    &mut self.unsaved_changes,
+                    &mut self.ui_state.status_message,
+                    &mut self.ui_state.file_load_merge_mode,
+                );
                 self.editor_registry.objects_editor_state.show(
                     ui,
                     &mut self.campaign_data.objects,
-                    self.campaign_dir.as_deref(),
-                    &mut self.unsaved_changes,
+                    &mut objects_ctx,
                 );
                 if let Some(objects_editor::ObjectsEditorSignal::OpenInObjImporter) =
                     self.editor_registry.objects_editor_state.requested_signal.take()

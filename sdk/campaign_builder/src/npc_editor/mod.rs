@@ -2561,6 +2561,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         self.merchant_dialogue_status_for_definition(&npc)
@@ -2614,6 +2616,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         self.merchant_dialogue_repair_action_for_definition(&npc)
@@ -2699,6 +2703,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let update = self
@@ -2896,6 +2902,8 @@ impl NpcEditorState {
                 .trim()
                 .parse::<u16>()
                 .ok(),
+            combat_switch: None,
+            suppress_flag: None,
         })
     }
 
@@ -3099,6 +3107,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         match self.trainer_dialogue_validation_for_definition(&npc) {
@@ -3195,6 +3205,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -3281,6 +3293,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -3430,6 +3444,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         match self.skill_trainer_dialogue_validation_for_definition(&npc) {
@@ -3527,6 +3543,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -3617,6 +3635,8 @@ impl NpcEditorState {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -3768,6 +3788,8 @@ impl NpcEditorState {
                 .trim()
                 .parse::<u16>()
                 .ok(),
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         // Perform the in-memory save and remember the result
@@ -4062,6 +4084,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
 
         state.start_edit_npc(0);
@@ -4596,6 +4620,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -4649,6 +4675,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
 
         // Edit it
@@ -4690,6 +4718,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         assert!(state.matches_filters(&npc));
     }
@@ -4723,6 +4753,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         assert!(state.matches_filters(&npc));
 
@@ -4750,6 +4782,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         assert!(!state.matches_filters(&npc2));
     }
@@ -4783,6 +4817,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         assert!(state.matches_filters(&merchant));
 
@@ -4810,6 +4846,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         assert!(!state.matches_filters(&non_merchant));
     }
@@ -4845,6 +4883,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
 
         let id2 = state.next_npc_id();
@@ -4901,6 +4941,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
 
         state.start_edit_npc(0);
@@ -4974,6 +5016,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
 
         state.mode = NpcEditorMode::Add;
@@ -5135,6 +5179,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
 
         // Start editing
@@ -5314,6 +5360,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         state.npcs.push(npc);
 
@@ -5393,6 +5441,8 @@ mod tests {
                 skill_training_fee_base: None,
                 skill_training_fee_multiplier: None,
                 skill_training_max_rank: None,
+                combat_switch: None,
+                suppress_flag: None,
             },
             NpcDefinition {
                 id: "npc_b".to_string(),
@@ -5418,6 +5468,8 @@ mod tests {
                 skill_training_fee_base: None,
                 skill_training_fee_multiplier: None,
                 skill_training_max_rank: None,
+                combat_switch: None,
+                suppress_flag: None,
             },
         ];
         let ron_str =
@@ -5450,6 +5502,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
         state.selected_npc = Some(0);
         state.mode = NpcEditorMode::Edit;
@@ -5567,6 +5621,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         });
 
         let missing_path = std::path::Path::new("/no/such/dir/npcs.ron");
@@ -6061,6 +6117,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
         let regular = NpcDefinition {
             id: "regular_npc".to_string(),
@@ -6086,6 +6144,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -6167,6 +6227,8 @@ mod tests {
             skill_training_fee_base: None,
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -6546,6 +6608,8 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         // Gate logic: is_trainer = true must suppress the fallback label.
@@ -6597,6 +6661,8 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         // Gate logic: is_skill_trainer = true must suppress the fallback label.
@@ -6648,6 +6714,8 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let ctx = egui::Context::default();
@@ -6686,6 +6754,8 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            combat_switch: None,
+            suppress_flag: None,
         };
 
         let ctx = egui::Context::default();

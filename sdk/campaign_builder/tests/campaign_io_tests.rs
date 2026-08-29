@@ -49,6 +49,7 @@ fn test_handle_maps_open_npc_request_success() {
         skill_training_fee_multiplier: None,
         skill_training_max_rank: None,
         combat_switch: None,
+        suppress_flag: None,
     };
     app.editor_registry.npc_editor_state.npcs.push(npc);
 
@@ -125,6 +126,7 @@ fn test_handle_validation_open_npc_request_success() {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
     app.editor_registry.npc_editor_state.requested_open_npc = Some("merchant_tom".to_string());
 
@@ -183,6 +185,7 @@ fn test_validate_merchant_dialogue_rules_reports_missing_dialogue() {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -227,6 +230,7 @@ fn test_validate_merchant_dialogue_rules_reports_missing_dialogue_tree() {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -282,6 +286,7 @@ fn test_validate_merchant_dialogue_rules_reports_wrong_open_merchant_target() {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -329,6 +334,7 @@ fn test_validate_merchant_dialogue_rules_reports_stale_sdk_content_for_non_merch
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -372,6 +378,7 @@ fn test_repair_merchant_dialogue_validation_issues_creates_missing_dialogue() {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
 
     let result = app.repair_merchant_dialogue_validation_issues();
@@ -428,6 +435,7 @@ fn test_repair_merchant_dialogue_validation_issues_rebinds_wrong_target() {
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
 
     let result = app.repair_merchant_dialogue_validation_issues();
@@ -493,6 +501,7 @@ fn test_repair_merchant_dialogue_validation_issues_removes_stale_non_merchant_co
             skill_training_fee_multiplier: None,
             skill_training_max_rank: None,
             combat_switch: None,
+            suppress_flag: None,
         });
 
     let result = app.repair_merchant_dialogue_validation_issues();

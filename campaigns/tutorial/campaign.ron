@@ -38,6 +38,7 @@ CampaignMetadata(
     stock_templates_file: "data/npc_stock_templates.ron",
     furniture_file: "data/furniture.ron",
     landscape_file: "data/landscape.ron",
+    terrain_file: "data/terrain.ron",
     levels_file: "data/levels.ron",
     starting_time: GameTime(
         year: 1000,

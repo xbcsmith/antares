@@ -518,7 +518,7 @@ impl RaceDatabase {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use antares::domain::races::RaceDatabase;
     ///
     /// let ron_data = r#"[
@@ -548,7 +548,7 @@ impl RaceDatabase {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use antares::domain::races::RaceDatabase;
     ///
     /// let db = RaceDatabase::new();

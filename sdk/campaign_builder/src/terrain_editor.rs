@@ -17,15 +17,17 @@
 //! assert!(state.search_query.is_empty());
 //! ```
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
+    handle_reload, handle_toolbar_action, show_standard_list_item, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::types::TerrainId;
 use antares::domain::world::terrain::{
     builtin_terrain_definitions, TerrainDefinition, TerrainMeshStyle, TerrainVegetation,
 };
 use eframe::egui;
-use std::path::Path;
+use std::collections::HashMap;
 
 /// Campaign-defined terrain IDs start here.
 ///
@@ -49,6 +51,20 @@ enum TerrainEditorMode {
 struct PendingDeleteConfirm {
     id: TerrainId,
     name: String,
+}
+
+/// Opaque terrain texture cache.
+///
+/// Wraps `HashMap<String, Option<egui::TextureHandle>>` and provides a minimal
+/// [`Debug`] implementation so `TerrainEditorState` can keep `#[derive(Debug)]`
+/// even though `TextureHandle` is not `Debug`.
+#[derive(Default)]
+struct TerrainTextureCache(HashMap<String, Option<egui::TextureHandle>>);
+
+impl std::fmt::Debug for TerrainTextureCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TerrainTextureCache({} entries)", self.0.len())
+    }
 }
 
 // ─── TerrainEditorState ───────────────────────────────────────────────────────
@@ -86,6 +102,24 @@ pub struct TerrainEditorState {
 
     /// Pending delete awaiting user confirmation.
     pending_delete_confirm: Option<PendingDeleteConfirm>,
+
+    /// Set to `true` when terrain definitions are successfully loaded from
+    /// disk via [`crate::campaign_io::CampaignBuilderApp::load_terrain`].
+    ///
+    /// Guards [`crate::campaign_io::CampaignBuilderApp::save_terrain`] in
+    /// `do_save_campaign` against writing an empty `[]` when terrain.ron
+    /// was never loaded during this session — the same wipe-bug pattern
+    /// that affected creatures, stock-templates, and levels.
+    pub loaded_from_file: bool,
+    /// Set to `true` after `reset_for_new_campaign()`. Cleared by `show()` on first render.
+    pub needs_initial_load: bool,
+    /// Merge-mode flag for the standard toolbar.
+    file_load_merge_mode: bool,
+
+    /// Texture cache: maps a `texture_path` string to a loaded egui handle (or `None` on
+    /// load failure).  Populated lazily in `show_list` and `show_edit`; cleared on every
+    /// campaign open/new so stale paths from a previous campaign do not bleed through.
+    terrain_texture_cache: TerrainTextureCache,
 }
 
 impl TerrainEditorState {
@@ -101,7 +135,82 @@ impl TerrainEditorState {
     /// assert_eq!(state.selected_terrain, None);
     /// ```
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            needs_initial_load: true,
+            ..Self::default()
+        }
+    }
+
+    /// Resets editor state for a new or freshly-opened campaign.
+    ///
+    /// Clears search/selection/edit state and sets `needs_initial_load = true`
+    /// so that `show()` performs an auto-load the first time the Terrain tab
+    /// is rendered. Call this from both `do_new_campaign` and
+    /// `do_open_campaign` — `sdk/AGENTS.md` Rule 13.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::terrain_editor::TerrainEditorState;
+    ///
+    /// let mut state = TerrainEditorState::default();
+    /// state.needs_initial_load = false;
+    /// state.reset_for_new_campaign();
+    /// assert!(state.needs_initial_load);
+    /// ```
+    pub fn reset_for_new_campaign(&mut self) {
+        self.search_query.clear();
+        self.selected_terrain = None;
+        self.mode = TerrainEditorMode::List;
+        self.edit_index = None;
+        self.edit_buffer = None;
+        self.pending_delete_confirm = None;
+        self.needs_initial_load = true;
+        self.file_load_merge_mode = true;
+        self.terrain_texture_cache.0.clear();
+        self.loaded_from_file = false;
+    }
+
+    /// Loads a terrain texture from `campaign_dir / texture_path` and caches the
+    /// resulting [`egui::TextureHandle`].  Returns a cloned handle on cache hit;
+    /// attempts to decode on miss and caches `None` for unreadable paths so the
+    /// failed lookup is not retried every frame.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx`          - The egui context used to register the texture.
+    /// * `campaign_dir` - Root of the open campaign (resolves relative texture paths).
+    /// * `texture_path` - Path relative to `campaign_dir` (e.g. `"assets/textures/terrain/grass.png"`).
+    fn load_or_get_texture(
+        &mut self,
+        ctx: &egui::Context,
+        campaign_dir: Option<&std::path::PathBuf>,
+        texture_path: &str,
+    ) -> Option<egui::TextureHandle> {
+        if let Some(cached) = self.terrain_texture_cache.0.get(texture_path) {
+            return cached.clone();
+        }
+        let full_path = match campaign_dir {
+            Some(dir) => dir.join(texture_path),
+            None => std::path::PathBuf::from(texture_path),
+        };
+        let handle = (|| -> Option<egui::TextureHandle> {
+            let bytes = std::fs::read(&full_path).ok()?;
+            let img = image::load_from_memory(&bytes).ok()?;
+            let rgba = img.to_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            let pixels = rgba.as_flat_samples();
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+            Some(ctx.load_texture(
+                format!("terrain_tex_{texture_path}"),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            ))
+        })();
+        self.terrain_texture_cache
+            .0
+            .insert(texture_path.to_string(), handle.clone());
+        handle
     }
 
     /// Renders the terrain editor UI.
@@ -116,35 +225,74 @@ impl TerrainEditorState {
     /// ```ignore
     /// # fn render(ui: &mut eframe::egui::Ui) {
     /// use campaign_builder::terrain_editor::TerrainEditorState;
+    /// use campaign_builder::editor_context::EditorContext;
     ///
     /// let mut state = TerrainEditorState::new();
     /// let mut definitions = Vec::new();
     /// let mut unsaved = false;
-    /// state.show(ui, &mut definitions, None, &mut unsaved);
+    /// let mut status = String::new();
+    /// let mut merge = true;
+    /// let mut ctx = EditorContext::new(None, "data/terrain.ron", &mut unsaved, &mut status, &mut merge);
+    /// state.show(ui, &mut definitions, &mut ctx);
     /// # }
     /// ```
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<TerrainDefinition>,
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
-        ui.horizontal(|ui| {
-            ui.heading("🗺 Terrain");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("+ Add Terrain").clicked() {
-                    self.enter_add(defs);
-                    ui.ctx().request_repaint();
+        // SDK Rule 13: auto-load guard — load once on first render after campaign open/new.
+        if self.needs_initial_load {
+            if let Some(dir) = ctx.campaign_dir {
+                let path = dir.join(ctx.data_file);
+                if path.exists() {
+                    match crate::ui_helpers::load_ron_file::<Vec<TerrainDefinition>>(&path) {
+                        Ok(loaded) => {
+                            *defs = loaded;
+                        }
+                        Err(e) => {
+                            *ctx.status_message = format!("Failed to auto-load terrain: {}", e);
+                        }
+                    }
                 }
-            });
-        });
-        ui.separator();
+            }
+            self.needs_initial_load = false;
+        }
+
+        let toolbar_action = EditorToolbar::new("Terrain")
+            .with_search(&mut self.search_query)
+            .with_merge_mode(&mut self.file_load_merge_mode)
+            .with_total_count(defs.len())
+            .with_id_salt("terrain_toolbar")
+            .show(ui);
+
+        match toolbar_action {
+            ToolbarAction::New => {
+                self.enter_add(defs);
+                ui.ctx().request_repaint();
+            }
+            ToolbarAction::Reload => {
+                handle_reload(defs, ctx.campaign_dir, ctx.data_file, ctx.status_message);
+            }
+            other => {
+                let mut editor_unsaved = false;
+                handle_toolbar_action(
+                    other,
+                    defs,
+                    |d: &TerrainDefinition| d.id,
+                    &mut editor_unsaved,
+                    ctx,
+                    "terrain.ron",
+                    "terrain definitions",
+                );
+            }
+        }
 
         if self.mode == TerrainEditorMode::Edit {
-            self.show_edit(ui, defs, campaign_dir, unsaved_changes);
+            self.show_edit(ui, defs, ctx);
         } else {
-            self.show_list(ui, defs, unsaved_changes);
+            self.show_list(ui, defs, ctx);
         }
     }
 
@@ -156,22 +304,21 @@ impl TerrainEditorState {
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<TerrainDefinition>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
-        // SDK Rule 12: horizontal_wrapped for filter rows.
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Search:");
-            if ui.text_edit_singleline(&mut self.search_query).changed() {
-                ui.ctx().request_repaint();
-            }
-        });
-
-        // SDK Rule 10: pre-compute shared state before multi-closure calls.
+        // SDK Rule 10: pre-compute ALL shared state before multi-closure calls.
         let filtered_rows = self.filtered_rows(defs);
         let selected_idx = self.selected_terrain;
         let preview_snapshot: Option<TerrainDefinition> = selected_idx
             .filter(|&i| i < defs.len())
             .map(|i| defs[i].clone());
+
+        // Load the texture for the selected terrain before entering the split
+        // closures so that neither closure needs to borrow &mut self.
+        let preview_texture: Option<egui::TextureHandle> =
+            preview_snapshot.as_ref().and_then(|def| {
+                self.load_or_get_texture(ui.ctx(), ctx.campaign_dir, &def.texture_path)
+            });
 
         let mut pending_selection: Option<usize> = None;
         let mut pending_edit: Option<usize> = None;
@@ -231,28 +378,49 @@ impl TerrainEditorState {
                 left_ui.collapsing("Built-in terrain (read-only)", |ui| {
                     let mut builtins = builtin_terrain_definitions();
                     builtins.sort_by_key(|d| d.id);
-                    // SDK Rule 1: push_id in every loop body.
-                    for def in &builtins {
-                        ui.push_id(def.id, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(format!("#{} {}", def.id, def.name))
-                                        .monospace(),
-                                );
-                                ui.colored_label(
-                                    egui::Color32::GRAY,
-                                    format!("[{}]", mesh_style_name(def.mesh_style)),
-                                );
-                                if def.blocked {
-                                    ui.colored_label(egui::Color32::DARK_RED, "blocked");
-                                }
+                    // Filter out built-ins whose IDs are already overridden by campaign entries.
+                    let campaign_ids: std::collections::HashSet<TerrainId> =
+                        defs.iter().map(|d| d.id).collect();
+                    let unoverridden: Vec<_> = builtins
+                        .iter()
+                        .filter(|b| !campaign_ids.contains(&b.id))
+                        .collect();
+                    if unoverridden.is_empty() {
+                        ui.label(
+                            egui::RichText::new(
+                                "All built-in terrain is overridden by this campaign.",
+                            )
+                            .weak()
+                            .italics(),
+                        );
+                    } else {
+                        // SDK Rule 1: push_id in every loop body.
+                        for def in &unoverridden {
+                            ui.push_id(def.id, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!("#{} {}", def.id, def.name))
+                                            .monospace(),
+                                    );
+                                    ui.colored_label(
+                                        egui::Color32::GRAY,
+                                        format!("[{}]", mesh_style_name(def.mesh_style)),
+                                    );
+                                    if def.blocked {
+                                        ui.colored_label(egui::Color32::DARK_RED, "blocked");
+                                    }
+                                });
                             });
-                        });
+                        }
                     }
                 });
             },
             |right_ui| {
-                show_terrain_preview(right_ui, preview_snapshot.as_ref());
+                show_terrain_preview(
+                    right_ui,
+                    preview_snapshot.as_ref(),
+                    preview_texture.as_ref(),
+                );
             },
         );
 
@@ -273,7 +441,7 @@ impl TerrainEditorState {
             }
         }
 
-        self.show_delete_confirmation(ui, defs, unsaved_changes);
+        self.show_delete_confirmation(ui, defs, ctx.unsaved_changes);
     }
 
     /// Removes `defs[idx]` and adjusts `selected_terrain` to stay valid.
@@ -380,16 +548,35 @@ impl TerrainEditorState {
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<TerrainDefinition>,
-        campaign_dir: Option<&Path>,
-        unsaved_changes: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
-        let Some(buf) = self.edit_buffer.as_mut() else {
-            // Shouldn't happen — guard and fall back to list mode.
+        // Phase 1 — brief immutable borrow to clone what we need before
+        // the mutable borrow for the edit form (avoids borrow-conflict with
+        // load_or_get_texture which borrows &mut self.terrain_texture_cache).
+        let Some((texture_path, heading_name)) = self
+            .edit_buffer
+            .as_ref()
+            .map(|buf| (buf.texture_path.clone(), buf.name.clone()))
+        else {
             self.mode = TerrainEditorMode::List;
             return;
         };
 
-        ui.heading(format!("Edit: {}", buf.name));
+        // Phase 2 — load texture while edit_buffer is not borrowed.
+        let edit_texture: Option<egui::TextureHandle> =
+            self.load_or_get_texture(ui.ctx(), ctx.campaign_dir, &texture_path);
+
+        // Phase 3 — mutable borrow for the actual form.
+        let Some(buf) = self.edit_buffer.as_mut() else {
+            return;
+        };
+
+        // Capture campaign_dir as an owned value so it can be moved into the
+        // egui closures below without conflicting with the mutable borrow of
+        // `self` via `buf` or the `&mut EditorContext` borrow of `ctx`.
+        let campaign_dir_owned: Option<std::path::PathBuf> = ctx.campaign_dir.cloned();
+
+        ui.heading(format!("Edit: {}", heading_name));
         ui.separator();
 
         // Reserve ~44 px for the separator + button row below so they stay visible.
@@ -419,7 +606,10 @@ impl TerrainEditorState {
                                     .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
                                     .pick_file()
                                 {
-                                    buf.texture_path = path.to_string_lossy().to_string();
+                                    // Store a campaign-relative path so that
+                                    // terrain.ron is portable across machines.
+                                    buf.texture_path =
+                                        make_relative(&path, campaign_dir_owned.as_ref());
                                 }
                             }
                         });
@@ -484,14 +674,21 @@ impl TerrainEditorState {
                         ui.end_row();
 
                         ui.label("Preview:");
-                        let swatch_size = egui::vec2(48.0, 20.0);
-                        let (rect, _) = ui.allocate_exact_size(swatch_size, egui::Sense::hover());
-                        let fill = egui::Color32::from_rgb(
-                            (buf.color[0] * 255.0) as u8,
-                            (buf.color[1] * 255.0) as u8,
-                            (buf.color[2] * 255.0) as u8,
-                        );
-                        ui.painter().rect_filled(rect, 2.0, fill);
+                        if let Some(tex) = &edit_texture {
+                            ui.add(egui::Image::new(tex).fit_to_exact_size(egui::vec2(64.0, 64.0)));
+                        } else {
+                            // Fallback color swatch when texture file is not on disk.
+                            let swatch_size = egui::vec2(48.0, 48.0);
+                            let (rect, _) =
+                                ui.allocate_exact_size(swatch_size, egui::Sense::hover());
+                            let fill = egui::Color32::from_rgb(
+                                (buf.color[0] * 255.0) as u8,
+                                (buf.color[1] * 255.0) as u8,
+                                (buf.color[2] * 255.0) as u8,
+                            );
+                            ui.painter().rect_filled(rect, 2.0, fill);
+                            ui.label(egui::RichText::new("(texture not found)").small().weak());
+                        }
                         ui.end_row();
                     });
             });
@@ -508,13 +705,36 @@ impl TerrainEditorState {
                 ui.ctx().request_repaint();
             }
             if ui.button("💾 Save").clicked() {
+                // Normalize the edit buffer's texture path before committing
+                // it to defs so that any absolute path (typed, pasted, or
+                // loaded from an older terrain.ron) is stripped to the
+                // campaign-relative form.
+                if let Some(b) = self.edit_buffer.as_mut() {
+                    b.texture_path = make_relative(
+                        std::path::Path::new(&b.texture_path),
+                        campaign_dir_owned.as_ref(),
+                    );
+                }
                 self.apply_edit(defs);
-                *unsaved_changes = true;
+
+                // Normalize ALL in-memory definitions so that entries which
+                // were loaded from an older terrain.ron (e.g. Sand, Ice) and
+                // never opened for editing also have relative paths before
+                // the inline write below and before the next full Campaign Save.
+                for def in defs.iter_mut() {
+                    def.texture_path = make_relative(
+                        std::path::Path::new(&def.texture_path),
+                        campaign_dir_owned.as_ref(),
+                    );
+                }
+                *ctx.unsaved_changes = true;
 
                 // Immediate best-effort persist so changes survive a crash
                 // without requiring a full Campaign Save.
-                if let Some(dir) = campaign_dir {
-                    let terrain_path = dir.join("data/terrain.ron");
+                if let Some(dir) = ctx.campaign_dir {
+                    // Invalidate the cached texture for this path so the
+                    // detail panel reflects any newly-saved texture immediately.
+                    let terrain_path = dir.join(ctx.data_file);
                     let ron_config = ron::ser::PrettyConfig::new()
                         .struct_names(false)
                         .enumerate_arrays(false);
@@ -523,6 +743,9 @@ impl TerrainEditorState {
                             eprintln!("Failed to write terrain.ron: {e}");
                         }
                     }
+                    // Bust the texture cache for the just-saved path so the
+                    // preview reloads the new texture on the next list render.
+                    self.terrain_texture_cache.0.remove(&texture_path);
                 }
 
                 self.mode = TerrainEditorMode::List;
@@ -550,7 +773,15 @@ impl TerrainEditorState {
 // ─── Preview panel ────────────────────────────────────────────────────────────
 
 /// Renders the right-column preview for a selected terrain definition.
-fn show_terrain_preview(ui: &mut egui::Ui, def: Option<&TerrainDefinition>) {
+///
+/// Displays the terrain texture (if available) followed by a property grid.
+/// When no texture handle is available (missing file or no campaign open) a
+/// color-tinted rectangle derived from `def.color` is shown instead.
+fn show_terrain_preview(
+    ui: &mut egui::Ui,
+    def: Option<&TerrainDefinition>,
+    texture: Option<&egui::TextureHandle>,
+) {
     let Some(def) = def else {
         ui.centered_and_justified(|ui| {
             ui.label(
@@ -565,6 +796,28 @@ fn show_terrain_preview(ui: &mut egui::Ui, def: Option<&TerrainDefinition>) {
     ui.heading(format!("🗺 {}", def.name));
     ui.separator();
 
+    // ── Texture preview image (or color-swatch fallback) ──────────────────────
+    let available_w = ui.available_width();
+    let img_sz = available_w.min(180.0);
+    if let Some(tex) = texture {
+        ui.add(egui::Image::new(tex).fit_to_exact_size(egui::vec2(img_sz, img_sz)));
+    } else {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(img_sz, img_sz), egui::Sense::hover());
+        let fill = egui::Color32::from_rgb(
+            (def.color[0] * 255.0) as u8,
+            (def.color[1] * 255.0) as u8,
+            (def.color[2] * 255.0) as u8,
+        );
+        ui.painter().rect_filled(rect, 4.0, fill);
+        ui.label(
+            egui::RichText::new("(texture not available)")
+                .small()
+                .weak(),
+        );
+    }
+    ui.add_space(6.0);
+
+    // ── Property grid ─────────────────────────────────────────────────────────
     egui::Grid::new("terrain_preview_grid")
         .num_columns(2)
         .spacing([8.0, 4.0])
@@ -574,7 +827,12 @@ fn show_terrain_preview(ui: &mut egui::Ui, def: Option<&TerrainDefinition>) {
             ui.end_row();
 
             ui.label("Texture:");
-            ui.label(&def.texture_path);
+            ui.label(
+                egui::RichText::new(&def.texture_path)
+                    .small()
+                    .monospace()
+                    .color(egui::Color32::GRAY),
+            );
             ui.end_row();
 
             ui.label("Roughness:");
@@ -647,6 +905,36 @@ fn vegetation_name(veg: TerrainVegetation) -> &'static str {
     }
 }
 
+/// Converts an absolute path to one relative to `base`.
+///
+/// When `base` is `Some` and `abs_path` is under it, the leading `base/`
+/// prefix is stripped and the remainder is returned as a `String`.  If
+/// `base` is `None`, or `abs_path` is not under `base`, the original path
+/// is returned unchanged (as a lossy UTF-8 string).
+///
+/// This keeps `texture_path` entries in `terrain.ron` portable: the editor
+/// stores campaign-relative paths (e.g. `"assets/textures/terrain/snow.png"`)
+/// instead of absolute machine-specific paths.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::{Path, PathBuf};
+///
+/// let base = PathBuf::from("/home/user/campaigns/tutorial");
+/// let abs  = Path::new("/home/user/campaigns/tutorial/assets/textures/terrain/snow.png");
+/// // Path is under base → stripped to relative form.
+/// // (In real usage this comes from rfd::FileDialog::pick_file.)
+/// ```
+pub(crate) fn make_relative(
+    abs_path: &std::path::Path,
+    base: Option<&std::path::PathBuf>,
+) -> String {
+    base.and_then(|b| abs_path.strip_prefix(b).ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| abs_path.to_string_lossy().into_owned())
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -674,6 +962,28 @@ mod tests {
     #[test]
     fn test_terrain_editor_new_defaults_empty_state() {
         let state = TerrainEditorState::new();
+        assert!(state.search_query.is_empty());
+        assert_eq!(state.selected_terrain, None);
+        assert_eq!(state.mode, TerrainEditorMode::List);
+        assert!(state.edit_buffer.is_none());
+        assert!(state.edit_index.is_none());
+        assert!(
+            state.needs_initial_load,
+            "new() must set needs_initial_load = true"
+        );
+    }
+
+    #[test]
+    fn test_reset_for_new_campaign_sets_needs_initial_load() {
+        let mut state = TerrainEditorState::new();
+        // Simulate mid-session state
+        state.needs_initial_load = false;
+        state.search_query = "grass".to_string();
+        state.selected_terrain = Some(2);
+
+        state.reset_for_new_campaign();
+
+        assert!(state.needs_initial_load);
         assert!(state.search_query.is_empty());
         assert_eq!(state.selected_terrain, None);
         assert_eq!(state.mode, TerrainEditorMode::List);
@@ -787,6 +1097,30 @@ mod tests {
         ];
         // max is 13103, so next is 13104
         assert_eq!(next_available_id(&defs), 13104);
+    }
+
+    #[test]
+    fn test_make_relative_strips_campaign_dir_prefix() {
+        let base = std::path::PathBuf::from("/home/user/campaigns/tutorial");
+        let abs =
+            std::path::Path::new("/home/user/campaigns/tutorial/assets/textures/terrain/snow.png");
+        assert_eq!(
+            make_relative(abs, Some(&base)),
+            "assets/textures/terrain/snow.png",
+        );
+    }
+
+    #[test]
+    fn test_make_relative_returns_original_when_not_under_base() {
+        let base = std::path::PathBuf::from("/home/user/campaigns/tutorial");
+        let abs = std::path::Path::new("/tmp/other_texture.png");
+        assert_eq!(make_relative(abs, Some(&base)), "/tmp/other_texture.png",);
+    }
+
+    #[test]
+    fn test_make_relative_returns_original_when_no_base() {
+        let abs = std::path::Path::new("/some/absolute/path.png");
+        assert_eq!(make_relative(abs, None), "/some/absolute/path.png");
     }
 
     #[test]

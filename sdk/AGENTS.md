@@ -1106,6 +1106,105 @@ ui.horizontal_wrapped(|ui| {
 
 ---
 
+### Rule 17: Every New Editor Save in `do_save_campaign` Must Be Guarded by `loaded_from_file`
+
+**THIS IS THE MOST REPEATEDLY VIOLATED RULE — every new editor gets this wrong**
+
+#### The Bug (seen in creatures, stock-templates, levels, terrain, and counting)
+
+When a new editor is added to the SDK, a corresponding `save_X()` call is added
+to `do_save_campaign`. If the data file is missing, fails to parse, or the
+campaign was never saved before, the in-memory `Vec` is empty. `save_X()` then
+writes `[]` to disk, **silently overwriting a valid file with an empty list**.
+
+The user sees a blank editor tab after the next reload, or loses all their
+custom data permanently (until git checkout).
+
+#### The Fix (mandatory for every new editor)
+
+**Step 1**: Add `pub loaded_from_file: bool` to the editor state struct and
+clear it in `reset_for_new_campaign()`:
+
+```rust
+pub struct MyEditorState {
+    // ... existing fields ...
+    /// Set to `true` when data is successfully loaded from disk.
+    /// Guards save in `do_save_campaign` against writing `[]` when the
+    /// data file was never loaded this session.
+    pub loaded_from_file: bool,
+}
+
+impl MyEditorState {
+    pub fn reset_for_new_campaign(&mut self) {
+        // ... clear other fields ...
+        self.loaded_from_file = false;  // MANDATORY
+    }
+}
+```
+
+**Step 2**: Set `loaded_from_file = true` in `load_my_data()` when the file is
+successfully read and parsed — not in the "file not found" branch:
+
+```rust
+pub fn load_my_data(&mut self) {
+    if let Some(data) = read_ron_collection::<MyType>(&self.campaign_dir, ...) {
+        self.campaign_data.my_data = data;
+        self.editor_registry.my_editor_state.reset_for_new_campaign();
+        self.editor_registry.my_editor_state.needs_initial_load = false;
+        self.editor_registry.my_editor_state.loaded_from_file = true; // ← SET HERE
+    } else {
+        self.campaign_data.my_data.clear();
+        self.editor_registry.my_editor_state.reset_for_new_campaign();
+        self.editor_registry.my_editor_state.needs_initial_load = false;
+        // loaded_from_file stays false — do NOT set it here
+    }
+}
+```
+
+**Step 3**: Guard `save_my_data()` in `do_save_campaign()` the same way as
+creatures (the canonical example):
+
+```rust
+// Guard: only write if data was successfully loaded from disk this session
+// OR the user made explicit in-editor changes.  An empty Vec that was never
+// backed by a real file must NOT overwrite an existing file with `[]`.
+let should_save = self.editor_registry.my_editor_state.loaded_from_file
+    || !self.campaign_data.my_data.is_empty();
+if should_save {
+    if let Err(e) = self.save_my_data() {
+        save_warnings.push(format!("MyData: {}", e));
+    }
+}
+```
+
+#### What happens without the guard
+
+| Action                                          | Result without guard                | Result with guard            |
+| ----------------------------------------------- | ----------------------------------- | ---------------------------- |
+| Open campaign, never visit tab, Ctrl+S          | Wipes data file with `[]`           | Skips save; file unchanged   |
+| Open campaign with missing data file, Ctrl+S    | Wipes every OTHER file that existed | Skips save for missing files |
+| First-time campaign save before any data loaded | Writes `[]`                         | Skips until data is authored |
+
+#### Existing safe editors (reference implementations)
+
+| Editor                             | Guard field        | Set in                                  |
+| ---------------------------------- | ------------------ | --------------------------------------- |
+| `creatures_editor_state`           | `loaded_from_file` | `load_creatures()` success branch       |
+| `stock_templates_editor_state`     | `loaded_from_file` | `load_stock_templates()` success branch |
+| `levels_editor_state` (if present) | `loaded_from_file` | `load_levels()` success branch          |
+| `terrain_editor_state`             | `loaded_from_file` | `load_terrain()` success branch         |
+
+**The creatures editor in `campaign_io.rs` is the canonical example. Copy its
+guard pattern exactly.**
+
+**Audit question before every PR that adds a new editor:**
+
+> "Does `do_save_campaign` guard this editor's `save_X()` call with
+> `loaded_from_file || !data.is_empty()`?"
+> If NO → add the guard before merging.
+
+---
+
 ## Future Editor Standardization Pattern
 
 Use this section as the default implementation recipe when adding a new
@@ -1307,6 +1406,15 @@ under `sdk/campaign_builder/src/`:
       - show() has an `if self.needs_initial_load` auto-load guard
       - load_* sets needs_initial_load = false on success
       - load_from_file itself does NOT touch needs_initial_load
+
+6c. (ANY new editor that adds a save_X() call to do_save_campaign) Rule 17 guard checklist:
+      - Editor state struct has `pub loaded_from_file: bool` field
+      - reset_for_new_campaign() sets loaded_from_file = false
+      - load_X() sets loaded_from_file = true in the SUCCESS branch only
+      - do_save_campaign guards save_X() with:
+          `loaded_from_file || !campaign_data.X.is_empty()`
+      - The CREATURES editor guard in campaign_io.rs is the canonical example
+      - NEVER add a bare `if let Err(e) = self.save_X()` without this guard
 ```
 
 Do not skip these steps even for "small" changes. ID collisions and load-pattern
@@ -1336,6 +1444,11 @@ campaign builder UI code:
       attempts a file load on first render and clears the flag unconditionally
 - [ ] `load_*` (the `CampaignBuilderApp` method) sets `needs_initial_load = false`
       on success; `load_from_file` (the editor state method) does not touch it
+- [ ] **Every editor state struct has `pub loaded_from_file: bool`** (Rule 17)
+- [ ] **`reset_for_new_campaign()` sets `loaded_from_file = false`** (Rule 17)
+- [ ] **`load_*` sets `loaded_from_file = true` in the SUCCESS branch only** (Rule 17)
+- [ ] **`do_save_campaign` guards every `save_X()` call with
+      `loaded_from_file || !data.is_empty()`** (Rule 17)
 
 ### egui Panel and Repaint Correctness
 
@@ -1402,16 +1515,17 @@ This file is updated whenever a new bug class is found and fixed in the
 campaign builder. When you fix a new category of bug, add a rule and an
 example here before closing the task.
 
-Last updated: 2025
+Last updated: 2026
 
 ### Bugs recorded in this file
 
-| Date | File                                     | Pattern                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Rule             |
-| ---- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| 2025 | `template_browser.rs`                    | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                                                                                         | Rules 1, 2, 3    |
-| 2025 | `creatures_editor.rs`                    | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                                     | Rules 2, 3, 6, 7 |
-| 2025 | `creatures_editor.rs`                    | `SidePanel::right.show_inside` used instead of `TwoColumnLayout`; registry list loop rows missing `push_id`; `self.id_manager` borrowed inside left closure conflicting with `&mut self` capture in right closure — fixed by pre-computing `row_valid: Vec<bool>`                                                                                                                                                                                                                                                                 | Rules 1, 6       |
-| 2025 | `creatures_editor.rs`                    | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                                                                                                                                                                                                                                                                                           | Rule 12          |
-| 2025 | `stock_templates_editor.rs` / `lib.rs`   | Stock Templates tab appeared empty after opening a campaign (recurring). Three compounding causes: (1) `load_stock_templates` had no `path.exists()` guard and clobbered `status_message` with an error on missing files; (2) `do_new_campaign` never reset `stock_templates_editor_state`, leaking previous campaign data; (3) `show()` had no `needs_initial_load` auto-load fallback when the explicit load silently failed. Fixed by Rule 13 load pattern.                                                                    | Rule 13          |
-| 2025 | `characters_editor.rs` / `npc_editor.rs` | Phase 4 Unified Creature Asset Binding initially used `egui::TextEdit::singleline` for `creature_id` in both editors. Value was lost between frames, user received no candidate suggestions, field was not cleared by `reset_autocomplete_buffers`, and no hover tooltip showed whether the typed ID existed. Fixed by adding `autocomplete_creature_selector` to `ui_helpers.rs`, an `available_creatures` cache on both state structs, buffer-clear wiring in `reset_autocomplete_buffers`, and modal-picker autocomplete sync. | Rule 14          |
-| 2025 | `item_mesh_editor.rs`                    | Registry left-panel used `format!("[{:?}] {}", entry.category, entry.name)` as the list label and a hand-rolled `resp.context_menu` block instead of `StandardListItemConfig` / `MetadataBadge` / `show_standard_list_item`. Every other Campaign Builder editor had already migrated; the divergence was invisible to the compiler and all tests. Fixed by carrying `name` + `category` in `RowData`, adding `item_mesh_category_badge`, and delegating to `show_standard_list_item`.                                            | Rule 15          |
+| Date | File                                     | Pattern                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Rule             |
+| ---- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 2025 | `template_browser.rs`                    | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Rules 1, 2, 3    |
+| 2025 | `creatures_editor.rs`                    | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                                                                                       | Rules 2, 3, 6, 7 |
+| 2025 | `creatures_editor.rs`                    | `SidePanel::right.show_inside` used instead of `TwoColumnLayout`; registry list loop rows missing `push_id`; `self.id_manager` borrowed inside left closure conflicting with `&mut self` capture in right closure — fixed by pre-computing `row_valid: Vec<bool>`                                                                                                                                                                                                                                                                                                                   | Rules 1, 6       |
+| 2025 | `creatures_editor.rs`                    | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                                                                                                                                                                                                                                                                                                                                             | Rule 12          |
+| 2025 | `stock_templates_editor.rs` / `lib.rs`   | Stock Templates tab appeared empty after opening a campaign (recurring). Three compounding causes: (1) `load_stock_templates` had no `path.exists()` guard and clobbered `status_message` with an error on missing files; (2) `do_new_campaign` never reset `stock_templates_editor_state`, leaking previous campaign data; (3) `show()` had no `needs_initial_load` auto-load fallback when the explicit load silently failed. Fixed by Rule 13 load pattern.                                                                                                                      | Rule 13          |
+| 2025 | `characters_editor.rs` / `npc_editor.rs` | Phase 4 Unified Creature Asset Binding initially used `egui::TextEdit::singleline` for `creature_id` in both editors. Value was lost between frames, user received no candidate suggestions, field was not cleared by `reset_autocomplete_buffers`, and no hover tooltip showed whether the typed ID existed. Fixed by adding `autocomplete_creature_selector` to `ui_helpers.rs`, an `available_creatures` cache on both state structs, buffer-clear wiring in `reset_autocomplete_buffers`, and modal-picker autocomplete sync.                                                   | Rule 14          |
+| 2025 | `item_mesh_editor.rs`                    | Registry left-panel used bare label format and hand-rolled context_menu instead of StandardListItemConfig/MetadataBadge/show_standard_list_item. Fixed by migrating to Rule 15 pattern.                                                                                                                                                                                                                                                                                                                                                                                             | Rule 15          |
+| 2026 | `terrain_editor.rs` / `campaign_io.rs`   | `do_save_campaign` called `save_terrain()` unconditionally. When `load_terrain()` failed (missing file, parse error, wrong path), `terrain_definitions` was empty and `save_terrain()` wrote `[]` to terrain.ron, silently destroying all custom terrain data. Same root cause as the creatures/stock-templates/levels wipe bugs. Fixed by adding `loaded_from_file: bool` to `TerrainEditorState`, setting it in the `load_terrain()` success branch only, and guarding `save_terrain()` in `do_save_campaign` with the same `loaded_from_file OR non-empty` pattern as creatures. | Rule 17          |

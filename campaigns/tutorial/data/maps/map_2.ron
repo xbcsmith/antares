@@ -4401,7 +4401,7 @@
                 color_tint: None,
                 scale: None,
                 y_offset: None,
-                rotation_y: None,
+                rotation_y: Some(90.0),
                 sprite: None,
             ),
         ),
@@ -8113,22 +8113,6 @@
             facing: Some(North),
         ),
         (
-            x: 10,
-            y: 13,
-        ): Container(
-            id: "container_10013",
-            name: "Large Treasure Chest",
-            description: "A large and ornate chest containing valuable loot.",
-            items: [
-                (
-                    item_id: 42,
-                    charges: 0,
-                ),
-            ],
-            gold: 100,
-            gems: 5,
-        ),
-        (
             x: 11,
             y: 0,
         ): Sign(
@@ -8193,6 +8177,23 @@
             proximity_facing: false,
             rotation_speed: None,
             combat_event_type: Ambush,
+        ),
+        (
+            x: 18,
+            y: 18,
+        ): Container(
+            id: "container_10013",
+            name: "Large Treasure Chest",
+            description: "A large and ornate chest containing valuable loot.",
+            items: [
+                (
+                    item_id: 42,
+                    charges: 0,
+                ),
+            ],
+            gold: 100,
+            gems: 5,
+            mesh_id: Some("12003"),
         ),
         (
             x: 19,

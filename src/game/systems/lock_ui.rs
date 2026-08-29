@@ -171,6 +171,17 @@ fn lock_prompt_ui_system(
     mut nav_state: ResMut<LockNavState>,
     mut action_writer: MessageWriter<LockActionChosen>,
 ) {
+    // Only show the lock prompt in Exploration mode.  During Dialogue mode the
+    // hint dialogue is shown first; `LockInteractionPending` is left intact so
+    // that the prompt appears automatically once the player dismisses the
+    // dialogue and the mode returns to Exploration.
+    if !matches!(
+        global_state.0.mode,
+        crate::application::GameMode::Exploration
+    ) {
+        return;
+    }
+
     // Only run when a lock interaction is pending.
     let lock_id = match lock_pending.lock_id.clone() {
         Some(id) => id,

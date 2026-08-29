@@ -183,14 +183,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                grass_density: Some(Medium),
-                grass_blade_config: Some((
-                    length: 1.8,
-                    width: 1.0,
-                    tilt: 0.5,
-                    curve: 0.8,
-                    color_variation: 0.4,
-                )),
             ),
         ),
         (
@@ -502,9 +494,9 @@
             ),
         ),
         (
-            terrain: 13005,
-            wall_type: Normal,
-            blocked: true,
+            terrain: 13000,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -594,11 +586,11 @@
             x: 7,
             y: 1,
             visual: (
-                height: Some(0.2),
+                height: Some(0.4),
                 width_x: None,
                 width_z: None,
-                color_tint: Some((0.6, 0.9, 0.6)),
-                scale: Some(0.8),
+                color_tint: Some((0.5, 0.85, 0.5)),
+                scale: Some(1.0),
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
@@ -809,9 +801,9 @@
             ),
         ),
         (
-            terrain: 13005,
-            wall_type: Normal,
-            blocked: true,
+            terrain: 13000,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -1011,7 +1003,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                grass_density: Some(Medium),
             ),
         ),
         (
@@ -7627,23 +7618,25 @@
             ),
         ),
         (
-            terrain: 13000,
-            wall_type: r#None,
-            blocked: false,
+            terrain: 13008,
+            wall_type: Normal,
+            blocked: true,
             is_special: false,
             is_dark: false,
             visited: false,
             x: 12,
             y: 18,
             visual: (
-                height: None,
+                height: Some(2.0),
                 width_x: None,
                 width_z: None,
-                color_tint: None,
+                color_tint: Some((0.7, 0.7, 0.7)),
                 scale: None,
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
+                rock_variant: Some(Jagged),
+                snow_coverage: Some(0.2),
             ),
         ),
         (
@@ -8208,19 +8201,138 @@
     ],
     events: {
         (
-            x: 3,
+            x: 1,
             y: 1,
         ): Furniture(
-            name: "Wooden Chair",
-            furniture_id: Some(6),
-            furniture_type: Chair,
-            rotation_y: Some(90.0),
+            name: "Table",
+            furniture_id: Some(18),
+            furniture_type: Table,
+            rotation_y: Some(0.0),
             scale: 1.0,
             material: Wood,
             flags: (
                 lit: false,
                 locked: false,
-                blocking: true,
+                blocking: false,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 1,
+            y: 5,
+        ): Furniture(
+            name: "Inn Table",
+            furniture_id: Some(18),
+            furniture_type: Chair,
+            rotation_y: Some(0.0),
+            scale: 0.5,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: false,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 1,
+            y: 7,
+        ): Furniture(
+            name: "Blacksmith Workbench",
+            furniture_id: Some(16),
+            furniture_type: Table,
+            rotation_y: Some(0.0),
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: false,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 1,
+            y: 11,
+        ): Furniture(
+            name: "Blacksmith Anvil",
+            furniture_id: Some(15),
+            furniture_type: Table,
+            rotation_y: Some(0.0),
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: false,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 1,
+            y: 13,
+        ): Container(
+            id: "container_1013",
+            name: "Weathered Wooden Hutch",
+            description: "Weathered Wooden Hutch",
+            items: [
+                (
+                    item_id: 26,
+                    charges: 0,
+                ),
+                (
+                    item_id: 106,
+                    charges: 0,
+                ),
+                (
+                    item_id: 111,
+                    charges: 0,
+                ),
+                (
+                    item_id: 112,
+                    charges: 0,
+                ),
+            ],
+            gold: 100,
+            gems: 5,
+            mesh_id: Some("12004"),
+        ),
+        (
+            x: 2,
+            y: 1,
+        ): Furniture(
+            name: "Wooden Chair",
+            furniture_id: Some(17),
+            furniture_type: Chair,
+            rotation_y: None,
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: false,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 2,
+            y: 5,
+        ): Furniture(
+            name: "Inn Chair",
+            furniture_id: Some(17),
+            furniture_type: Chair,
+            rotation_y: Some(0.0),
+            scale: 0.5,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: false,
             ),
             color_tint: None,
             key_item_id: None,
@@ -8260,15 +8372,18 @@
             ],
             gold: 1000,
             gems: 100,
-            mesh_id: Some("12003"),
+            mesh_id: Some("12007"),
         ),
         (
             x: 3,
             y: 17,
-        ): DroppedItem(
+        ): Treasure(
             name: "Dropped Sword",
-            item_id: 3,
-            charges: 0,
+            description: "",
+            loot: [
+                3,
+            ],
+            mesh_id: Some("12008"),
         ),
         (
             x: 4,
@@ -8356,7 +8471,7 @@
         ),
         (
             x: 7,
-            y: 15,
+            y: 14,
         ): RecruitableCharacter(
             name: "Whisper",
             description: "A nimble elf watches from the shadows near the alley.",
@@ -8404,6 +8519,18 @@
         ),
         (
             x: 11,
+            y: 14,
+        ): RecruitableCharacter(
+            name: "mira",
+            description: "Mira the War Cleric",
+            character_id: "tutorial_human_cleric",
+            dialogue_id: Some(106),
+            time_condition: None,
+            facing: None,
+            face_on_dialogue: false,
+        ),
+        (
+            x: 11,
             y: 18,
         ): LockedDoor(
             name: "Barred Passage",
@@ -8411,7 +8538,7 @@
             key_item_id: Some(200),
             initial_trap_chance: 25,
             mesh_id: Some("12002"),
-            dialogue_id: Some(9),
+            dialogue_id: Some(500),
         ),
         (
             x: 13,
@@ -8508,8 +8635,9 @@
                     charges: 0,
                 ),
             ],
-            gold: 0,
-            gems: 0,
+            gold: 100,
+            gems: 10,
+            mesh_id: Some("12007"),
         ),
         (
             x: 18,
@@ -8525,8 +8653,8 @@
             x: 18,
             y: 18,
         ): Teleport(
-            name: "Dark Forrest Portal",
-            description: "This is a portal to the Dark Forrest",
+            name: "Dark Forest Portal",
+            description: "This is a portal to the Dark Forest",
             destination: (
                 x: 0,
                 y: 10,
@@ -8742,6 +8870,27 @@
                 y: 11,
             ),
             scale: Some(1.65),
+        ),
+        (
+            landscape_id: 6,
+            position: (
+                x: 7,
+                y: 2,
+            ),
+        ),
+        (
+            landscape_id: 6,
+            position: (
+                x: 11,
+                y: 1,
+            ),
+        ),
+        (
+            landscape_id: 6,
+            position: (
+                x: 7,
+                y: 0,
+            ),
         ),
     ],
     is_outdoor: true,

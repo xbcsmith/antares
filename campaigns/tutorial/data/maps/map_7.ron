@@ -3946,7 +3946,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4646,7 +4646,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -4746,7 +4746,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4986,7 +4986,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5006,7 +5006,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5026,7 +5026,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5046,7 +5046,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5066,7 +5066,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5086,7 +5086,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5106,7 +5106,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5126,7 +5126,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5146,7 +5146,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5166,7 +5166,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5366,7 +5366,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5386,7 +5386,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5406,7 +5406,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5426,7 +5426,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5446,7 +5446,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5546,7 +5546,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5786,7 +5786,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5806,7 +5806,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5826,7 +5826,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5846,7 +5846,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5866,7 +5866,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5886,7 +5886,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5906,7 +5906,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5926,7 +5926,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5946,7 +5946,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -5966,7 +5966,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6166,7 +6166,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6186,7 +6186,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6206,7 +6206,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6226,7 +6226,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6246,7 +6246,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6346,7 +6346,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6586,7 +6586,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6606,7 +6606,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6626,7 +6626,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6646,7 +6646,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6666,7 +6666,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6686,7 +6686,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6706,7 +6706,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6726,7 +6726,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6746,7 +6746,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6766,7 +6766,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6966,7 +6966,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -6986,7 +6986,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7006,7 +7006,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7026,7 +7026,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7046,7 +7046,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7066,7 +7066,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7146,7 +7146,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7386,7 +7386,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7406,7 +7406,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7546,7 +7546,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7566,7 +7566,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7766,7 +7766,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7786,7 +7786,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7806,7 +7806,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7826,7 +7826,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7846,7 +7846,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7866,7 +7866,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7886,7 +7886,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -7946,7 +7946,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7966,7 +7966,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7986,7 +7986,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8186,7 +8186,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8206,7 +8206,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8346,7 +8346,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8366,7 +8366,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8566,7 +8566,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8586,7 +8586,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8606,7 +8606,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8626,7 +8626,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8646,7 +8646,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8666,7 +8666,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -8786,7 +8786,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8986,7 +8986,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9006,7 +9006,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9146,7 +9146,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9166,7 +9166,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9366,7 +9366,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9386,7 +9386,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9466,7 +9466,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9506,7 +9506,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9586,7 +9586,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -9786,7 +9786,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9806,7 +9806,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9946,7 +9946,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -9966,7 +9966,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10166,7 +10166,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10186,7 +10186,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10266,7 +10266,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10306,7 +10306,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10386,7 +10386,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -10586,7 +10586,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10606,7 +10606,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10626,7 +10626,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10646,7 +10646,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10706,7 +10706,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10726,7 +10726,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10746,7 +10746,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -10766,7 +10766,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11146,7 +11146,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -11166,7 +11166,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -11186,7 +11186,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -11386,7 +11386,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11406,7 +11406,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11426,7 +11426,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11446,7 +11446,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11506,7 +11506,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11526,7 +11526,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11546,7 +11546,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11566,7 +11566,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -11966,7 +11966,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -11986,7 +11986,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -12186,7 +12186,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12206,7 +12206,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12226,7 +12226,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12246,7 +12246,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12306,7 +12306,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12326,7 +12326,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12346,7 +12346,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12366,7 +12366,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -12766,7 +12766,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -12786,7 +12786,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -13546,7 +13546,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -13566,7 +13566,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -13586,7 +13586,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -14166,7 +14166,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -14186,7 +14186,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -14366,7 +14366,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -14966,7 +14966,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -14986,7 +14986,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -15766,7 +15766,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -15786,7 +15786,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -15806,7 +15806,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -15826,7 +15826,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -15846,7 +15846,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -15886,7 +15886,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -16566,7 +16566,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -16586,7 +16586,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -16606,7 +16606,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -16626,7 +16626,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -16646,7 +16646,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -16686,7 +16686,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -17366,7 +17366,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -17386,7 +17386,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -17406,7 +17406,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -17426,7 +17426,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -17446,7 +17446,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -17486,7 +17486,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -18166,7 +18166,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -18186,7 +18186,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -18206,7 +18206,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -18226,7 +18226,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -18246,7 +18246,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -18286,7 +18286,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -19006,7 +19006,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -19026,7 +19026,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -19046,7 +19046,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -19806,7 +19806,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -19826,7 +19826,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -19846,7 +19846,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -19866,7 +19866,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22426,7 +22426,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22446,7 +22446,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22466,7 +22466,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22486,7 +22486,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22506,7 +22506,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22526,7 +22526,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22566,7 +22566,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22586,7 +22586,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22606,7 +22606,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22626,7 +22626,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22686,7 +22686,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -22706,7 +22706,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23226,7 +23226,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23246,7 +23246,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23266,7 +23266,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23286,7 +23286,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23326,7 +23326,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23386,7 +23386,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23406,7 +23406,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23486,7 +23486,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23526,7 +23526,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -23626,7 +23626,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -23646,7 +23646,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -23666,7 +23666,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -24426,7 +24426,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -24446,7 +24446,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -25206,7 +25206,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -25226,7 +25226,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -25246,7 +25246,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -25566,7 +25566,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25586,7 +25586,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25646,7 +25646,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25666,7 +25666,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25686,7 +25686,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25726,7 +25726,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25746,7 +25746,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25786,7 +25786,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25806,7 +25806,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25846,7 +25846,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -25886,7 +25886,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26006,7 +26006,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26026,7 +26026,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26046,7 +26046,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26066,7 +26066,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26086,7 +26086,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26106,7 +26106,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26126,7 +26126,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26146,7 +26146,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26166,7 +26166,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26346,7 +26346,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26366,7 +26366,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26386,7 +26386,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26446,7 +26446,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26466,7 +26466,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26486,7 +26486,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26526,7 +26526,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26566,7 +26566,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26586,7 +26586,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26606,7 +26606,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26626,7 +26626,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26646,7 +26646,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26666,7 +26666,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26706,7 +26706,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -26826,7 +26826,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26846,7 +26846,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26966,7 +26966,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -26986,7 +26986,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -27146,7 +27146,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27166,7 +27166,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27186,7 +27186,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27246,7 +27246,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27426,7 +27426,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27446,7 +27446,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27506,7 +27506,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27586,7 +27586,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -27606,7 +27606,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -27626,7 +27626,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -27646,7 +27646,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27666,7 +27666,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27786,7 +27786,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -27926,7 +27926,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27946,7 +27946,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27966,7 +27966,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -27986,7 +27986,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28006,7 +28006,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -28046,7 +28046,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28066,7 +28066,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28106,7 +28106,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28166,7 +28166,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28186,7 +28186,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28386,7 +28386,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -28426,7 +28426,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28446,7 +28446,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28466,7 +28466,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28486,7 +28486,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28586,7 +28586,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -28646,7 +28646,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -28666,7 +28666,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -28686,7 +28686,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -28706,7 +28706,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28726,7 +28726,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28746,7 +28746,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28766,7 +28766,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28786,7 +28786,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -28806,7 +28806,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -28906,7 +28906,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29186,7 +29186,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29226,7 +29226,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29246,7 +29246,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29266,7 +29266,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29286,7 +29286,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29386,7 +29386,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29406,7 +29406,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29426,7 +29426,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29446,7 +29446,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29466,7 +29466,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29486,7 +29486,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29506,7 +29506,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29526,7 +29526,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29546,7 +29546,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29566,7 +29566,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29586,7 +29586,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29606,7 +29606,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -29706,7 +29706,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29766,7 +29766,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -29986,7 +29986,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -30046,7 +30046,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -30066,7 +30066,7 @@
             ),
         ),
         (
-            terrain: 13002,
+            terrain: 13102,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -30246,7 +30246,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -30266,7 +30266,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -30286,7 +30286,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -30306,7 +30306,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -30326,7 +30326,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -30346,7 +30346,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -30366,7 +30366,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -30386,7 +30386,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -30406,7 +30406,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -31026,7 +31026,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31046,7 +31046,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31066,7 +31066,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31086,7 +31086,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31106,7 +31106,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31126,7 +31126,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31146,7 +31146,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -31166,7 +31166,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -31186,7 +31186,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31206,7 +31206,7 @@
             ),
         ),
         (
-            terrain: 13006,
+            terrain: 13101,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -31806,7 +31806,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31826,7 +31826,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31846,7 +31846,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31866,7 +31866,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31886,7 +31886,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31906,7 +31906,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31926,7 +31926,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31946,7 +31946,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31966,7 +31966,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -31986,7 +31986,7 @@
             ),
         ),
         (
-            terrain: 13001,
+            terrain: 13101,
             wall_type: Normal,
             blocked: true,
             is_special: false,
@@ -32038,6 +32038,18 @@
             combat_event_type: Ambush,
         ),
         (
+            x: 6,
+            y: 17,
+        ): Teleport(
+            name: "Frostspire Teleport",
+            description: "Teleport to Frostspire Mountain",
+            destination: (
+                x: 36,
+                y: 38,
+            ),
+            map_id: 8,
+        ),
+        (
             x: 11,
             y: 36,
         ): Container(
@@ -32078,6 +32090,24 @@
             facing: Some(South),
             proximity_facing: false,
             rotation_speed: None,
+        ),
+        (
+            x: 15,
+            y: 10,
+        ): Furniture(
+            name: "Alter of the Astronomer",
+            furniture_id: Some(20),
+            furniture_type: Chest,
+            rotation_y: Some(0.0),
+            scale: 1.0,
+            material: Stone,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: false,
+            ),
+            color_tint: None,
+            key_item_id: None,
         ),
         (
             x: 26,

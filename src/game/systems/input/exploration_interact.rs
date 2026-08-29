@@ -280,18 +280,6 @@ pub fn try_interact_locked_door_event(
         return false;
     };
 
-    // If a dialogue is configured, open it instead of direct interaction.
-    if let Some(dlg_id) = dialogue_id {
-        open_dialogue_for_event(
-            game_state,
-            dlg_id,
-            target,
-            start_dialogue_writer,
-            pending_event_context,
-        );
-        return true;
-    }
-
     let is_locked: bool = game_state
         .world
         .get_current_map()
@@ -316,6 +304,9 @@ pub fn try_interact_locked_door_event(
         return true;
     }
 
+    // Search party inventory for the required key before checking the dialogue.
+    // The dialogue_id is meant for the "no key" case; a party that already
+    // carries the key should unlock the door immediately without seeing it.
     let key_found: Option<(usize, usize)> = key_item_id.and_then(|kid| {
         game_state
             .party
@@ -333,6 +324,7 @@ pub fn try_interact_locked_door_event(
 
     match (key_item_id, key_found) {
         (Some(kid), Some((char_idx, slot_idx))) => {
+            // Key found: consume it, unlock the door, open the tile.
             game_state.party.members[char_idx]
                 .inventory
                 .items
@@ -358,15 +350,41 @@ pub fn try_interact_locked_door_event(
             game_log.add_exploration(msg);
         }
         (Some(_), None) => {
-            let msg = "The door is locked. You need a key.".to_string();
-            info!("{}", msg);
-            game_log.add_exploration(msg);
+            // Key required but not in party inventory.
+            // Show the hint dialogue if configured, otherwise log a message.
+            // Always offer Pick Lock / Bash as a fallback — the player may have
+            // a Robber who can attempt the lock even without the key.
+            if let Some(dlg_id) = dialogue_id {
+                open_dialogue_for_event(
+                    game_state,
+                    dlg_id,
+                    target,
+                    start_dialogue_writer,
+                    pending_event_context,
+                );
+            } else {
+                let msg = "The door is locked. You need a key.".to_string();
+                info!("{}", msg);
+                game_log.add_exploration(msg);
+            }
             populate_lock_pending(game_state, game_content, lock_pending, lock_id, target);
         }
         (None, _) => {
-            let msg = "The door is locked.".to_string();
-            info!("{}", msg);
-            game_log.add_exploration(msg);
+            // No key required; party must pick lock or bash.
+            // Show the hint dialogue if configured, otherwise log a message.
+            if let Some(dlg_id) = dialogue_id {
+                open_dialogue_for_event(
+                    game_state,
+                    dlg_id,
+                    target,
+                    start_dialogue_writer,
+                    pending_event_context,
+                );
+            } else {
+                let msg = "The door is locked.".to_string();
+                info!("{}", msg);
+                game_log.add_exploration(msg);
+            }
             populate_lock_pending(game_state, game_content, lock_pending, lock_id, target);
         }
     }
@@ -714,15 +732,38 @@ pub fn try_pickup_adjacent_dropped_item(
         return true;
     };
 
+    // Distinguish between a runtime drop (stored in map.dropped_items and
+    // removed via pickup_item()) and a static authored drop (stored in
+    // map.events as MapEvent::DroppedItem and removed by clearing the event).
+    // Both paths check the party's current tile before the 8 surrounding tiles.
+    enum PickupSource {
+        RuntimeDrop,
+        StaticEvent { charges: u16 },
+    }
+
     let pickup_target = std::iter::once(party_position)
         .chain(adjacent_tiles)
         .find_map(|position| {
-            map.dropped_items_at(position)
-                .first()
-                .map(|item| (position, item.item_id, item.charges))
+            // Runtime dropped items in map.dropped_items take priority.
+            if let Some(item) = map.dropped_items_at(position).first() {
+                return Some((position, item.item_id, PickupSource::RuntimeDrop));
+            }
+            // Static MapEvent::DroppedItem entries authored in campaign data.
+            // These live in map.events and are invisible to pickup_item().
+            if let Some(MapEvent::DroppedItem {
+                item_id, charges, ..
+            }) = map.get_event(position)
+            {
+                return Some((
+                    position,
+                    *item_id,
+                    PickupSource::StaticEvent { charges: *charges },
+                ));
+            }
+            None
         });
 
-    let Some((position, item_id, _charges)) = pickup_target else {
+    let Some((position, item_id, source)) = pickup_target else {
         return false;
     };
 
@@ -739,36 +780,81 @@ pub fn try_pickup_adjacent_dropped_item(
         .unwrap_or_else(|| format!("item {}", item_id));
 
     let map_id = game_state.world.current_map;
-    match pickup_item(
-        &mut game_state.party.members[0],
-        0,
-        &mut game_state.world,
-        map_id,
-        position,
-        item_id,
-    ) {
-        Ok(_slot) => {
-            let msg = format!("Picked up {}.", item_name);
-            info!("{}", msg);
-            game_log.add_exploration(msg);
 
-            if let Some(writer) = item_picked_up_messages {
-                writer.write(ItemPickedUpEvent {
-                    item_id,
-                    map_id,
-                    tile_x: position.x,
-                    tile_y: position.y,
-                });
-            }
+    match source {
+        PickupSource::RuntimeDrop => {
+            match pickup_item(
+                &mut game_state.party.members[0],
+                0,
+                &mut game_state.world,
+                map_id,
+                position,
+                item_id,
+            ) {
+                Ok(_slot) => {
+                    let msg = format!("Picked up {}.", item_name);
+                    info!("{}", msg);
+                    game_log.add_exploration(msg);
 
-            if let Some(writer) = quest_progress_messages {
-                writer.write(QuestProgressEvent::ItemCollected { item_id, count: 1 });
+                    if let Some(writer) = item_picked_up_messages {
+                        writer.write(ItemPickedUpEvent {
+                            item_id,
+                            map_id,
+                            tile_x: position.x,
+                            tile_y: position.y,
+                        });
+                    }
+
+                    if let Some(writer) = quest_progress_messages {
+                        writer.write(QuestProgressEvent::ItemCollected { item_id, count: 1 });
+                    }
+                }
+                Err(error) => {
+                    let msg = format!("Could not pick up {}: {}", item_name, error);
+                    warn!("{}", msg);
+                    game_log.add_exploration(msg);
+                }
             }
         }
-        Err(error) => {
-            let msg = format!("Could not pick up {}: {}", item_name, error);
-            warn!("{}", msg);
-            game_log.add_exploration(msg);
+        PickupSource::StaticEvent { charges } => {
+            // Static MapEvent::DroppedItem: the item lives in map.events, not
+            // map.dropped_items, so pickup_item() cannot remove it.  Add the
+            // item directly to the first party member's inventory, then remove
+            // the event so the tile no longer shows the item.
+            let effective_charges = charges.min(u8::MAX as u16) as u8;
+            let member = &mut game_state.party.members[0];
+
+            if member.inventory.is_full() {
+                let msg = format!("Cannot pick up {}: inventory is full.", item_name);
+                warn!("{}", msg);
+                game_log.add_exploration(msg);
+            } else {
+                // add_item only fails when inventory is full, which we already
+                // checked above.  The .ok() silences the unused-Result warning.
+                member.inventory.add_item(item_id, effective_charges).ok();
+
+                // Remove the static event so the tile no longer shows the item.
+                if let Some(map) = game_state.world.get_map_mut(map_id) {
+                    map.remove_event(position);
+                }
+
+                let msg = format!("Picked up {}.", item_name);
+                info!("{}", msg);
+                game_log.add_exploration(msg);
+
+                if let Some(writer) = item_picked_up_messages {
+                    writer.write(ItemPickedUpEvent {
+                        item_id,
+                        map_id,
+                        tile_x: position.x,
+                        tile_y: position.y,
+                    });
+                }
+
+                if let Some(writer) = quest_progress_messages {
+                    writer.write(QuestProgressEvent::ItemCollected { item_id, count: 1 });
+                }
+            }
         }
     }
 
@@ -1283,6 +1369,170 @@ mod tests {
         );
     }
 
+    /// Party standing on a tile with a static `MapEvent::DroppedItem` must pick
+    /// up the item via E-interact — the bug was that only `map.dropped_items`
+    /// was searched; static events were silently skipped.
+    #[test]
+    fn test_try_pickup_static_dropped_item_event_adds_to_inventory() {
+        let mut game_state = build_game_state();
+        let item_pos = Position::new(5, 5); // party is standing here
+
+        // Author a static DroppedItem event (the campaign-data path)
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_event(
+                item_pos,
+                MapEvent::DroppedItem {
+                    name: "Dropped Sword".to_string(),
+                    item_id: 3,
+                    charges: 0,
+                },
+            );
+        }
+
+        let mut game_log = GameLog::default();
+        let handled = try_pickup_adjacent_dropped_item(
+            &mut game_state,
+            item_pos,
+            get_adjacent_positions(item_pos),
+            None,
+            &mut game_log,
+            None,
+            None,
+        );
+
+        assert!(
+            handled,
+            "pickup must return true for a static DroppedItem event"
+        );
+        assert!(
+            game_state.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|slot| slot.item_id == 3),
+            "item must be added to the first party member's inventory"
+        );
+        // The event must be consumed so it does not persist on re-entry.
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .get_event(item_pos)
+                .is_none(),
+            "MapEvent::DroppedItem must be removed from map after pickup"
+        );
+    }
+
+    /// Party one tile away from a static `MapEvent::DroppedItem` must still be
+    /// able to pick it up (adjacent-tile reach).
+    #[test]
+    fn test_try_pickup_static_dropped_item_event_adjacent_tile() {
+        let mut game_state = build_game_state();
+        let party_pos = Position::new(5, 5);
+        let item_pos = Position::new(5, 4); // one tile north
+
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_event(
+                item_pos,
+                MapEvent::DroppedItem {
+                    name: "Gem".to_string(),
+                    item_id: 7,
+                    charges: 0,
+                },
+            );
+        }
+
+        let mut game_log = GameLog::default();
+        let handled = try_pickup_adjacent_dropped_item(
+            &mut game_state,
+            party_pos,
+            get_adjacent_positions(party_pos),
+            None,
+            &mut game_log,
+            None,
+            None,
+        );
+
+        assert!(handled);
+        assert!(
+            game_state.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|slot| slot.item_id == 7),
+            "adjacent static DroppedItem must be picked up"
+        );
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .get_event(item_pos)
+                .is_none(),
+            "event must be removed after adjacent pickup"
+        );
+    }
+
+    /// Full inventory must prevent picking up a static `MapEvent::DroppedItem`
+    /// and leave the event intact on the map.
+    #[test]
+    fn test_try_pickup_static_dropped_item_event_full_inventory_leaves_event() {
+        let mut game_state = build_game_state();
+        let item_pos = Position::new(5, 5);
+
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_event(
+                item_pos,
+                MapEvent::DroppedItem {
+                    name: "Potion".to_string(),
+                    item_id: 42,
+                    charges: 3,
+                },
+            );
+        }
+
+        // Fill the party member's inventory.
+        while !game_state.party.members[0].inventory.is_full() {
+            let next = (game_state.party.members[0].inventory.items.len() as u8) + 1;
+            game_state.party.members[0]
+                .inventory
+                .add_item(next, 0)
+                .unwrap();
+        }
+
+        let mut game_log = GameLog::default();
+        let handled = try_pickup_adjacent_dropped_item(
+            &mut game_state,
+            item_pos,
+            get_adjacent_positions(item_pos),
+            None,
+            &mut game_log,
+            None,
+            None,
+        );
+
+        // Function returns true (it handled the event — just couldn't complete)
+        assert!(handled);
+        // The event must still be on the map.
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .get_event(item_pos)
+                .is_some(),
+            "event must remain when inventory is full"
+        );
+        assert!(
+            game_log
+                .entries
+                .iter()
+                .any(|e| e.text.contains("inventory is full")),
+            "full-inventory message must appear in the game log"
+        );
+    }
+
     #[test]
     fn test_try_interact_locked_door_event_consumes_key_and_opens_tile() {
         use bevy::ecs::system::SystemState;
@@ -1407,6 +1657,173 @@ mod tests {
         assert!(handled);
         assert_eq!(lock_pending.lock_id.as_deref(), Some(DOOR_LOCK_ID));
         assert_eq!(lock_pending.position, Some(Position::new(5, 4)));
+    }
+
+    /// When a `LockedDoor` has `dialogue_id: Some(...)` AND the party carries the
+    /// correct key, the door must open immediately — the dialogue must NOT fire.
+    #[test]
+    fn test_try_interact_locked_door_event_with_key_and_dialogue_id_opens_door() {
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{App, MinimalPlugins};
+
+        let mut game_state = build_game_state();
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_event(
+                Position::new(5, 4),
+                MapEvent::LockedDoor {
+                    name: "Barred Passage".to_string(),
+                    lock_id: DOOR_LOCK_ID.to_string(),
+                    key_item_id: Some(DOOR_KEY_ID),
+                    initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: Some(500), // <-- dialogue is set
+                },
+            );
+            if let Some(tile) = map.get_tile_mut(Position::new(5, 4)) {
+                tile.wall_type = WallType::Door;
+                tile.blocked = true;
+            }
+            map.lock_states
+                .insert(DOOR_LOCK_ID.to_string(), LockState::new(DOOR_LOCK_ID));
+        }
+        // Party carries the key.
+        game_state.party.members[0]
+            .inventory
+            .add_item(DOOR_KEY_ID, 1)
+            .expect("inventory must not be full for test key");
+
+        let mut game_log = GameLog::default();
+        let mut lock_pending = LockInteractionPending::default();
+        let mut pending = PendingEventInteractionContext::default();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<StartDialogue>();
+
+        let handled = {
+            let world = app.world_mut();
+            let mut state = SystemState::<MessageWriter<StartDialogue>>::new(world);
+            let mut writer = state.get_mut(world).unwrap();
+            let result = try_interact_locked_door_event(
+                &mut game_state,
+                Position::new(5, 4),
+                None,
+                &mut game_log,
+                &mut lock_pending,
+                &mut writer,
+                &mut pending,
+            );
+            let _ = writer;
+            state.apply(world);
+            result
+        };
+
+        assert!(handled, "interaction must be consumed");
+        // Door should be open.
+        let map = game_state.world.get_current_map().unwrap();
+        let tile = map.get_tile(Position::new(5, 4)).unwrap();
+        assert_eq!(tile.wall_type, WallType::None, "wall_type must be cleared");
+        assert!(!tile.blocked, "tile must be unblocked");
+        assert!(
+            map.get_event(Position::new(5, 4)).is_none(),
+            "event must be removed after unlock"
+        );
+        // Key must be consumed.
+        assert!(
+            !game_state.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|slot| slot.item_id == DOOR_KEY_ID),
+            "key must be removed from inventory"
+        );
+        // Dialogue must NOT have been opened.
+        assert!(
+            pending.0.is_none(),
+            "dialogue must not fire when party already has the key"
+        );
+        // Lock-pending UI must NOT have been set.
+        assert!(
+            lock_pending.lock_id.is_none(),
+            "lock_pending must not be set when key opened the door"
+        );
+    }
+
+    /// When a `LockedDoor` has `dialogue_id: Some(...)` and the party does NOT
+    /// carry the key, the configured dialogue must open (not the lock-pending UI).
+    #[test]
+    fn test_try_interact_locked_door_event_without_key_and_dialogue_id_opens_dialogue() {
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{App, MinimalPlugins};
+
+        let mut game_state = build_game_state();
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_event(
+                Position::new(5, 4),
+                MapEvent::LockedDoor {
+                    name: "Barred Passage".to_string(),
+                    lock_id: DOOR_LOCK_ID.to_string(),
+                    key_item_id: Some(DOOR_KEY_ID),
+                    initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: Some(500), // <-- dialogue is set
+                },
+            );
+            map.lock_states
+                .insert(DOOR_LOCK_ID.to_string(), LockState::new(DOOR_LOCK_ID));
+        }
+        // Party does NOT carry the key.
+
+        let mut game_log = GameLog::default();
+        let mut lock_pending = LockInteractionPending::default();
+        let mut pending = PendingEventInteractionContext::default();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<StartDialogue>();
+
+        let handled = {
+            let world = app.world_mut();
+            let mut state = SystemState::<MessageWriter<StartDialogue>>::new(world);
+            let mut writer = state.get_mut(world).unwrap();
+            let result = try_interact_locked_door_event(
+                &mut game_state,
+                Position::new(5, 4),
+                None,
+                &mut game_log,
+                &mut lock_pending,
+                &mut writer,
+                &mut pending,
+            );
+            let _ = writer;
+            state.apply(world);
+            result
+        };
+
+        assert!(handled, "interaction must be consumed");
+        // Dialogue context must be populated (dialogue opened).
+        assert!(
+            pending.0.is_some(),
+            "dialogue must open when party lacks the key and dialogue_id is set"
+        );
+        let ctx = pending.0.unwrap();
+        assert_eq!(
+            ctx.event_position,
+            Position::new(5, 4),
+            "event position must match the door tile"
+        );
+        // Lock-pending UI must ALSO be set so Pick Lock / Bash are offered
+        // once the player dismisses the hint dialogue.
+        assert_eq!(
+            lock_pending.lock_id.as_deref(),
+            Some(DOOR_LOCK_ID),
+            "lock_pending must be set so Pick Lock / Bash appear after dialogue"
+        );
+        assert_eq!(
+            lock_pending.position,
+            Some(Position::new(5, 4)),
+            "lock_pending position must match the door tile"
+        );
     }
 
     #[test]

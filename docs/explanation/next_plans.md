@@ -602,3 +602,11 @@ We need to add a tray icon for the game like the ones we added for the SDK.
 ## Bugs
 
 Portraits should support jpg images.
+
+## Creatures
+
+@creatures.ron has the same stupid  /*[4]*/  that we removed from other RON files. And it is not loading into the SDK by default even though it exists in the campaign. 
+
+## Potions and Scrolls 
+
+Potions and Scrolls have no effect when used in or out of combat. 

@@ -8083,13 +8083,13 @@
                 x: 3,
                 y: 16,
             ),
-            facing: None,
+            facing: Some(South),
             dialogue_override: None,
         ),
         (
             npc_id: "tutorial_wizard_arcturus",
             position: (
-                x: 13,
+                x: 15,
                 y: 7,
             ),
             facing: Some(North),
