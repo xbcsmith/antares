@@ -1171,7 +1171,8 @@ mod tests {
 
     #[test]
     fn test_jump_target_invalid_for_blocked_tile() {
-        use crate::domain::world::{Map, TerrainType, Tile, WallType, World};
+        use crate::domain::world::terrain::{builtin_terrain_db, TERRAIN_MOUNTAIN};
+        use crate::domain::world::{Map, Tile, WallType, World};
 
         let mut world = World::new();
         let mut map = Map::new(1, "Test".to_string(), "Test".to_string(), 10, 10);
@@ -1179,7 +1180,8 @@ mod tests {
         // Overwrite tile at (3, 3) with Mountain terrain (blocked).
         let block_pos = Position::new(3, 3);
         if let Some(tile) = map.get_tile_mut(block_pos) {
-            *tile = Tile::new(3, 3, TerrainType::Mountain, WallType::None);
+            let db = builtin_terrain_db();
+            *tile = Tile::new(3, 3, TERRAIN_MOUNTAIN, WallType::None, &db);
         }
 
         world.add_map(map);

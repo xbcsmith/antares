@@ -6,6 +6,10 @@ This guide explains how to use the terrain-specific visual controls in the Campa
 
 The map editor provides context-sensitive controls based on the terrain type of the selected tile. This allows you to fine-tune the visual appearance of different terrain types to create rich, varied landscapes.
 
+Terrain types are identified by numeric `TerrainId` values (e.g., Grass = 13001,
+Forest = 13007). The Campaign Builder displays them by name, loaded from the active
+campaign's `TerrainDatabase`.
+
 Terrain-specific controls affect `TileVisualMetadata` and procedural terrain variation. For authored reusable decorations such as imported trees, brush, rocks, or ruins, use the **Landscape** tab and the Map Editor's **Place Landscape** tool instead.
 
 ## Prerequisites
@@ -135,7 +139,7 @@ The specific controls shown depend on the tile's terrain type.
 4. Increase foliage density for vegetation
 5. Result: A stagnant swamp area
 
-### Desert and Snow Tiles
+### Sand, Snow, and Ice Tiles (IDs 13009, 13010, 13011)
 
 **Available Controls**:
 
@@ -143,16 +147,23 @@ The specific controls shown depend on the tile's terrain type.
 
 **Use Cases**:
 
-- Add realistic snow dusting to desert peaks
-- Create blizzard conditions with high coverage
-- Design transition zones between biomes
+- Sand (13009): Create desert terrain with heat haze and sand dune variation
+- Snow (13010): Add blizzard conditions or tundra expanses with high coverage
+- Ice (13011): Frozen surfaces with reflective, slippery appearance
 
-**Example Workflow - Desert Peak with Snow**:
+**Example Workflow - Desert Sand**:
 
-1. Select a desert terrain tile
-2. Adjust "Snow Coverage" to 0.3 for light dusting
-3. Apply a light brown/tan tint for desert sand
-4. Result: Desert terrain with snowy highlights
+1. Select a Sand (13009) terrain tile
+2. Apply a tan/amber tint via the color control for warm desert appearance
+3. Set "Snow Coverage" to 0.0 (no snow in desert regions)
+4. Result: A dry, sunbaked desert surface
+
+**Example Workflow - Snow-covered Tundra**:
+
+1. Select a Snow (13010) terrain tile
+2. Adjust "Snow Coverage" to 0.8 for heavy snowfall appearance
+3. Apply a slight blue tint for cold ambiance
+4. Result: A frozen tundra landscape
 
 ## Using Visual Presets
 
@@ -231,8 +242,12 @@ To reset terrain-specific settings to their default values:
 **A**:
 
 - Verify a tile is actually selected (should be highlighted in the grid)
-- Check that the terrain type matches the expected controls
-- Example: Forest tiles show tree_type controls, but grassland tiles don't
+- Check that the terrain ID matches the expected controls:
+  - Forest (13007): shows tree_type and foliage controls
+  - Grass (13001): shows grass density controls
+  - Mountain (13008): shows rock variant and snow coverage
+  - Water/Swamp (13002/13004): shows water flow direction
+  - Sand/Snow/Ice (13009/13010/13011): shows snow coverage slider
 
 ### Q: My changes don't apply to the tile
 

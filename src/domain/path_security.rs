@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_validate_campaign_relative_path_accepts_normal() {
-        let base = Path::new("campaigns/tutorial");
+        let base = Path::new("campaigns/my_campaign");
         let resolved = validate_campaign_relative_path(base, "data/creatures/goblin.ron").unwrap();
         assert!(resolved.ends_with("data/creatures/goblin.ron"));
         assert!(resolved.starts_with(base));
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_validate_campaign_relative_path_rejects_parent_traversal() {
-        let base = Path::new("campaigns/tutorial");
+        let base = Path::new("campaigns/my_campaign");
         assert_eq!(
             validate_campaign_relative_path(base, "../../etc/passwd"),
             Err(PathSecurityError::ParentTraversal(
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_validate_campaign_relative_path_rejects_embedded_parent() {
-        let base = Path::new("campaigns/tutorial");
+        let base = Path::new("campaigns/my_campaign");
         assert_eq!(
             validate_campaign_relative_path(base, "data/../../secret"),
             Err(PathSecurityError::ParentTraversal(
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_validate_campaign_relative_path_rejects_absolute() {
-        let base = Path::new("campaigns/tutorial");
+        let base = Path::new("campaigns/my_campaign");
         assert_eq!(
             validate_campaign_relative_path(base, "/etc/passwd"),
             Err(PathSecurityError::Absolute("/etc/passwd".to_string()))
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_validate_campaign_relative_path_rejects_empty() {
-        let base = Path::new("campaigns/tutorial");
+        let base = Path::new("campaigns/my_campaign");
         assert_eq!(
             validate_campaign_relative_path(base, "   "),
             Err(PathSecurityError::Empty)

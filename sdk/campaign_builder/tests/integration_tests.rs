@@ -386,8 +386,8 @@ fn test_map_editor_terrain_wall_independence() {
 
     // Verify old pattern (terrain/wall as enum payloads) is removed
     assert!(
-        !map_editor_src.contains("PaintTerrain(TerrainType)"),
-        "Should not use PaintTerrain(TerrainType) - terrain/wall should be independent"
+        !map_editor_src.contains("PaintTerrain("),
+        "Should not use PaintTerrain(..) variant - terrain/wall should be independent"
     );
 
     // Verify paint_tile function exists

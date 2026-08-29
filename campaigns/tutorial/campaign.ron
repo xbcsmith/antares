@@ -4,7 +4,7 @@ CampaignMetadata(
     version: "1.0.0",
     author: "Brett Smith",
     description: "Tutorial Campaign",
-    engine_version: "0.1.0",
+    engine_version: "1.0.0",
     starting_map: "1",
     starting_position: (9, 17),
     starting_direction: "North",
@@ -38,6 +38,7 @@ CampaignMetadata(
     stock_templates_file: "data/npc_stock_templates.ron",
     furniture_file: "data/furniture.ron",
     landscape_file: "data/landscape.ron",
+    terrain_file: "data/terrain.ron",
     levels_file: "data/levels.ron",
     starting_time: GameTime(
         year: 1000,

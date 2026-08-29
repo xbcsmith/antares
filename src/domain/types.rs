@@ -118,6 +118,37 @@ pub type LandscapeMeshId = u32;
 /// ```
 pub const LANDSCAPE_MESH_ID_MIN: LandscapeMeshId = 11_000;
 
+/// Terrain definition identifier.
+///
+/// Used to reference [`TerrainDefinition`](crate::domain::world::terrain::TerrainDefinition)
+/// entries in a [`TerrainDatabase`](crate::domain::world::terrain::TerrainDatabase).
+/// Built-in terrain occupies IDs `13000`–`13011`; campaign-defined custom terrain
+/// starts at `13100` by convention. `0` is reserved as an unassigned/invalid sentinel.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::{TerrainId, TERRAIN_ID_MIN};
+///
+/// let ground_id: TerrainId = TERRAIN_ID_MIN;
+/// assert_eq!(ground_id, 13_000);
+/// ```
+pub type TerrainId = u32;
+
+/// Minimum terrain definition ID.
+///
+/// Built-in terrain occupies `13000`–`13011`. Campaign-defined custom terrain
+/// starts at `13100` by convention (not enforced at runtime).
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::TERRAIN_ID_MIN;
+///
+/// assert_eq!(TERRAIN_ID_MIN, 13_000);
+/// ```
+pub const TERRAIN_ID_MIN: TerrainId = 13_000;
+
 // ===== Position =====
 
 /// 2D position on a map

@@ -17,6 +17,7 @@ use crate::application::GameMode;
 ///
 /// - `Menu`
 /// - `Inventory`
+/// - `ContainerInventory`
 /// - `Automap`
 /// - `Combat`
 /// - `Resting`
@@ -30,8 +31,14 @@ use crate::application::GameMode;
 /// only stood down via the `egui_wants_any_pointer_input` run condition,
 /// which is written in `PostUpdate` -- one frame *after* the Character Sheet
 /// UI draws in `Update` -- so exploration input could leak through on the
-/// frame the sheet opened. Every other modal screen already avoided this by
-/// being listed here; `CharacterSheet` was the one omission.
+/// frame the sheet opened.
+///
+/// `ContainerInventory` was missing for the same reason: pressing the interact
+/// key while a chest was open would re-fire `MapEventTriggered` with a stale
+/// snapshot of the map event (before any take had been synced), causing
+/// `handle_events` to call `enter_container_inventory` again with the original
+/// items and resetting the container state mid-session. Players could exploit
+/// this to loot the same item twice.
 ///
 /// Dialogue is intentionally **not** blocked for movement because the current
 /// input flow allows "move to cancel" behavior.
@@ -58,6 +65,7 @@ pub fn movement_blocked_for_mode(mode: &GameMode) -> bool {
         mode,
         GameMode::Menu(_)
             | GameMode::Inventory(_)
+            | GameMode::ContainerInventory(_)
             | GameMode::Automap
             | GameMode::Combat(_)
             | GameMode::Resting(_)
@@ -319,6 +327,37 @@ mod tests {
         assert!(
             input_blocked_for_mode(&GameMode::GameOver),
             "All exploration input must be blocked in GameOver — the party is dead"
+        );
+    }
+
+    #[test]
+    fn test_movement_blocked_for_container_inventory_true() {
+        let mut state = GameState::new();
+        state.enter_container_inventory("chest".to_string(), "Chest".to_string(), vec![], 0, 0);
+        assert!(
+            movement_blocked_for_mode(&state.mode),
+            "Movement must be blocked while ContainerInventory is open — \
+             prevents interact-key from re-firing MapEventTriggered with stale items"
+        );
+    }
+
+    #[test]
+    fn test_interaction_blocked_for_container_inventory_true() {
+        let mut state = GameState::new();
+        state.enter_container_inventory("chest".to_string(), "Chest".to_string(), vec![], 0, 0);
+        assert!(
+            interaction_blocked_for_mode(&state.mode),
+            "Interaction must be blocked while ContainerInventory is open"
+        );
+    }
+
+    #[test]
+    fn test_input_blocked_for_container_inventory_true() {
+        let mut state = GameState::new();
+        state.enter_container_inventory("chest".to_string(), "Chest".to_string(), vec![], 0, 0);
+        assert!(
+            input_blocked_for_mode(&state.mode),
+            "All exploration input must be blocked while ContainerInventory is open"
         );
     }
 

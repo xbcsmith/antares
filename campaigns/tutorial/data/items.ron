@@ -75,7 +75,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: Some(9003),
+        mesh_id: Some(9010),
     ),
     (
         id: 4,

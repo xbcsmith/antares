@@ -6,9 +6,8 @@
 //! Migrated from `src/bin/generate_terrain_textures.rs`. Exposes [`run`] as
 //! the single entry point called by `src/bin/antares_sdk.rs`.
 //!
-//! This module has **no antares library imports** — all generation logic is
-//! self-contained and depends only on the `image` crate and the standard
-//! library.
+//! Terrain specs are built dynamically from [`TerrainDatabase`] so that
+//! campaign-defined terrain types are automatically included.
 //!
 //! # Subcommands
 //!
@@ -23,7 +22,7 @@
 //!
 //! ```text
 //! <output-dir>/
-//!   terrain/     ← 9 terrain PNGs (64×64)
+//!   terrain/     ← 12 terrain PNGs (64×64)
 //!   grass/       ← grass_blade.png (32×128)
 //!   trees/       ← bark.png + 6 foliage PNGs
 //! ```
@@ -48,6 +47,8 @@ use clap::{Args, Subcommand};
 use image::{ImageBuffer, Rgba};
 use std::f32::consts::PI;
 use std::path::{Path, PathBuf};
+
+use crate::domain::world::terrain::{builtin_terrain_db, TerrainDatabase};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // CLI argument structs
@@ -146,8 +147,10 @@ fn run_generate(args: TexturesGenerateArgs) -> Result<(), Box<dyn std::error::Er
     })?;
 
     println!("Writing terrain textures to: {}", terrain_dir.display());
-    for spec in TERRAIN_SPECS {
-        let path = terrain_dir.join(spec.filename);
+    let terrain_db = builtin_terrain_db();
+    let terrain_specs = terrain_specs_for_db(&terrain_db);
+    for spec in &terrain_specs {
+        let path = terrain_dir.join(&spec.filename);
         let img = generate_texture(spec);
         match img.save(&path) {
             Ok(()) => println!("  ✓  {}", spec.filename),
@@ -157,7 +160,7 @@ fn run_generate(args: TexturesGenerateArgs) -> Result<(), Box<dyn std::error::Er
             }
         }
     }
-    println!("Done. {} terrain textures written.", TERRAIN_SPECS.len());
+    println!("Done. {} terrain textures written.", terrain_specs.len());
 
     // ── Grass ─────────────────────────────────────────────────────────────────
     let grass_dir = base.join("grass");
@@ -325,7 +328,7 @@ pub struct FoliageTextureSpec {
 /// Describes one terrain texture to generate.
 struct TerrainTextureSpec {
     /// Output filename (placed in `terrain/` sub-directory).
-    filename: &'static str,
+    filename: String,
     /// Base red channel value (0–255).
     r: u8,
     /// Base green channel value (0–255).
@@ -339,83 +342,40 @@ struct TerrainTextureSpec {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Static specs
+// Dynamic terrain specs
 // ──────────────────────────────────────────────────────────────────────────────
 
-const TERRAIN_SPECS: &[TerrainTextureSpec] = &[
-    TerrainTextureSpec {
-        filename: "ground.png",
-        r: 100,
-        g: 95,
-        b: 85,
-        a: 255,
-        seed: 0x1A2B_3C4D_5E6F_7081,
-    },
-    TerrainTextureSpec {
-        filename: "grass.png",
-        r: 65,
-        g: 120,
-        b: 50,
-        a: 255,
-        seed: 0x2B3C_4D5E_6F70_8192,
-    },
-    TerrainTextureSpec {
-        filename: "stone.png",
-        r: 130,
-        g: 130,
-        b: 135,
-        a: 255,
-        seed: 0x3C4D_5E6F_7081_92A3,
-    },
-    TerrainTextureSpec {
-        filename: "mountain.png",
-        r: 90,
-        g: 88,
-        b: 90,
-        a: 255,
-        seed: 0x4D5E_6F70_8192_A3B4,
-    },
-    TerrainTextureSpec {
-        filename: "dirt.png",
-        r: 110,
-        g: 80,
-        b: 55,
-        a: 255,
-        seed: 0x5E6F_7081_92A3_B4C5,
-    },
-    TerrainTextureSpec {
-        filename: "water.png",
-        r: 55,
-        g: 105,
-        b: 200,
-        a: 255,
-        seed: 0x6F70_8192_A3B4_C5D6,
-    },
-    TerrainTextureSpec {
-        filename: "lava.png",
-        r: 210,
-        g: 75,
-        b: 50,
-        a: 255,
-        seed: 0x7081_92A3_B4C5_D6E7,
-    },
-    TerrainTextureSpec {
-        filename: "swamp.png",
-        r: 88,
-        g: 100,
-        b: 55,
-        a: 255,
-        seed: 0x8192_A3B4_C5D6_E7F8,
-    },
-    TerrainTextureSpec {
-        filename: "forest_floor.png",
-        r: 50,
-        g: 95,
-        b: 40,
-        a: 255,
-        seed: 0x92A3_B4C5_D6E7_F809,
-    },
-];
+/// Derives a deterministic texture noise seed from a terrain ID.
+///
+/// Uses a multiplicative hash to spread consecutive IDs into distinct seeds.
+fn terrain_texture_seed(id: u32) -> u64 {
+    let x = id as u64;
+    x.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(0x6c62_272e_07bb_0142)
+}
+
+/// Generates texture specs for all terrain definitions in the database.
+///
+/// Colors come from `TerrainDefinition.color`; seeds are derived
+/// deterministically from the terrain ID.
+fn terrain_specs_for_db(db: &TerrainDatabase) -> Vec<TerrainTextureSpec> {
+    let mut defs = db.all_definitions();
+    defs.sort_by_key(|d| d.id);
+    defs.iter()
+        .map(|def| {
+            let [r, g, b] = def.color;
+            let filename_base = def.name.to_lowercase().replace(' ', "_");
+            TerrainTextureSpec {
+                filename: format!("{filename_base}.png"),
+                r: (r * 255.0).round() as u8,
+                g: (g * 255.0).round() as u8,
+                b: (b * 255.0).round() as u8,
+                a: 255,
+                seed: terrain_texture_seed(def.id),
+            }
+        })
+        .collect()
+}
 
 /// All foliage output specs. Filenames, dimensions, and seeds must remain fixed.
 const FOLIAGE_SPECS: &[FoliageTextureSpec] = &[
@@ -996,33 +956,36 @@ mod tests {
 
     #[test]
     fn test_terrain_specs_unique_seeds() {
-        let seeds: Vec<u64> = TERRAIN_SPECS.iter().map(|s| s.seed).collect();
-        let mut sorted = seeds.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
+        let specs = terrain_specs_for_db(&builtin_terrain_db());
+        let mut seeds: Vec<u64> = specs.iter().map(|s| s.seed).collect();
+        let original_len = seeds.len();
+        seeds.sort_unstable();
+        seeds.dedup();
         assert_eq!(
-            sorted.len(),
             seeds.len(),
-            "Duplicate seeds found in TERRAIN_SPECS"
+            original_len,
+            "Duplicate seeds found in terrain specs"
         );
     }
 
     #[test]
     fn test_terrain_specs_unique_filenames() {
-        let mut names: Vec<&str> = TERRAIN_SPECS.iter().map(|s| s.filename).collect();
+        let specs = terrain_specs_for_db(&builtin_terrain_db());
+        let mut names: Vec<&str> = specs.iter().map(|s| s.filename.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), TERRAIN_SPECS.len());
+        assert_eq!(names.len(), specs.len());
     }
 
     #[test]
     fn test_terrain_specs_count() {
-        assert_eq!(TERRAIN_SPECS.len(), 9, "Expected exactly 9 terrain specs");
+        let specs = terrain_specs_for_db(&builtin_terrain_db());
+        assert_eq!(specs.len(), 12, "Expected exactly 12 terrain specs");
     }
 
     #[test]
     fn test_terrain_specs_all_opaque() {
-        for spec in TERRAIN_SPECS {
+        for spec in &terrain_specs_for_db(&builtin_terrain_db()) {
             assert_eq!(spec.a, 255, "Spec '{}' must be fully opaque", spec.filename);
         }
     }
@@ -1099,7 +1062,8 @@ mod tests {
 
     #[test]
     fn test_generate_texture_dimensions() {
-        let spec = &TERRAIN_SPECS[0];
+        let specs = terrain_specs_for_db(&builtin_terrain_db());
+        let spec = &specs[0];
         let img = generate_texture(spec);
         assert_eq!(img.width(), IMAGE_WIDTH);
         assert_eq!(img.height(), IMAGE_HEIGHT);
@@ -1107,7 +1071,7 @@ mod tests {
 
     #[test]
     fn test_generate_texture_pixels_in_bounds() {
-        for spec in TERRAIN_SPECS {
+        for spec in &terrain_specs_for_db(&builtin_terrain_db()) {
             let img = generate_texture(spec);
             for pixel in img.pixels() {
                 let lo = (spec.r as i32 - NOISE_RANGE).max(0) as u8;
@@ -1124,7 +1088,8 @@ mod tests {
 
     #[test]
     fn test_generate_texture_is_deterministic() {
-        let spec = &TERRAIN_SPECS[0];
+        let specs = terrain_specs_for_db(&builtin_terrain_db());
+        let spec = &specs[0];
         let img1 = generate_texture(spec);
         let img2 = generate_texture(spec);
         assert_eq!(img1.as_raw(), img2.as_raw());
@@ -1132,8 +1097,9 @@ mod tests {
 
     #[test]
     fn test_generate_texture_different_seeds_differ() {
-        let img1 = generate_texture(&TERRAIN_SPECS[0]);
-        let img2 = generate_texture(&TERRAIN_SPECS[1]);
+        let specs = terrain_specs_for_db(&builtin_terrain_db());
+        let img1 = generate_texture(&specs[0]);
+        let img2 = generate_texture(&specs[1]);
         assert_ne!(img1.as_raw(), img2.as_raw());
     }
 
@@ -1516,11 +1482,12 @@ mod tests {
         };
         run_generate(args).expect("run_generate should succeed");
 
-        // Terrain
+        // Terrain — all 12 built-in terrain files
         let terrain_dir = base.join("terrain");
-        for spec in TERRAIN_SPECS {
+        let terrain_specs = terrain_specs_for_db(&builtin_terrain_db());
+        for spec in &terrain_specs {
             assert!(
-                terrain_dir.join(spec.filename).exists(),
+                terrain_dir.join(&spec.filename).exists(),
                 "missing terrain file: {}",
                 spec.filename
             );
@@ -1542,5 +1509,22 @@ mod tests {
                 spec.filename
             );
         }
+    }
+
+    #[test]
+    fn test_texture_generator_covers_all_database_terrains() {
+        let db = builtin_terrain_db();
+        let specs = terrain_specs_for_db(&db);
+        // Every terrain in the database has a spec.
+        assert_eq!(specs.len(), db.len());
+        // All 12 built-ins present.
+        assert_eq!(specs.len(), 12);
+        // Filenames correspond to terrain names.
+        let filenames: std::collections::HashSet<&str> =
+            specs.iter().map(|s| s.filename.as_str()).collect();
+        assert!(filenames.contains("ground.png"));
+        assert!(filenames.contains("sand.png"));
+        assert!(filenames.contains("snow.png"));
+        assert!(filenames.contains("ice.png"));
     }
 }

@@ -26,8 +26,13 @@
 //! - `help` — Show help
 //! - `quit` / `exit` — Exit builder
 
-use crate::domain::types::{MapId, Position};
-use crate::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
+use crate::domain::types::{MapId, Position, TerrainId};
+use crate::domain::world::terrain::{
+    builtin_terrain_db, TerrainDatabase, TERRAIN_DIRT, TERRAIN_FOREST, TERRAIN_GRASS,
+    TERRAIN_GROUND, TERRAIN_ICE, TERRAIN_LAVA, TERRAIN_MOUNTAIN, TERRAIN_SAND, TERRAIN_SNOW,
+    TERRAIN_STONE, TERRAIN_SWAMP, TERRAIN_WATER,
+};
+use crate::domain::world::{Map, MapEvent, Tile, WallType};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::fs;
@@ -39,12 +44,14 @@ use std::io;
 
 /// Interactive map builder state.
 ///
-/// Holds an optional in-progress [`Map`] and the auto-show flag. Construct
-/// via [`MapBuilder::new`] then drive by calling [`MapBuilder::process_command`]
-/// in a REPL loop.
+/// Holds an optional in-progress [`Map`], the auto-show flag, and a
+/// [`TerrainDatabase`] pre-loaded with all built-in terrain definitions for
+/// tile construction.
 pub struct MapBuilder {
     map: Option<Map>,
     auto_show: bool,
+    /// Terrain database for seeding tile blocked flags in [`Tile::new`].
+    terrain_db: TerrainDatabase,
 }
 
 impl MapBuilder {
@@ -53,6 +60,7 @@ impl MapBuilder {
         Self {
             map: None,
             auto_show: true,
+            terrain_db: builtin_terrain_db(),
         }
     }
 
@@ -102,7 +110,7 @@ impl MapBuilder {
     }
 
     /// Sets a single tile at the given coordinates.
-    pub fn set_tile(&mut self, x: i32, y: i32, terrain: TerrainType, wall: WallType) {
+    pub fn set_tile(&mut self, x: i32, y: i32, terrain: TerrainId, wall: WallType) {
         let Some(ref mut map) = self.map else {
             println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
             return;
@@ -115,8 +123,8 @@ impl MapBuilder {
         }
 
         if let Some(tile) = map.get_tile_mut(pos) {
-            *tile = Tile::new(x, y, terrain, wall);
-            println!("✅ Set tile at ({}, {}) to {:?}/{:?}", x, y, terrain, wall);
+            *tile = Tile::new(x, y, terrain, wall, &self.terrain_db);
+            println!("✅ Set tile at ({}, {}) to {}/{:?}", x, y, terrain, wall);
 
             if self.auto_show {
                 self.show_map();
@@ -131,7 +139,7 @@ impl MapBuilder {
         y1: i32,
         x2: i32,
         y2: i32,
-        terrain: TerrainType,
+        terrain: TerrainId,
         wall: WallType,
     ) {
         let Some(ref mut map) = self.map else {
@@ -150,14 +158,14 @@ impl MapBuilder {
                 let pos = Position::new(x, y);
                 if map.is_valid_position(pos) {
                     if let Some(tile) = map.get_tile_mut(pos) {
-                        *tile = Tile::new(x, y, terrain, wall);
+                        *tile = Tile::new(x, y, terrain, wall, &self.terrain_db);
                         count += 1;
                     }
                 }
             }
         }
 
-        println!("✅ Filled {} tiles with {:?}/{:?}", count, terrain, wall);
+        println!("✅ Filled {} tiles with {}/{:?}", count, terrain, wall);
 
         if self.auto_show {
             self.show_map();
@@ -166,7 +174,7 @@ impl MapBuilder {
 
     /// Bulk-updates tiles whose current terrain is in `terrains_csv`.
     ///
-    /// `terrains_csv` is a comma-separated list of [`TerrainType`] names
+    /// `terrains_csv` is a comma-separated list of terrain names or numeric IDs
     /// (case-insensitive). All matching tiles have their `wall_type` and
     /// `blocked` flag overwritten with the given values.
     ///
@@ -181,9 +189,10 @@ impl MapBuilder {
             return;
         };
 
-        let terrains: Vec<TerrainType> = terrains_csv
+        let db = &self.terrain_db;
+        let terrains: Vec<TerrainId> = terrains_csv
             .split(',')
-            .map(|s| parse_terrain(s.trim()))
+            .map(|s| parse_terrain(s.trim(), db))
             .collect();
 
         let mut count = 0;
@@ -269,17 +278,7 @@ impl MapBuilder {
                 } else if map.events.contains_key(&pos) {
                     '!'
                 } else {
-                    match tile.terrain {
-                        TerrainType::Ground => '.',
-                        TerrainType::Grass => ',',
-                        TerrainType::Water => '~',
-                        TerrainType::Lava => '^',
-                        TerrainType::Swamp => '%',
-                        TerrainType::Stone => '░',
-                        TerrainType::Dirt => ':',
-                        TerrainType::Forest => '♣',
-                        TerrainType::Mountain => '▲',
-                    }
+                    builtin_glyph(tile.terrain).unwrap_or('?')
                 };
                 print!("{}", c);
             }
@@ -393,7 +392,7 @@ impl MapBuilder {
                         return true;
                     }
                 };
-                let terrain = parse_terrain(parts[3]);
+                let terrain = parse_terrain(parts[3], &self.terrain_db);
                 let wall = if parts.len() == 5 {
                     parse_wall(parts[4])
                 } else {
@@ -434,7 +433,7 @@ impl MapBuilder {
                         return true;
                     }
                 };
-                let terrain = parse_terrain(parts[5]);
+                let terrain = parse_terrain(parts[5], &self.terrain_db);
                 let wall = if parts.len() == 7 {
                     parse_wall(parts[6])
                 } else {
@@ -586,25 +585,69 @@ impl Default for MapBuilder {
 // Free-standing helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Parses a terrain type name (case-insensitive) into a [`TerrainType`].
+/// Returns the ASCII display glyph for a built-in terrain ID, or `None` for
+/// custom campaign terrain.
 ///
-/// Unrecognised names default to [`TerrainType::Ground`] with a warning.
-pub fn parse_terrain(s: &str) -> TerrainType {
-    match s.to_lowercase().as_str() {
-        "ground" => TerrainType::Ground,
-        "grass" => TerrainType::Grass,
-        "water" => TerrainType::Water,
-        "lava" => TerrainType::Lava,
-        "swamp" => TerrainType::Swamp,
-        "stone" => TerrainType::Stone,
-        "dirt" => TerrainType::Dirt,
-        "forest" => TerrainType::Forest,
-        "mountain" => TerrainType::Mountain,
-        _ => {
-            println!("⚠️  Unknown terrain '{}', using Ground", s);
-            TerrainType::Ground
-        }
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::terrain::{TERRAIN_GROUND, TERRAIN_WATER};
+/// use antares::sdk::cli::map_builder::builtin_glyph;
+///
+/// assert_eq!(builtin_glyph(TERRAIN_GROUND), Some('.'));
+/// assert_eq!(builtin_glyph(TERRAIN_WATER), Some('~'));
+/// assert_eq!(builtin_glyph(99999), None);
+/// ```
+pub fn builtin_glyph(id: TerrainId) -> Option<char> {
+    match id {
+        TERRAIN_GROUND => Some('.'),
+        TERRAIN_GRASS => Some(','),
+        TERRAIN_WATER => Some('~'),
+        TERRAIN_LAVA => Some('^'),
+        TERRAIN_SWAMP => Some('%'),
+        TERRAIN_STONE => Some('░'),
+        TERRAIN_DIRT => Some(':'),
+        TERRAIN_FOREST => Some('♣'),
+        TERRAIN_MOUNTAIN => Some('▲'),
+        TERRAIN_SAND => Some('~'),
+        TERRAIN_SNOW => Some('*'),
+        TERRAIN_ICE => Some('≈'),
+        _ => None,
     }
+}
+
+/// Parses a terrain name (case-insensitive) or numeric ID into a [`TerrainId`].
+///
+/// Looks up the name in the provided [`TerrainDatabase`], so campaign-specific
+/// terrain types are recognised in addition to all built-in terrain names.
+/// Unrecognised names default to [`TERRAIN_GROUND`] with a warning.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::terrain::{builtin_terrain_db, TERRAIN_GRASS};
+/// use antares::sdk::cli::map_builder::parse_terrain;
+///
+/// let db = builtin_terrain_db();
+/// assert_eq!(parse_terrain("grass", &db), TERRAIN_GRASS);
+/// assert_eq!(parse_terrain("Grass", &db), TERRAIN_GRASS);
+/// ```
+pub fn parse_terrain(s: &str, db: &TerrainDatabase) -> TerrainId {
+    // Try to parse as a numeric ID first (for custom campaign terrain)
+    if let Ok(id) = s.trim().parse::<TerrainId>() {
+        return id;
+    }
+    // Case-insensitive name lookup in the terrain database
+    let lower = s.trim().to_lowercase();
+    if let Some(def) = db
+        .all_definitions()
+        .into_iter()
+        .find(|d| d.name.to_lowercase() == lower)
+    {
+        return def.id;
+    }
+    println!("⚠️  Unknown terrain '{}', using Ground", s);
+    TERRAIN_GROUND
 }
 
 /// Parses a wall type name (case-insensitive) into a [`WallType`].
@@ -729,13 +772,46 @@ pub fn run_build() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::world::terrain::{
+        TERRAIN_FOREST, TERRAIN_GRASS, TERRAIN_GROUND, TERRAIN_STONE, TERRAIN_WATER,
+    };
 
     #[test]
     fn test_parse_terrain() {
-        assert_eq!(parse_terrain("ground"), TerrainType::Ground);
-        assert_eq!(parse_terrain("grass"), TerrainType::Grass);
-        assert_eq!(parse_terrain("water"), TerrainType::Water);
-        assert_eq!(parse_terrain("FOREST"), TerrainType::Forest);
+        let db = builtin_terrain_db();
+        assert_eq!(parse_terrain("ground", &db), TERRAIN_GROUND);
+        assert_eq!(parse_terrain("grass", &db), TERRAIN_GRASS);
+        assert_eq!(parse_terrain("water", &db), TERRAIN_WATER);
+        assert_eq!(parse_terrain("FOREST", &db), TERRAIN_FOREST);
+    }
+
+    #[test]
+    fn test_parse_terrain_resolves_custom_campaign_terrain_by_name() {
+        use crate::domain::world::terrain::{
+            TerrainDefinition, TerrainMeshStyle, TerrainVegetation,
+        };
+
+        let custom_id: TerrainId = 13100;
+        let mut db = builtin_terrain_db();
+        db.add(TerrainDefinition {
+            id: custom_id,
+            name: "Volcanic Rock".to_string(),
+            texture_path: "assets/textures/terrain/volcanic_rock.png".to_string(),
+            roughness: 0.9,
+            mesh_style: TerrainMeshStyle::Flat,
+            vegetation: TerrainVegetation::None,
+            blocked: false,
+            height: 0.0,
+            color: [0.3, 0.1, 0.1],
+        })
+        .unwrap();
+
+        assert_eq!(parse_terrain("Volcanic Rock", &db), custom_id);
+        assert_eq!(parse_terrain("volcanic rock", &db), custom_id);
+        // Unknown name returns TERRAIN_GROUND
+        assert_eq!(parse_terrain("nonexistent", &db), TERRAIN_GROUND);
+        // Numeric ID passes through
+        assert_eq!(parse_terrain("13100", &db), custom_id);
     }
 
     #[test]
@@ -792,11 +868,11 @@ mod tests {
     fn test_set_tile() {
         let mut builder = MapBuilder::new();
         builder.create_map(1, 10, 10);
-        builder.set_tile(5, 5, TerrainType::Water, WallType::None);
+        builder.set_tile(5, 5, TERRAIN_WATER, WallType::None);
 
         let map = builder.map.as_ref().unwrap();
         let tile = map.get_tile(Position::new(5, 5)).unwrap();
-        assert_eq!(tile.terrain, TerrainType::Water);
+        assert_eq!(tile.terrain, TERRAIN_WATER);
     }
 
     #[test]
@@ -823,7 +899,7 @@ mod tests {
     fn test_fill_tiles() {
         let mut builder = MapBuilder::new();
         builder.create_map(1, 10, 10);
-        builder.fill_tiles(0, 0, 9, 0, TerrainType::Ground, WallType::Normal);
+        builder.fill_tiles(0, 0, 9, 0, TERRAIN_GROUND, WallType::Normal);
 
         let map = builder.map.as_ref().unwrap();
         for x in 0..10 {
@@ -837,17 +913,17 @@ mod tests {
         let mut builder = MapBuilder::new();
         builder.create_map(1, 5, 5);
 
-        builder.set_tile(1, 1, TerrainType::Forest, WallType::Normal);
+        builder.set_tile(1, 1, TERRAIN_FOREST, WallType::Normal);
         if let Some(ref mut map) = builder.map {
             map.get_tile_mut(Position::new(1, 1)).unwrap().blocked = true;
         }
 
-        builder.set_tile(2, 2, TerrainType::Ground, WallType::Normal);
+        builder.set_tile(2, 2, TERRAIN_GROUND, WallType::Normal);
         if let Some(ref mut map) = builder.map {
             map.get_tile_mut(Position::new(2, 2)).unwrap().blocked = true;
         }
 
-        builder.set_tile(3, 3, TerrainType::Stone, WallType::Normal);
+        builder.set_tile(3, 3, TERRAIN_STONE, WallType::Normal);
         if let Some(ref mut map) = builder.map {
             map.get_tile_mut(Position::new(3, 3)).unwrap().blocked = true;
         }

@@ -2191,7 +2191,7 @@ mod tests {
             timestamp: "2025-01-01 12:00:00".to_string(),
             character_names: vec!["Hero".to_string(), "Mage".to_string()],
             location: "Map 1, (5, 10)".to_string(),
-            game_version: "0.1.0".to_string(),
+            game_version: env!("CARGO_PKG_VERSION").to_string(),
         };
 
         assert_eq!(info.filename, "save_20250101_120000");
