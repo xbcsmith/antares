@@ -105,6 +105,11 @@
         filepath: "assets/creatures/lich_king.ron",
     ),
     (
+        id: 22,
+        name: "Red Kobald",
+        filepath: "assets/creatures/red_kobald.ron",
+    ),
+    (
         id: 1000,
         name: "mountain_village_elder",
         filepath: "assets/creatures/mountain_village_elder.ron",
