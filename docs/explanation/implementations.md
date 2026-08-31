@@ -1,3 +1,63 @@
+## Phase 3: Merchant Character Panel — Text List + Linear Navigation
+
+### Summary
+
+Converted the left panel of the merchant inventory screen (`render_character_sell_panel`)
+from an 8×8 icon-grid to a scrollable text-list matching the style already used by
+the right (merchant stock) panel. Each occupied inventory slot renders as a 24 px row
+showing a dim slot index, the item name in white, and a dim category tag on the right
+(`[Weapon]`, `[Armor]`, `[Potion]`, etc.). An `(empty)` placeholder is shown when the
+character carries no items. Arrow-key navigation on the left panel (`MerchantFocus::Left`)
+is updated from 2D grid movement (Left/Right = column, Up/Down = row) to linear
+Up/Down ±1 movement, matching the right panel's existing behaviour.
+
+### Files Changed
+
+- `src/game/systems/merchant_inventory_ui.rs`
+  - **Imports**: removed `GRID_LINE_COLOR` and `SLOT_COLS` from the
+    `inventory_ui_common` import block (both only used in the deleted grid code);
+    removed `use crate::domain::character::Inventory` from the top-level imports
+    entirely (it was only needed by the deleted grid loop and navigation branch;
+    the one remaining test that needs it already imports it locally within the
+    test function).
+  - **New helper `item_type_tag`**: private function mapping `&ItemType` to a
+    short `&'static str` tag (`[Weapon]`, `[Armor]`, `[Accessory]`, `[Potion]`,
+    `[Ammo]`, `[Quest]`) for display in the text list.
+  - **`render_character_sell_panel`**: replaced the painter block + `cell_child`
+    for-loop (grid rendering + `paint_item_silhouette_pub` calls) with a single
+    `egui::ScrollArea::vertical()` inside a `ui.new_child` body; each occupied
+    slot uses `push_id` + `allocate_exact_size` for a 24 px row with selection
+    highlight (amber fill + 1.5 px yellow border), slot index, item name, and
+    type tag. The action strip (Sell button) beneath is unchanged.
+  - **`merchant_inventory_input_system` — `MerchantFocus::Left` branch**: replaced
+    4-direction grid navigation (`SLOT_COLS`-aware wrap) with linear Up/Down ±1
+    movement bounded by the character's actual `inventory.items.len()`; returns
+    early if the inventory is empty (matching the Right panel's behaviour).
+
+### Key Design Decisions
+
+- **Mirrors the right panel pattern** — the merchant stock list already used linear
+  navigation and a `ScrollArea`; the left panel now uses the same structure for
+  visual and behavioural consistency.
+- **`item_count` from `inventory.items.len()`** — navigation wraps within actual
+  items, never into empty slots.
+- **`Inventory` import removed entirely** — after removing the grid loop and grid
+  navigation, `Inventory::MAX_ITEMS` was no longer used anywhere in the file; the
+  sole remaining test that needs it already imports `Inventory` locally.
+
+### Validation
+
+```
+cargo fmt --all          ✅
+cargo check              ✅  (0 errors, 0 warnings)
+cargo clippy -D warnings ✅  (0 warnings)
+cargo nextest run        ✅  106/106 merchant tests PASS; 8 pre-existing
+                             failures in game::systems::events (AssetServer not
+                             registered in test env — unrelated to this change)
+```
+
+---
+
 ## Phase 2: Inventory UI Refactor — Main Character Inventory Text List + Linear Navigation
 
 ### Summary
