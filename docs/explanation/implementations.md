@@ -1,3 +1,80 @@
+## Phase 4: Container Character Panel — Text List + Linear Navigation
+
+### Summary
+
+Converted the left panel of the container inventory screen
+(`render_character_stash_panel`) from an 8×8 icon-grid to a scrollable text-list
+matching the style already used by the right (container items) panel. Each
+occupied inventory slot renders as a 24 px row showing a dim slot index, the item
+name in white, and a dim category tag on the right (`[Weapon]`, `[Armor]`,
+`[Potion]`, etc.). An `(empty)` placeholder is shown when the character carries no
+items. Arrow-key navigation on the left panel (`ContainerFocus::Left`) is updated
+from 2D grid movement (Left/Right = column, Up/Down = row) to linear Up/Down ±1
+movement, with Left/Right also stepping through the list for discoverability —
+matching the right panel's existing behaviour.
+
+### Files Changed
+
+- `src/game/systems/container_inventory_ui.rs`
+
+  - **Imports**: removed `GRID_LINE_COLOR` and `SLOT_COLS` from the
+    `inventory_ui_common` import block (both only referenced by the deleted grid
+    code); removed `Inventory` from `use crate::domain::character::{Inventory,
+InventorySlot}` (was only needed by the deleted grid loop and navigation branch;
+    `InventorySlot` remains because it is still used by `write_container_items_back`).
+  - **New helper `item_type_tag`**: private function mapping `&ItemType` to a
+    short `&'static str` tag (`[Weapon]`, `[Armor]`, `[Accessory]`, `[Potion]`,
+    `[Ammo]`, `[Quest]`) for display in the text list, placed after `const
+STASH_COLOR` and before `pub struct ContainerInventoryPlugin`.
+  - **`render_character_stash_panel`**: replaced the painter block + `cell_child`
+    for-loop (grid rendering + `paint_item_silhouette_pub` calls) with a single
+    `egui::ScrollArea::vertical()` (`.auto_shrink([true, false])`) inside a
+    `ui.new_child` body; each occupied slot uses `push_id` + `allocate_exact_size`
+    for a 24 px row with selection highlight (amber fill + 1.5 px yellow border),
+    slot index, item name, and type tag; `has_item: true` is always correct for
+    click responses because only real items appear in the list. The action strip
+    (Stash button) beneath is unchanged.
+  - **`container_inventory_input_system` — `ContainerFocus::Left` branch**:
+    replaced 4-direction grid navigation (`SLOT_COLS`-aware wrap) with linear
+    Up/Down / Left/Right ±1 movement bounded by the character's actual
+    `inventory.items.len()`; returns early if the inventory is empty (matching the
+    Right panel's existing behaviour).
+
+- `src/game/systems/inventory_ui_common.rs`
+  - Removed the `SLOT_COLS` constant (`pub(crate) const SLOT_COLS: usize = 8`) which
+    now has zero callers across the codebase after the container panel conversion.
+
+### Key Design Decisions
+
+- **Mirrors the right panel pattern** — the container items list already used
+  linear navigation and a `ScrollArea`; the left panel now uses the same structure
+  for visual and behavioural consistency.
+- **`item_count` from `inventory.items.len()`** — navigation wraps within actual
+  items, never into empty slots.
+- **`Inventory` import removed** — after removing the grid loop and grid
+  navigation, `Inventory::MAX_ITEMS` is no longer used in non-test code in this
+  file; `InventorySlot` is kept as it is still used by `write_container_items_back`.
+- **`paint_item_silhouette_pub` now has zero callers** — the silhouette paint helper
+  in `inventory_ui.rs` was only called from this grid loop; it is no longer invoked
+  anywhere in the codebase after this change.
+- **`SLOT_COLS` removed from `inventory_ui_common`** — the constant had no remaining
+  callers after this change (the main inventory panel in `inventory_ui.rs` never
+  imported it) so it was removed to keep dead code clean.
+
+### Validation
+
+```
+cargo fmt --all          ✅
+cargo check              ✅  (0 errors, 0 warnings)
+cargo clippy -D warnings ✅  (0 warnings)
+cargo nextest run        ✅  35/35 container_inventory_ui tests PASS; 8
+                             pre-existing failures in game::systems::events
+                             (AssetServer not registered in test env — unrelated
+                             to this change)
+```
+
+---
+
 ## Phase 3: Merchant Character Panel — Text List + Linear Navigation
 
 ### Summary
