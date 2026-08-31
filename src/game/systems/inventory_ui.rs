@@ -34,7 +34,9 @@
 use crate::application::inventory_state::InventoryViewMode;
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
-use crate::domain::character::{EquipmentSlot, Inventory, PARTY_MAX_SIZE};
+#[cfg(test)] // used in tests via `use super::*`
+use crate::domain::character::Inventory;
+use crate::domain::character::{EquipmentSlot, PARTY_MAX_SIZE};
 use crate::domain::combat::item_usage::{validate_item_use_slot, ItemUseError};
 use crate::domain::items::consumable_usage::{
     apply_consumable_effect_exploration, ConsumableApplyResult,
@@ -54,7 +56,7 @@ use bevy_egui::{egui, EguiContexts};
 
 use super::inventory_ui_common::{
     ACTION_FOCUSED_COLOR, FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H,
-    PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS, UNFOCUSED_BORDER_COLOR,
+    PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, UNFOCUSED_BORDER_COLOR,
 };
 // Re-export `NavigationPhase` so that existing `use
 // antares::game::systems::inventory_ui::NavigationPhase` paths keep working.
@@ -65,9 +67,19 @@ pub use super::inventory_ui_common::NavigationPhase;
 /// Height of the equipment display strip shown between the header and slot grid.
 /// Two rows of cells (weapon/armor/shield, then helmet/boots/ring/ring).
 const EQUIP_STRIP_H: f32 = 76.0;
-/// Colour for item silhouettes.
-const ITEM_SILHOUETTE_COLOR: egui::Color32 =
-    egui::Color32::from_rgba_premultiplied(230, 230, 230, 255);
+/// Returns a short category tag string for the given item type, shown dim in the
+/// inventory text list to the right of each item name.
+fn item_type_tag(item_type: &crate::domain::items::types::ItemType) -> &'static str {
+    use crate::domain::items::types::ItemType;
+    match item_type {
+        ItemType::Weapon(_) => "[Weapon]",
+        ItemType::Armor(_) => "[Armor]",
+        ItemType::Accessory(_) => "[Accessory]",
+        ItemType::Consumable(_) => "[Potion]",
+        ItemType::Ammo(_) => "[Ammo]",
+        ItemType::Quest(_) => "[Quest]",
+    }
+}
 
 /// Plugin for inventory management UI
 pub struct InventoryPlugin;
@@ -779,28 +791,33 @@ fn handle_grid_navigation(
         return;
     }
 
-    // ── Arrow keys — navigate the slot grid in the focused panel ──────────
+    // ── Arrow keys — navigate the inventory list in the focused panel ──────────
     //
-    // The grid is SLOT_COLS (8) columns × (MAX_ITEMS/SLOT_COLS = 8) rows.
-    // Left/Right move one column; Up/Down move one full row (SLOT_COLS slots).
-    // All movement wraps within 0..MAX_ITEMS.
-    // The first press with no selection starts at slot 0.
-    let max_slots = Inventory::MAX_ITEMS;
+    // Up moves to the previous slot; Down moves to the next slot.
+    // ArrowUp from slot 0 (or no selection) → move focus to the equipment strip.
+    // All movement wraps within 0..items.len().
+    // ArrowLeft and ArrowRight have no meaning in a linear list; they are
+    // consumed by handle_equip_flow when the equipment strip is focused.
+    let item_count = global_state
+        .0
+        .party
+        .members
+        .get(focused_party_index)
+        .map(|ch| ch.inventory.items.len())
+        .unwrap_or(0);
 
-    let any_arrow = keyboard.just_pressed(KeyCode::ArrowRight)
-        || keyboard.just_pressed(KeyCode::ArrowLeft)
-        || keyboard.just_pressed(KeyCode::ArrowDown)
-        || keyboard.just_pressed(KeyCode::ArrowUp);
+    let any_arrow =
+        keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::ArrowUp);
 
     if any_arrow {
-        // ArrowUp from slot row 0 → move focus to the equipment strip
+        // ArrowUp from slot 0 (or no selection) → move focus to the equipment strip
         if keyboard.just_pressed(KeyCode::ArrowUp) {
             let current = match &global_state.0.mode {
-                GameMode::Inventory(s) => s.selected_slot.unwrap_or(0),
-                _ => 0,
+                GameMode::Inventory(s) => s.selected_slot,
+                _ => None,
             };
-            if current < SLOT_COLS {
-                // Entering the equipment strip — clear grid selection
+            if current.is_none_or(|c| c == 0) {
+                // Entering the equipment strip — clear list selection
                 if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
                     inv_state.selected_slot = None;
                 }
@@ -810,24 +827,18 @@ fn handle_grid_navigation(
             }
         }
 
-        if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
-            let current = inv_state.selected_slot.unwrap_or(0);
-            let next = if keyboard.just_pressed(KeyCode::ArrowRight) {
-                (current + 1) % max_slots
-            } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
-                if current == 0 {
-                    max_slots - 1
+        if item_count > 0 {
+            if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
+                let current = inv_state.selected_slot.unwrap_or(0);
+                let next = if keyboard.just_pressed(KeyCode::ArrowDown) {
+                    (current + 1) % item_count
                 } else {
-                    current - 1
-                }
-            } else if keyboard.just_pressed(KeyCode::ArrowDown) {
-                (current + SLOT_COLS) % max_slots
-            } else {
-                // ArrowUp — move one row up (row > 0 case handled above)
-                current.saturating_sub(SLOT_COLS)
-            };
-            inv_state.selected_slot = Some(next);
-            nav_state.selected_slot_index = Some(next);
+                    // ArrowUp — slot > 0 case (slot 0 handled above)
+                    current.saturating_sub(1)
+                };
+                inv_state.selected_slot = Some(next);
+                nav_state.selected_slot_index = Some(next);
+            }
         }
     }
 }
@@ -1573,105 +1584,118 @@ fn render_character_panel(
         });
     }
 
-    // ── Body: slot grid ───────────────────────────────────────────────────
+    // ── Body: scrollable inventory text list ─────────────────────────────
     let body_rect = egui::Rect::from_min_size(
         panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H + EQUIP_STRIP_H + equip_action_reserve),
         egui::vec2(size.x, body_h),
     );
     painter.rect_filled(body_rect, 0.0, PANEL_BG_COLOR);
 
-    // Compute cell size to fill the body exactly: SLOT_COLS wide, rows tall.
-    let slot_rows = Inventory::MAX_ITEMS.div_ceil(SLOT_COLS);
-    let cell_w = (body_rect.width() / SLOT_COLS as f32).floor();
-    let cell_h = (body_rect.height() / slot_rows as f32).floor();
-    let cell_size = cell_w.min(cell_h).max(8.0);
-
-    // Draw grid lines
-    for col in 0..=SLOT_COLS {
-        let x = body_rect.min.x + col as f32 * cell_w;
-        painter.line_segment(
-            [
-                egui::pos2(x, body_rect.min.y),
-                egui::pos2(x, body_rect.max.y),
-            ],
-            egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
-        );
-    }
-    for row in 0..=slot_rows {
-        let y = body_rect.min.y + row as f32 * cell_h;
-        painter.line_segment(
-            [
-                egui::pos2(body_rect.min.x, y),
-                egui::pos2(body_rect.max.x, y),
-            ],
-            egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
-        );
-    }
-
-    // Draw items and selection highlight in each cell.
-    for slot_idx in 0..Inventory::MAX_ITEMS {
-        let col = slot_idx % SLOT_COLS;
-        let row = slot_idx / SLOT_COLS;
-        let cell_min = body_rect.min + egui::vec2(col as f32 * cell_w, row as f32 * cell_h);
-        let cell_rect = egui::Rect::from_min_size(cell_min, egui::vec2(cell_w, cell_h));
-
-        // Selection highlight — yellow ring on the selected slot
-        if selected_slot == Some(slot_idx) {
-            painter.rect_filled(
-                cell_rect.shrink(1.0),
-                0.0,
-                egui::Color32::from_rgba_premultiplied(180, 150, 0, 60),
-            );
-            painter.rect_stroke(
-                cell_rect.shrink(1.0),
-                0.0,
-                egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR),
-                egui::StrokeKind::Outside,
-            );
-        }
-
-        let cell_response = ui.allocate_rect(cell_rect, egui::Sense::click());
-
-        // Item silhouette
-        if slot_idx < items.len() {
-            let item_def =
-                game_content.and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id));
-            let item_type = item_def.map(|it| &it.item_type);
-            paint_item_silhouette(
-                &painter,
-                cell_rect,
-                cell_size,
-                item_type,
-                ITEM_SILHOUETTE_COLOR,
-            );
-
-            // Charge annotation for charged non-consumable magical items (wands,
-            // staves, enchanted accessories).  Displayed as "✨N" in the
-            // bottom-right corner of the cell, matching the ammo-quantity style.
-            let slot = &items[slot_idx];
-            let is_charged_magical = item_def
-                .map(|item| {
-                    item.spell_effect.is_some()
-                        && item.max_charges > 0
-                        && !matches!(item.item_type, ItemType::Consumable(_))
-                })
-                .unwrap_or(false);
-            if is_charged_magical && slot.charges > 0 {
-                let charge_text = format!("\u{2728}{}", slot.charges);
-                painter.text(
-                    cell_rect.right_bottom() + egui::vec2(-2.0, -2.0),
-                    egui::Align2::RIGHT_BOTTOM,
-                    &charge_text,
-                    egui::FontId::proportional(8.0),
-                    egui::Color32::from_rgb(255, 220, 100),
+    // Render inventory items as a scrollable text list using egui widgets.
+    // One row per occupied slot; empty inventory shows an "(empty)" placeholder.
+    let mut body_child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(body_rect)
+            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+    );
+    egui::ScrollArea::vertical()
+        .id_salt(format!("char_inv_scroll_{}", party_index))
+        .max_height(body_h)
+        .show(&mut body_child, |ui| {
+            if items.is_empty() {
+                ui.label(
+                    egui::RichText::new("(empty)")
+                        .color(egui::Color32::from_rgba_premultiplied(120, 120, 120, 255))
+                        .small(),
                 );
-            }
-        }
+            } else {
+                for (slot_idx, slot) in items.iter().enumerate() {
+                    ui.push_id(format!("inv_row_{}", slot_idx), |ui| {
+                        let is_selected = selected_slot == Some(slot_idx);
 
-        if cell_response.clicked() {
-            clicked_slot = Some(slot_idx);
-        }
-    }
+                        let item_def =
+                            game_content.and_then(|gc| gc.db().items.get_item(slot.item_id));
+                        let item_name = item_def
+                            .map(|it| it.name.clone())
+                            .unwrap_or_else(|| format!("#{}", slot.item_id));
+                        let type_tag = item_def
+                            .map(|it| item_type_tag(&it.item_type))
+                            .unwrap_or("");
+
+                        // Charge annotation for charged non-consumable magical items
+                        // (wands, staves, enchanted accessories).
+                        let is_charged_magical = item_def
+                            .map(|item| {
+                                item.spell_effect.is_some()
+                                    && item.max_charges > 0
+                                    && !matches!(item.item_type, ItemType::Consumable(_))
+                            })
+                            .unwrap_or(false);
+                        let charge_suffix = if is_charged_magical && slot.charges > 0 {
+                            format!(" \u{2728}{}", slot.charges)
+                        } else {
+                            String::new()
+                        };
+
+                        const INV_ROW_H: f32 = 24.0;
+                        let (row_rect, response) = ui.allocate_exact_size(
+                            egui::vec2(body_rect.width(), INV_ROW_H),
+                            egui::Sense::click(),
+                        );
+
+                        // Selection highlight — amber fill + yellow border
+                        if is_selected {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                0.0,
+                                egui::Color32::from_rgba_premultiplied(100, 85, 0, 80),
+                            );
+                            ui.painter().rect_stroke(
+                                row_rect.shrink(1.0),
+                                0.0,
+                                egui::Stroke::new(1.5_f32, SELECT_HIGHLIGHT_COLOR),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+
+                        let dim_color = egui::Color32::from_rgba_premultiplied(120, 120, 120, 255);
+
+                        // Slot index (dim, left edge)
+                        ui.painter().text(
+                            row_rect.min + egui::vec2(4.0, INV_ROW_H / 2.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{:2}.", slot_idx + 1),
+                            egui::FontId::proportional(11.0),
+                            dim_color,
+                        );
+
+                        // Item name + charge annotation (white, main area)
+                        ui.painter().text(
+                            row_rect.min + egui::vec2(28.0, INV_ROW_H / 2.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{}{}", item_name, charge_suffix),
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::WHITE,
+                        );
+
+                        // Type tag (dim, right side)
+                        if !type_tag.is_empty() {
+                            ui.painter().text(
+                                row_rect.right_center() - egui::vec2(4.0, 0.0),
+                                egui::Align2::RIGHT_CENTER,
+                                type_tag,
+                                egui::FontId::proportional(11.0),
+                                dim_color,
+                            );
+                        }
+
+                        if response.clicked() {
+                            clicked_slot = Some(slot_idx);
+                        }
+                    });
+                }
+            }
+        });
 
     // ── Action strip (egui widgets, below the painted body) ───────────────
     if has_action {
@@ -3217,7 +3241,7 @@ mod tests {
     // ------------------------------------------------------------------
 
     /// `render_character_panel` must not panic when the character's inventory
-    /// is empty.
+    /// is empty; the text list renders an "(empty)" placeholder.
     #[test]
     fn test_render_character_panel_does_not_panic_empty_inventory() {
         use crate::domain::character::{Alignment, Character, Sex};
@@ -3266,7 +3290,7 @@ mod tests {
     // ------------------------------------------------------------------
 
     /// `render_character_panel` must not panic when the character has
-    /// `Inventory::MAX_ITEMS` slots filled.
+    /// `Inventory::MAX_ITEMS` slots filled; all slots render as text rows.
     #[test]
     fn test_render_character_panel_does_not_panic_full_inventory() {
         use crate::domain::character::{Alignment, Character, InventorySlot, Sex};

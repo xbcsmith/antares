@@ -1,3 +1,67 @@
+## Phase 2: Inventory UI Refactor — Main Character Inventory Text List + Linear Navigation
+
+### Summary
+
+Replaced the fixed 8×8 slot grid in the main character inventory panel with a
+scrollable text-list view. Each occupied slot renders as a 24 px row showing a
+slot index, item name (with charge annotation), and a dimmed category tag
+(`[Weapon]`, `[Armor]`, etc.). Empty inventories show an `(empty)` placeholder.
+Arrow-key navigation is updated to linear Up/Down movement (no more column-aware
+Left/Right grid movement); ArrowUp from slot 0 still shifts focus to the
+equipment strip.
+
+### Files Changed
+
+- `src/game/systems/inventory_ui.rs`
+  - **Imports**: removed `SLOT_COLS` from `inventory_ui_common` import; moved
+    `Inventory` import behind `#[cfg(test)]` (only needed in tests via
+    `use super::*`).
+  - **Removed constant**: `ITEM_SILHOUETTE_COLOR` (no longer referenced after grid
+    removal).
+  - **New helper**: `item_type_tag(&ItemType) -> &'static str` maps an `ItemType`
+    variant to a short bracketed tag string shown dim in the list.
+  - **`handle_grid_navigation`**: replaced 4-direction grid navigation (Left/Right
+    = column, Up/Down = row) with simple linear navigation (Down = next slot, Up =
+    previous slot or focus equipment strip). `item_count` is read directly from the
+    focused character's inventory instead of using `Inventory::MAX_ITEMS`.
+  - **`render_character_panel`**: replaced the painted 8×8 cell grid with a
+    `ScrollArea`-backed text list using `egui::UiBuilder::new_child` +
+    `allocate_exact_size` per row; selection highlight uses an amber fill + 1.5 px
+    yellow stroke; charge annotations (`✨N`) appear inline in the item-name column.
+  - **Test doc comments**: updated two doc comments to reference the new text-list
+    rendering behaviour.
+
+### Key Design Decisions
+
+- **Linear navigation** is simpler and more accessible than a 2D grid for a list
+  of items of variable count.
+- **`item_count` instead of `MAX_ITEMS`** means ArrowDown wraps within the actual
+  items owned, not empty slots.
+- **`#[cfg(test)]` guard on `Inventory`** is the correct fix: the import is only
+  needed in test code (via `use super::*`); keeping it unconditionally triggers
+  `unused_imports` under `-D warnings`.
+- **`is_none_or`** replaces the clippy-flagged `map_or(true, …)` pattern.
+
+### Tests Updated (2 doc comments)
+
+- `test_render_character_panel_does_not_panic_empty_inventory` — updated doc to
+  note the `(empty)` placeholder.
+- `test_render_character_panel_does_not_panic_full_inventory` — updated doc to note
+  that all slots render as text rows.
+
+### Validation
+
+```
+cargo fmt --all          ✅
+cargo check              ✅  (0 errors, 0 warnings)
+cargo clippy -D warnings ✅  (0 warnings)
+cargo nextest run        ✅  134/134 inventory_ui tests PASS; 8 pre-existing
+                             failures in game::systems::events (AssetServer not
+                             registered in test env — unrelated to this change)
+```
+
+---
+
 ## Phase 1: Inventory UI Refactor — View Mode State and Navigation Foundation
 
 ### Summary
