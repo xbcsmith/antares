@@ -1,3 +1,68 @@
+## Phase 1: Inventory UI Refactor — View Mode State and Navigation Foundation
+
+### Summary
+
+Added `InventoryViewMode { Multi, Single }` to the inventory state layer and wired
+it through the input and UI systems. Players can now press **1–6** to collapse the
+multi-panel grid to a single full-width character panel, and press **Tab** from
+that Single view to expand back to Multi view. All existing action logic
+(equip/unequip/drop/use/transfer) is untouched.
+
+### Files Changed
+
+- `src/application/inventory_state.rs` — Added `InventoryViewMode` enum
+  (`Multi` default, `Single`); added `view_mode: InventoryViewMode` field to
+  `InventoryState` (with `#[serde(default)]` for save compatibility); added
+  `enter_single_view(character_index)` and `enter_multi_view(party_size)` methods;
+  updated `tab_next` / `tab_prev` to expand Single → Multi before cycling.
+
+- `src/game/systems/inventory_ui.rs` — Added
+  `use crate::application::inventory_state::InventoryViewMode`; bound digit keys
+  1–6 in `inventory_input_system` (enter Single view on that character); simplified
+  Tab handling to delegate to `tab_next`/`tab_prev` methods; updated
+  `render_equipment_panel` signature to accept `&InventoryViewMode` and show
+  mode-aware hint text; updated `inventory_ui_system` to derive `effective_panels`
+  (single-element slice in Single view) and pass `view_mode` to the render helpers;
+  updated module-level key-binding table.
+
+### Key Design Decisions
+
+| Key         | Multi view                            | Single view                        |
+| ----------- | ------------------------------------- | ---------------------------------- |
+| `1`–`6`     | Collapse to Single, focus character N | Switch character N (stay Single)   |
+| `Tab`       | Cycle focus, add panel                | Expand to Multi then advance focus |
+| `Shift+Tab` | Cycle focus backward                  | Expand to Multi then retreat focus |
+
+### Tests Added (11)
+
+**`inventory_state.rs`** (9 unit tests):
+`test_inventory_view_mode_default_is_multi`,
+`test_enter_single_view_sets_mode_and_updates_index`,
+`test_enter_single_view_preserves_open_panels`,
+`test_enter_multi_view_sets_mode_and_restores_panels`,
+`test_enter_multi_view_empty_party_keeps_panel_zero`,
+`test_enter_multi_view_preserves_focused_index`,
+`test_tab_next_from_single_view_enters_multi_and_advances`,
+`test_tab_prev_from_single_view_enters_multi_and_retreats`,
+`test_inventory_state_new_view_mode_defaults_to_multi`
+
+**`inventory_ui.rs`** (2 Bevy app tests):
+`test_number_key_enters_single_view`,
+`test_tab_from_single_view_enters_multi`
+
+### Validation
+
+```
+cargo fmt --all          ✅
+cargo check              ✅  (0 errors, 0 warnings)
+cargo clippy -D warnings ✅  (0 warnings)
+cargo nextest run        ✅  11/11 new tests PASS; 4 pre-existing failures in
+                             container_event and trap_treasure tests (AssetServer
+                             not registered in test env — unrelated to this change)
+```
+
+---
+
 ## Bug Fix: Static `MapEvent::DroppedItem` Cannot Be Picked Up
 
 ### Summary

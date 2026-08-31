@@ -605,8 +605,21 @@ Portraits should support jpg images.
 
 ## Creatures
 
-@creatures.ron has the same stupid  /*[4]*/  that we removed from other RON files. And it is not loading into the SDK by default even though it exists in the campaign. 
+@creatures.ron has the same stupid  /*[4]*/  that we removed from other RON files. And it is not loading into the SDK by default even though it exists in the campaign.
 
-## Potions and Scrolls 
+## Potions and Scrolls
 
-Potions and Scrolls have no effect when used in or out of combat. 
+Potions and Scrolls have no effect when used in or out of combat.
+
+## BUG
+
+Note that interacting with a despawned entity is the most common cause of this error but there are others
+
+    If you were attempting to apply a command to this entity,
+    and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.
+
+2026-08-29T21:58:06.578780Z  WARN bevy_ecs::error::handler: Encountered an error in command `<bevy_ecs::system::commands::entity_command::despawn::{{closure}} as bevy_ecs::system::commands::entity_command::EntityCommand>::with_entity::{{closure}}`: Entity despawned: The entity with ID 2172v288 is invalid; its index now has generation 289.
+Note that interacting with a despawned entity is the most common cause of this error but there are others
+
+    If you were attempting to apply a command to this entity,
+    and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.

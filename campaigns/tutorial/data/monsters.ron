@@ -404,7 +404,7 @@
             items: [],
             experience: 100,
         ),
-        creature_id: Some(5),
+        creature_id: Some(10),
         conditions: Normal,
         active_conditions: [],
         has_acted: false,

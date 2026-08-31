@@ -13,9 +13,10 @@
 //!
 //! | Key              | Effect                                                                        |
 //! |------------------|-------------------------------------------------------------------------------|
-//! | `Tab`            | Advance focus to the next character panel (yellow border)                     |
-//! | `Shift+Tab`      | Move focus to the previous character panel                                    |
-//! | `←` `→` `↑` `↓` | Navigate the slot grid inside the focused panel                               |
+//! | `1`–`6`          | Focus that character and switch to Single view                                 |
+//! | `Tab`            | In Multi view: advance focus; in Single view: expand to Multi and advance     |
+//! | `Shift+Tab`      | In Multi view: retreat focus; in Single view: expand to Multi and retreat     |
+//! | `↑` `↓`          | Navigate the slot list inside the focused panel                               |
 //! | `Enter`          | Enter **Action Navigation** for the highlighted slot                          |
 //! | `U`              | Use the highlighted consumable directly (bypasses Action Navigation)          |
 //! | `Esc` / `I`      | Close the inventory and resume the previous game mode                         |
@@ -30,6 +31,7 @@
 //!
 //! Follows the `InnUiPlugin` pattern from `src/game/systems/inn_ui.rs` exactly.
 
+use crate::application::inventory_state::InventoryViewMode;
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::character::{EquipmentSlot, Inventory, PARTY_MAX_SIZE};
@@ -920,6 +922,35 @@ fn inventory_input_system(
     // open/close toggle for that key before inventory UI input runs. Duplicating
     // it here would cause the inventory to open and close in the same frame.
 
+    // ── Number keys 1-6: focus a specific character and enter Single view ─
+    //
+    // Pressing a digit collapses the multi-panel grid to a single full-width
+    // panel showing only that character.  Tab (below) reverses the transition.
+    let char_select: Option<usize> = [
+        (KeyCode::Digit1, 0usize),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+        (KeyCode::Digit5, 4),
+        (KeyCode::Digit6, 5),
+    ]
+    .iter()
+    .find(|(key, _)| keyboard.just_pressed(*key))
+    .map(|(_, idx)| *idx);
+
+    if let Some(char_idx) = char_select {
+        if char_idx < party_size {
+            if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                inv_state.enter_single_view(char_idx);
+            }
+            nav_state.selected_slot_index = None;
+            nav_state.focused_action_index = 0;
+            nav_state.selected_equip_slot = None;
+            nav_state.phase = NavigationPhase::SlotNavigation;
+        }
+        return;
+    }
+
     // ── Tab / Shift-Tab — cycle the yellow-border panel focus ─────────────
     //
     // TAB only changes which character panel has focus. It does NOT affect
@@ -933,29 +964,9 @@ fn inventory_input_system(
     if focus_next || focus_prev {
         if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
             if focus_prev {
-                inv_state.focused_index = if inv_state.focused_index == 0 {
-                    party_size.saturating_sub(1)
-                } else {
-                    inv_state.focused_index - 1
-                };
-                // Ensure newly focused panel is in open_panels
-                if !inv_state.open_panels.contains(&inv_state.focused_index)
-                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
-                {
-                    inv_state.open_panels.push(inv_state.focused_index);
-                }
+                inv_state.tab_prev(party_size);
             } else {
-                inv_state.focused_index = if party_size == 0 {
-                    0
-                } else {
-                    (inv_state.focused_index + 1) % party_size
-                };
-                // Ensure newly focused panel is in open_panels
-                if !inv_state.open_panels.contains(&inv_state.focused_index)
-                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
-                {
-                    inv_state.open_panels.push(inv_state.focused_index);
-                }
+                inv_state.tab_next(party_size);
             }
             // Clear slot selection — cursor stays at the new panel's grid
             inv_state.selected_slot = None;
@@ -994,6 +1005,9 @@ fn inventory_input_system(
 
 /// Renders the status line (focused character and selected item) and keyboard
 /// navigation hint below it.
+///
+/// The hint text varies by `view_mode`: Single view shows character-switch and
+/// "Tab: all chars" hints; Multi view shows "1-6: single view" and "Tab: cycle".
 fn render_equipment_panel(
     ui: &mut egui::Ui,
     global_state: &GlobalState,
@@ -1001,6 +1015,7 @@ fn render_equipment_panel(
     selected_slot: Option<usize>,
     game_content: Option<&GameContent>,
     nav_state: &InventoryNavigationState,
+    view_mode: &InventoryViewMode,
 ) {
     // ── Status line: focused character + selected item ───────────────
     {
@@ -1029,14 +1044,19 @@ fn render_equipment_panel(
         }
     }
 
-    // ── Hint line changes based on navigation phase ──────────────────
+    // ── Hint line changes based on navigation phase and view mode ──────────
     let hint = if nav_state.selected_equip_slot.is_some() {
         "←→: cycle equipment slots   ↓: back to inventory   Enter: unequip   Esc: cancel"
     } else {
         match nav_state.phase {
-            NavigationPhase::SlotNavigation => {
-                "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   E: equip   U: use   Esc/I: close"
-            }
+            NavigationPhase::SlotNavigation => match view_mode {
+                InventoryViewMode::Single => {
+                    "1-6: switch char   Tab: all chars   ↑↓: navigate   Enter: select   E: equip   U: use   Esc/I: close"
+                }
+                InventoryViewMode::Multi => {
+                    "1-6: single view   Tab: cycle   ↑↓: navigate   Enter: select   E: equip   U: use   Esc/I: close"
+                }
+            },
             NavigationPhase::ActionNavigation => {
                 "←→: cycle actions   Enter: execute   Esc: cancel"
             }
@@ -1233,6 +1253,12 @@ fn inventory_ui_system(
     let open_panels = inv_state.open_panels.clone();
     let focused_index = inv_state.focused_index;
     let selected_slot = inv_state.selected_slot;
+    let view_mode = inv_state.view_mode.clone();
+    // In Single view only the focused character's panel fills the screen.
+    let effective_panels: Vec<usize> = match view_mode {
+        InventoryViewMode::Multi => open_panels.clone(),
+        InventoryViewMode::Single => vec![focused_index],
+    };
 
     let panel_names: Vec<(usize, String)> = open_panels
         .iter()
@@ -1270,13 +1296,14 @@ fn inventory_ui_system(
             selected_slot,
             game_content.as_deref(),
             &nav_state,
+            &view_mode,
         );
         ui.separator();
 
         // ── Panel layout ─────────────────────────────────────────────────
         let (action, slot_update) = render_item_grid(
             ui,
-            &open_panels,
+            &effective_panels,
             focused_index,
             selected_slot,
             &nav_state,
@@ -3042,6 +3069,123 @@ mod tests {
         assert_eq!(state.focus_on_panel, 0);
         assert_eq!(state.focused_action_index, 0);
         assert!(matches!(state.phase, NavigationPhase::SlotNavigation));
+    }
+
+    // ------------------------------------------------------------------
+    // 3.4.3  Number-key view mode switching
+    // ------------------------------------------------------------------
+
+    /// Pressing digit key `2` while in inventory Multi view must collapse to
+    /// Single view focused on character index 1, and reset navigation state.
+    #[test]
+    fn test_number_key_enters_single_view() {
+        use crate::application::inventory_state::InventoryViewMode;
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut game_state = GameState::new();
+        for name in ["Alpha", "Beta"] {
+            let ch = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            game_state.party.add_member(ch).unwrap();
+        }
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+        app.add_message::<UseItemExplorationAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(InventoryNavigationState::default());
+        app.add_systems(Update, inventory_input_system);
+
+        // Press Digit2 → character index 1
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Digit2);
+        app.update();
+
+        let mode = &app.world().resource::<GlobalState>().0.mode;
+        if let GameMode::Inventory(ref inv) = mode {
+            assert_eq!(
+                inv.view_mode,
+                InventoryViewMode::Single,
+                "Digit2 must switch to Single view"
+            );
+            assert_eq!(inv.focused_index, 1, "Digit2 must focus character index 1");
+            assert_eq!(inv.selected_slot, None, "selected_slot must be cleared");
+        } else {
+            panic!("mode must still be Inventory after number key press");
+        }
+
+        let nav = app.world().resource::<InventoryNavigationState>();
+        assert_eq!(nav.selected_slot_index, None);
+        assert!(matches!(nav.phase, NavigationPhase::SlotNavigation));
+    }
+
+    /// Pressing `Tab` while in Single view must expand back to Multi view and
+    /// advance `focused_index` by one.
+    #[test]
+    fn test_tab_from_single_view_enters_multi() {
+        use crate::application::inventory_state::InventoryViewMode;
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut game_state = GameState::new();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            let ch = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            game_state.party.add_member(ch).unwrap();
+        }
+        game_state.enter_inventory();
+        // Collapse to Single view on character 0 before entering the app
+        if let GameMode::Inventory(ref mut inv) = game_state.mode {
+            inv.enter_single_view(0);
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+        app.add_message::<UseItemExplorationAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(InventoryNavigationState::default());
+        app.add_systems(Update, inventory_input_system);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        app.update();
+
+        let mode = &app.world().resource::<GlobalState>().0.mode;
+        if let GameMode::Inventory(ref inv) = mode {
+            assert_eq!(
+                inv.view_mode,
+                InventoryViewMode::Multi,
+                "Tab from Single view must expand to Multi"
+            );
+            assert_eq!(
+                inv.focused_index, 1,
+                "Tab must advance focused_index from 0 to 1"
+            );
+        } else {
+            panic!("mode must still be Inventory after Tab press");
+        }
     }
 
     // ------------------------------------------------------------------
