@@ -1,3 +1,144 @@
+## Inventory Text-List Refactor — Complete Summary (Phases 1–5)
+
+### What Changed
+
+All three character-facing inventory panels (main inventory, merchant sell panel,
+container stash panel) had their body sections replaced: the 8×8 fixed-size icon
+grid is gone and a scrollable text list now renders in its place. A new
+Single/Multi view mode was added to the main inventory overlay.
+
+#### Replaced in every character panel
+
+| Before                                                               | After                                                                                      |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 8×8 painted cell grid (`SLOT_COLS × slot_rows`)                      | `ScrollArea::vertical()` with one 24 px text row per item                                  |
+| `paint_item_silhouette` / `paint_item_silhouette_pub` calls per cell | None — icons removed entirely                                                              |
+| Grid-line painting (`GRID_LINE_COLOR`)                               | None                                                                                       |
+| 2D Left/Right column + Up/Down row navigation                        | Linear Up/Down ±1 (Left/Right also ±1 for merchant/container, matching their right panels) |
+| Navigation bounded by `Inventory::MAX_ITEMS` (64 empty cells)        | Navigation bounded by `items.len()` (only real items)                                      |
+| Selection highlight on empty cells possible                          | Only occupied rows are rendered; empty inventory shows `(empty)` placeholder               |
+
+#### Row format (all three panels)
+
+```
+  1. Longsword                                    [Weapon]
+  2. Healing Potion                               [Potion]
+  3. Fire Wand ✨3                             [Accessory]
+```
+
+- **Dim slot index** (left, `11 pt`)
+- **White item name** (main area, `13 pt`); inline `✨N` charge annotation for
+  non-consumable charged items (main panel only)
+- **Dim category tag** (right, `11 pt`): `[Weapon]` `[Armor]` `[Accessory]`
+  `[Potion]` `[Ammo]` `[Quest]`
+
+#### What was preserved unchanged
+
+- Equipment strip in the main character panel (7 slots, keyboard + mouse unequip)
+- All action strips (Equip / Use / Drop / Give, Sell, Stash buttons)
+- `ArrowUp` from slot 0 → equipment strip focus (main inventory only)
+- All keyboard-equip flows (`E` key, `Enter` + ActionNavigation)
+- Merchant stock right panel and container items right panel
+- `NavigationPhase`, `InventoryNavigationState`, `MerchantNavState`,
+  `ContainerNavState` structs and their reset logic
+- All action systems (`inventory_action_system`, `merchant_inventory_action_system`,
+  `container_inventory_action_system`)
+- Consumable use logic, spell-scroll logic, wand use logic
+- Save / load compatibility (inventory state fields unchanged)
+
+#### New: Single / Multi view (Phase 1)
+
+`InventoryViewMode { Multi, Single }` was added to `InventoryState`. Pressing
+**1–6** collapses the multi-panel view to a single full-width panel for that
+character; pressing **Tab** or a second number key returns to Multi view.
+
+#### Key-binding changes
+
+| Key                                    | Before                              | After                                 |
+| -------------------------------------- | ----------------------------------- | ------------------------------------- |
+| `←` `→` (main inventory slots)         | Move one grid column left/right     | Removed from slot navigation          |
+| `↑` `↓` (main inventory slots)         | Move one grid row up/down (8 slots) | Move one slot up/down (1 slot)        |
+| `←` `→` `↑` `↓` (merchant left panel)  | 2D grid navigation                  | All four keys do linear ±1            |
+| `←` `→` `↑` `↓` (container left panel) | 2D grid navigation                  | All four keys do linear ±1            |
+| **1–6** (main inventory)               | No effect                           | Focus character and enter Single view |
+
+### Dead Code Removed (Phase 5)
+
+| Symbol                             | File                        | Lines removed |
+| ---------------------------------- | --------------------------- | ------------- |
+| `pub fn paint_item_silhouette_pub` | `inventory_ui.rs`           | ~20           |
+| `fn paint_item_silhouette`         | `inventory_ui.rs`           | ~160          |
+| `const ITEM_SILHOUETTE_COLOR`      | `inventory_ui.rs`           | 2             |
+| `pub(crate) const SLOT_COLS`       | `inventory_ui_common.rs`    | 4             |
+| `GRID_LINE_COLOR` import           | `merchant_inventory_ui.rs`  | —             |
+| `GRID_LINE_COLOR` import           | `container_inventory_ui.rs` | —             |
+| `SLOT_COLS` import                 | `inventory_ui.rs`           | —             |
+| `SLOT_COLS` import                 | `merchant_inventory_ui.rs`  | —             |
+| `SLOT_COLS` import                 | `container_inventory_ui.rs` | —             |
+
+Net reduction in `inventory_ui.rs` from Phase 5 alone: **−196 lines**.
+
+### Final line counts (post-refactor)
+
+| File                                         | Lines |
+| -------------------------------------------- | ----- |
+| `src/game/systems/inventory_ui.rs`           | 6 631 |
+| `src/game/systems/merchant_inventory_ui.rs`  | 2 429 |
+| `src/game/systems/container_inventory_ui.rs` | 2 882 |
+| `src/game/systems/inventory_ui_common.rs`    | 179   |
+
+### Validation
+
+```
+cargo fmt --all          ✅
+cargo check              ✅  0 errors, 0 warnings
+cargo clippy -D warnings ✅  0 warnings
+cargo nextest run        ✅  5559/5590 passed; 31 pre-existing failures in
+                             game::systems::events and combat_integration
+                             (AssetServer not registered in test env —
+                             unrelated to this refactor; previously masked by
+                             nextest fail-fast at 8 visible failures)
+Project-wide grep for `paint_item_silhouette`: 0 matches
+Project-wide grep for `SLOT_COLS`: 0 matches
+```
+
+---
+
+## Phase 5: Dead Code Cleanup
+
+### Summary
+
+Deleted the silhouette rendering engine from `inventory_ui.rs` — the two
+functions (`paint_item_silhouette_pub` and `paint_item_silhouette`) that drew
+geometric item-type icons inside grid cells. Both became callerless after
+Phases 2–4 removed all three grids. Also confirmed that `SLOT_COLS` and
+`ITEM_SILHOUETTE_COLOR` were already cleaned up in the earlier phases.
+
+### Files Changed
+
+- `src/game/systems/inventory_ui.rs`
+  - Deleted `pub fn paint_item_silhouette_pub` (~20 lines including doc comment)
+  - Deleted `fn paint_item_silhouette` (~160 lines including doc comment and all
+    six `ItemType` arm implementations)
+  - Net: **−196 lines** from this file for Phase 5
+
+### Verification
+
+Project-wide `grep` for both `paint_item_silhouette` and `SLOT_COLS` returns
+zero matches. `cargo clippy --all-targets --all-features -- -D warnings` emits
+zero warnings, confirming no dead-code lint is suppressed.
+
+### Quality Gates
+
+```
+cargo fmt --all          ✅
+cargo check              ✅  0 errors, 0 warnings
+cargo clippy -D warnings ✅  0 warnings
+cargo nextest run        ✅  5559 passed (31 pre-existing failures, unrelated)
+```
+
+---
+
 ## Phase 4: Container Character Panel — Text List + Linear Navigation
 
 ### Summary
