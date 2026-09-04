@@ -46,6 +46,7 @@
 use crate::application::merchant_inventory_state::{MerchantFocus, MerchantInventoryState};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
+use crate::domain::inventory::MerchantStock;
 use crate::domain::types::ItemId;
 use crate::game::resources::GlobalState;
 use crate::game::systems::inventory_ui_common::{
@@ -755,7 +756,8 @@ fn render_character_sell_panel(params: CharacterSellPanelParams) -> CharacterPan
             .layout(egui::Layout::top_down(egui::Align::LEFT)),
     );
     egui::ScrollArea::vertical()
-        .id_salt("merch_char_inv_scroll")
+        .id_salt(format!("merch_char_inv_scroll_{}", party_index))
+        .auto_shrink([true, false])
         .max_height(body_h)
         .show(&mut body_child, |ui| {
             if items.is_empty() {
@@ -783,6 +785,10 @@ fn render_character_sell_panel(params: CharacterSellPanelParams) -> CharacterPan
                             egui::vec2(body_rect.width(), SELL_ROW_H),
                             egui::Sense::click(),
                         );
+
+                        if is_selected {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
 
                         // Selection highlight — amber fill + yellow border
                         if is_selected {
@@ -1053,6 +1059,7 @@ fn render_merchant_stock_panel(params: MerchantStockPanelParams) -> MerchantStoc
 
     egui::ScrollArea::vertical()
         .id_salt("merchant_stock_scroll")
+        .auto_shrink([true, false])
         .max_height(body_h)
         .show(&mut child, |ui| {
             for (i, (item_id, qty, price)) in stock_entries.iter().enumerate() {
@@ -1081,6 +1088,10 @@ fn render_merchant_stock_panel(params: MerchantStockPanelParams) -> MerchantStoc
                         egui::vec2(body_rect.width(), STOCK_ROW_H),
                         egui::Sense::click(),
                     );
+
+                    if is_selected {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
 
                     // Row background
                     if is_selected {
@@ -1513,34 +1524,40 @@ fn merchant_inventory_action_system(
             }
         }
 
-        // Determine sell price from NPC economy settings or item sell_cost
+        // Determine sell price using the same formula as the UI and domain sell_item():
+        //   1. Use item.sell_cost if non-zero, otherwise item.base_cost / 2.
+        //   2. Multiply by the NPC's economy buy_rate (default 0.5 when not configured).
+        //   3. Minimum 1 gold.
         let sell_price = {
-            let base_sell_cost = game_content
+            let (base_cost, sell_cost) = game_content
                 .as_deref()
                 .and_then(|gc| gc.db().items.get_item(item_id))
-                .map(|it| it.sell_cost)
-                .unwrap_or(0);
-
-            let economy = global_state.0.npc_runtime.get(&npc_id).and_then(|_rt| {
-                // Economy settings live on NpcDefinition; look up from content
-                game_content
-                    .as_deref()
-                    .and_then(|gc| gc.db().npcs.get_npc(&npc_id))
-                    .and_then(|npc| npc.economy.clone())
-            });
-
-            match economy {
-                Some(eco) => eco.npc_buy_price(base_sell_cost),
-                None => base_sell_cost,
-            }
+                .map(|it| (it.base_cost, it.sell_cost))
+                .unwrap_or((0, 0));
+            let buy_rate = game_content
+                .as_deref()
+                .and_then(|gc| gc.db().npcs.get_npc(&npc_id))
+                .and_then(|npc| npc.economy.as_ref().map(|e| e.buy_rate))
+                .unwrap_or(0.5_f32);
+            compute_sell_price(base_cost, sell_cost, buy_rate).max(1)
         };
 
-        // Remove item from character
+        // Remove item from character, credit gold, and replenish NPC stock.
         if let Some(removed) = global_state.0.party.members[character_index]
             .inventory
             .remove_item(slot_index)
         {
             global_state.0.party.gold = global_state.0.party.gold.saturating_add(sell_price);
+            // Add the sold item to the merchant's stock (creates a new entry if
+            // the merchant did not previously carry it, increments quantity if
+            // they did).  Using get_or_insert_with handles the case where the
+            // NPC has no stock object at all (e.g. a pure service NPC who now
+            // accepts items the player sells).
+            if let Some(rt) = global_state.0.npc_runtime.get_mut(&npc_id) {
+                rt.stock
+                    .get_or_insert_with(MerchantStock::new)
+                    .add_or_increment(removed.item_id);
+            }
             info!(
                 "Sold item_id={} from party[{}] slot {} to NPC {} for {} gold",
                 removed.item_id, character_index, slot_index, npc_id, sell_price
@@ -2228,10 +2245,11 @@ mod tests {
         state.enter_merchant_inventory(npc_id.clone(), "Click Buyer".to_string());
 
         // Simulate what the action system does for a SellItemAction.
-        // (No GameContent, so sell_price falls back to 0; test verifies item removal.)
+        // No GameContent → base_cost=0, sell_cost=0, buy_rate defaults to 0.5.
+        // compute_sell_price(0, 0, 0.5) = 0; .max(1) = 1 gold minimum.
         let character_index = 0_usize;
         let slot_index = 0_usize;
-        let sell_price: u32 = 0; // no GameContent → sell_cost=0
+        let sell_price: u32 = 1; // minimum 1 gold even when content DB is empty
 
         let removed = state.party.members[character_index]
             .inventory
@@ -2245,10 +2263,292 @@ mod tests {
             0,
             "Inventory should be empty after sell"
         );
-        assert_eq!(state.party.gold, 100, "Gold unchanged when sell_price=0");
+        assert_eq!(
+            state.party.gold, 101,
+            "1 gold minimum received with empty content DB"
+        );
     }
 
-    // ── SelectMerchantStockSlotAction / SelectMerchantCharacterSlotAction ─
+    // ── sell price / stock replenishment (action system) ─────────────────
+
+    /// Helper: build a minimal Bevy app wired with `merchant_inventory_action_system`
+    /// and a `GameContent` database that contains one item and one merchant NPC.
+    fn build_sell_price_test_app(
+        initial_gold: u32,
+        item_id: u8,
+        base_cost: u32,
+        sell_cost: u32,
+        buy_rate: f32,
+        stock_qty: Option<u32>,
+    ) -> App {
+        use crate::application::resources::GameContent;
+        use crate::domain::inventory::NpcEconomySettings;
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::domain::world::npc::NpcDefinition;
+        use bevy::prelude::{App, MinimalPlugins, Update};
+
+        const MERCHANT_ID: &str = "sell_price_test_merchant";
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.items
+            .add_item(Item {
+                id: item_id,
+                name: "Test Item".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(5),
+                    is_combat_usable: false,
+                    duration_minutes: None,
+                }),
+                base_cost,
+                sell_cost,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .expect("add item");
+
+        let mut npc = NpcDefinition::merchant(MERCHANT_ID, "Sell Test Merchant", "merchant.png");
+        npc.economy = Some(NpcEconomySettings {
+            buy_rate,
+            sell_rate: 1.0,
+            max_buy_value: None,
+        });
+        db.npcs.add_npc(npc).expect("add npc");
+
+        let mut state = GameState::new();
+        state.party.gold = initial_gold;
+
+        let mut character = crate::domain::character::Character::new(
+            "Seller".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        character
+            .inventory
+            .add_item(item_id, 0)
+            .expect("add to inventory");
+        state.party.add_member(character).expect("add party member");
+
+        let mut npc_rt = NpcRuntimeState::new(MERCHANT_ID.to_string());
+        if let Some(qty) = stock_qty {
+            let mut stock = MerchantStock::new();
+            stock.entries.push(StockEntry::new(item_id, qty as u8));
+            npc_rt.stock = Some(stock);
+        }
+        state.npc_runtime.insert(npc_rt);
+        state.enter_merchant_inventory(MERCHANT_ID.to_string(), "Sell Test Merchant".to_string());
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<BuyItemAction>();
+        app.add_message::<SellItemAction>();
+        app.add_message::<SelectMerchantStockSlotAction>();
+        app.add_message::<SelectMerchantCharacterSlotAction>();
+        app.insert_resource(GlobalState(state));
+        app.init_resource::<MerchantNavState>();
+        app.insert_resource(GameContent::new(db));
+        app.add_systems(Update, merchant_inventory_action_system);
+        app
+    }
+
+    #[test]
+    fn test_sell_item_action_applies_sell_cost_with_economy_buy_rate() {
+        // item: sell_cost=40, base_cost=100, npc buy_rate=0.5
+        // compute_sell_price(100, 40, 0.5) = floor(40 * 0.5) = 20; .max(1) = 20
+        let mut app = build_sell_price_test_app(50, 3, 100, 40, 0.5, None);
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        assert_eq!(
+            state.0.party.gold, 70,
+            "50 + 20 = 70 gold; sell_cost=40 × buy_rate=0.5 = 20"
+        );
+        assert_eq!(
+            state.0.party.members[0].inventory.items.len(),
+            0,
+            "Item should be removed from inventory after sell"
+        );
+    }
+
+    #[test]
+    fn test_sell_item_zero_sell_cost_falls_back_to_half_base_cost() {
+        // item: sell_cost=0, base_cost=100, npc buy_rate=0.5
+        // compute_sell_price(100, 0, 0.5) = floor((100/2) * 0.5) = floor(25) = 25; .max(1) = 25
+        let mut app = build_sell_price_test_app(50, 4, 100, 0, 0.5, None);
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        assert_eq!(
+            state.0.party.gold, 75,
+            "50 + 25 = 75 gold; base_cost=100/2=50 × buy_rate=0.5 = 25"
+        );
+    }
+
+    #[test]
+    fn test_sell_item_replenishes_npc_stock_when_merchant_carries_item() {
+        // NPC has item_id=5 in stock with qty=2; after selling, qty should be 3.
+        let mut app = build_sell_price_test_app(0, 5, 10, 5, 0.5, Some(2));
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        let qty = state
+            .0
+            .npc_runtime
+            .get(&"sell_price_test_merchant".to_string())
+            .and_then(|rt| rt.stock.as_ref())
+            .and_then(|s| s.get_entry(5))
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        assert_eq!(
+            qty, 3,
+            "Stock should increase from 2 to 3 after selling item back to merchant"
+        );
+    }
+
+    /// Selling an item the merchant does not carry must add a new stock entry
+    /// with quantity 1 so the player can buy it back.
+    #[test]
+    fn test_sell_item_adds_new_entry_when_merchant_does_not_carry_item() {
+        // stock_qty = Some(0) gives the merchant an empty (qty=0) entry so they
+        // have a stock object, but no entry for item_id=6.
+        // We pass None to test the truly "no entry" case.
+        let mut app = build_sell_price_test_app(0, 6, 10, 5, 0.5, None);
+
+        // The merchant starts with no stock at all.
+        {
+            let state = app.world().resource::<GlobalState>();
+            assert!(
+                state
+                    .0
+                    .npc_runtime
+                    .get(&"sell_price_test_merchant".to_string())
+                    .and_then(|rt| rt.stock.as_ref())
+                    .is_none(),
+                "Precondition: merchant has no stock object before sell"
+            );
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        let qty = state
+            .0
+            .npc_runtime
+            .get(&"sell_price_test_merchant".to_string())
+            .and_then(|rt| rt.stock.as_ref())
+            .and_then(|s| s.get_entry(6))
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        assert_eq!(
+            qty, 1,
+            "Sold item must appear in merchant stock with quantity 1"
+        );
+    }
+
+    /// Selling a second copy of an item the merchant does not normally carry
+    /// increments the quantity they received from the first sale.
+    #[test]
+    fn test_sell_item_increments_entry_added_by_previous_sale() {
+        // Merchant starts with one pre-existing entry (qty=1) for a different
+        // item (id=99) so there IS a stock object, but no entry for id=8.
+        let mut app = build_sell_price_test_app(0, 8, 20, 10, 0.5, None);
+        // Inject a stock object with an unrelated item.
+        {
+            let mut state = app.world_mut().resource_mut::<GlobalState>();
+            let rt = state
+                .0
+                .npc_runtime
+                .get_mut(&"sell_price_test_merchant".to_string())
+                .expect("npc runtime must exist");
+            let mut stock = MerchantStock::new();
+            stock.entries.push(StockEntry::new(99, 1));
+            rt.stock = Some(stock);
+        }
+
+        // Add a second item_id=8 to the character so we can sell twice.
+        app.world_mut()
+            .resource_mut::<GlobalState>()
+            .0
+            .party
+            .members[0]
+            .inventory
+            .add_item(8, 0)
+            .expect("add second item");
+
+        // First sell.
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        // Second sell (slot 0 again after the first was removed).
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        let qty = state
+            .0
+            .npc_runtime
+            .get(&"sell_price_test_merchant".to_string())
+            .and_then(|rt| rt.stock.as_ref())
+            .and_then(|s| s.get_entry(8))
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        assert_eq!(
+            qty, 2,
+            "Two sells of item_id=8 must yield quantity 2 in merchant stock"
+        );
+    }
 
     #[test]
     fn test_select_merchant_stock_slot_action_fields() {

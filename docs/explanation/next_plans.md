@@ -623,3 +623,7 @@ Note that interacting with a despawned entity is the most common cause of this e
 
     If you were attempting to apply a command to this entity,
     and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.
+
+New Bug: In the merchant inventory system. Items that are set to have a resale value are all being sold for only 1 gold meaning sell_cost is not being respected.
+
+Character Inventory does not group like items and provide a count. Instead they are all listed individually. There are no scroll bars so you can not see what you are selecting in the inventory once the list is off the screen. Also in the merchant menu you can't tell what you are selecting in the inventory once the list is off the screen

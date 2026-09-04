@@ -1,4 +1,235 @@
-## Inventory Text-List Refactor — Complete Summary (Phases 1–5)
+## Fix: Potions and Scrolls Now Apply Their Effects When Used
+
+### Files Changed
+
+- `src/domain/character_definition.rs`
+- `src/domain/combat/item_usage.rs`
+- `campaigns/tutorial/data/items.ron`
+
+### Root Cause
+
+`populate_starting_inventory` created every `InventorySlot` with `charges: 0`.
+A comment in the code said "charges are set based on item type later" but that
+second step was never implemented. Both item-use paths guard on `charges == 0`
+and bail out immediately, so potions and scrolls were silently consumed (or
+logged "no charges remaining") with no effect applied.
+
+`grant_starting_food` had the same `charges: 0` bug for food items (harmless
+for the rest system, which reads `ConsumableEffect::IsFood(n)` rather than
+`charges`, but incorrect nonetheless).
+
+The Resurrection Scroll in tutorial item data also had `max_charges: 0`, which
+would have made it permanently unusable even after the code fix.
+
+### Fix
+
+**`populate_starting_inventory`** (`src/domain/character_definition.rs`):
+
+- Added `items: &ItemDatabase` parameter.
+- Sets `charges = item.max_charges.min(u8::MAX as u16) as u8` for each slot,
+  matching the existing pattern in `buy_item`. Non-magical gear (`max_charges == 0`)
+  is unaffected.
+- Updated the single call site in `instantiate` to pass `items`.
+
+**`grant_starting_food`** (`src/domain/character_definition.rs`):
+
+- Replaced hardcoded `charges: 0` with a `get_item` lookup of the food item's
+  `max_charges`, falling back to `1`.
+
+**`validate_item_use_slot`** (`src/domain/combat/item_usage.rs`):
+
+- Added `slot.charges == 0` guard to the `Consumable` branch so validation
+  returns `ItemUseError::NoCharges` immediately instead of passing validation
+  only to fail silently deeper in the action handler.
+
+**`campaigns/tutorial/data/items.ron`**:
+
+- Item 110 (Resurection Scroll): `max_charges: 0` changed to `max_charges: 1`.
+
+### Tests Added / Updated
+
+- `test_populate_starting_inventory_empty` - updated signature.
+- `test_populate_starting_inventory_with_items` - updated signature; added
+  `charges == 1` assertions.
+- `test_populate_starting_inventory_full` - updated signature.
+- `test_validate_consumable_no_charges_returns_error` (new) - verifies
+  `validate_item_use_slot` returns `NoCharges` for a zero-charge consumable.
+- Added `make_item_db_with_ids` helper for the inventory tests.
+
+---
+
+## Fix: Sold Items Now Appear in Merchant Stock
+
+### Files Changed
+
+- `src/domain/inventory.rs`
+- `src/game/systems/merchant_inventory_ui.rs`
+
+### Root Cause
+
+When a player sold an item to a merchant, the action system called
+`stock.get_entry_mut(item_id)` and only incremented the quantity if an entry
+already existed. If the merchant did not normally carry that item — or had no
+stock object at all — the sold item was silently discarded and never appeared in
+the merchant's panel.
+
+### Fix
+
+**`MerchantStock::add_or_increment`** added to `src/domain/inventory.rs`:
+
+- Increments quantity of an existing entry by 1, OR
+- Pushes a new `StockEntry` with quantity 1 if the item was not yet listed.
+
+**Sell handler in `merchant_inventory_action_system`** updated:
+
+- Replaced the guarded `get_entry_mut` increment with `stock.add_or_increment`.
+- Uses `rt.stock.get_or_insert_with(MerchantStock::new)` so merchants with no
+  stock object at all receive the sold item (previously a no-op).
+
+### Tests Added
+
+In `src/domain/inventory.rs`:
+
+- `test_merchant_stock_add_or_increment_existing_entry` — qty goes 2 → 3
+- `test_merchant_stock_add_or_increment_new_entry` — first sell creates entry with qty 1
+- `test_merchant_stock_add_or_increment_saturates_at_max` — no u8 overflow
+
+In `src/game/systems/merchant_inventory_ui.rs`:
+
+- `test_sell_item_adds_new_entry_when_merchant_does_not_carry_item` — verifies qty=1 after selling an unknown item to a merchant with no stock
+- `test_sell_item_increments_entry_added_by_previous_sale` — verifies qty=2 after two consecutive sells of the same unknown item
+
+---
+
+### Files Changed
+
+- `src/game/systems/inventory_ui.rs`
+- `src/game/systems/merchant_inventory_ui.rs`
+
+### What Changed
+
+#### Issue 1 — Item grouping in character inventory
+
+Previously the inventory text list rendered one row per raw slot, causing identical
+items (e.g. three Health Potions) to appear as three separate rows with the same name.
+
+Added `GroupedRow` struct and `build_grouped_inventory` helper function. Items that
+share the same `item_id` **and** have `charges == 0` are collapsed into a single display
+row showing `"Item Name (xN)"`. Items with `charges > 0` (wands, staves) are always
+shown individually with a charge annotation (`✨N`).
+
+`render_character_panel` was updated to call `build_grouped_inventory` and render the
+grouped list. The row index shown is now the 1-based group number; `clicked_slot` and
+`selected_slot` continue to carry the underlying raw slot index (`first_slot_idx`) so
+that all downstream action logic (drop, equip, use) is unaffected.
+
+`handle_grid_navigation` was updated so that ArrowUp/ArrowDown step through groups
+rather than raw slot indices, preventing the cursor from ever landing on a "hidden"
+duplicate slot.
+
+#### Issue 2 — ScrollArea `auto_shrink`
+
+Added `.auto_shrink([true, false])` to the `ScrollArea::vertical()` in
+`render_character_panel` so the scroll area fills available vertical height even when
+the item count is small.
+
+#### Tests added
+
+Four unit tests for `build_grouped_inventory` in `mod tests`:
+
+- `test_build_grouped_inventory_merges_like_items` — stackable items collapse to count
+- `test_build_grouped_inventory_does_not_merge_charged` — charged items always separate
+- `test_build_grouped_inventory_mixed` — mixed inventory produces correct group list
+- `test_build_grouped_inventory_empty` — empty slice produces empty group list
+
+All four new tests pass. All 141 existing `inventory_ui` and `merchant_inventory_ui` tests continue to pass.
+
+#### Issue 3 — Merchant panel scroll-to-selection and per-character scroll ID
+
+`render_character_sell_panel` changed:
+
+- `id_salt("merch_char_inv_scroll")` → `id_salt(format!("merch_char_inv_scroll_{}", party_index))` to prevent egui ID collisions between party members.
+- Added `.auto_shrink([true, false])` and `response.scroll_to_me(Some(egui::Align::Center))` so the highlighted sell row stays visible during keyboard navigation.
+
+`render_merchant_stock_panel` changed:
+
+- Added `.auto_shrink([true, false])` and `response.scroll_to_me(Some(egui::Align::Center))` so the highlighted buy row stays visible during keyboard navigation.
+
+---
+
+## Bug Fix: Merchant Sell Price Not Respecting `sell_cost` + Economy System Audit
+
+### Root Cause
+
+The `merchant_inventory_action_system` in `src/game/systems/merchant_inventory_ui.rs` was
+computing sell price with a broken inline formula that diverged from both the UI helper
+(`compute_sell_price`) and the domain function (`transactions::sell_item`).
+
+Three defects:
+
+1. **Missing `base_cost/2` fallback**: The action system only read `item.sell_cost`,
+   ignoring `item.base_cost`. When `sell_cost == 0`, `base_sell_cost = 0`, and
+   `npc_buy_price(0) = max(1) = 1 gold` for every item regardless of its actual value.
+2. **`None`-economy path returned 0 gold**: `None => base_sell_cost` had no `.max(1)`,
+   so items with `sell_cost = 0` at merchants without economy config gave 0 gold.
+3. **NPC stock not replenished**: Sold items were never returned to NPC stock;
+   `transactions::sell_item()` step 6 was silently bypassed.
+
+### Additional Finding: Economy Never Exercised
+
+Every tutorial campaign merchant had `economy: None` in `campaigns/tutorial/data/npcs.ron`,
+making `NpcEconomySettings` dead configuration. The fix populates all eight merchant NPCs
+with standard economy settings (`buy_rate: 0.5, sell_rate: 1.0`).
+
+### What the Economy System Does (Current State)
+
+`NpcEconomySettings` (in `src/domain/inventory.rs`) has three fields:
+
+- `buy_rate: f32` — multiplier the NPC applies when buying from the player (default 0.5)
+- `sell_rate: f32` — multiplier the NPC applies when selling to the player (default 1.0)
+- `max_buy_value: Option<u32>` — hard cap on how much an NPC will ever pay
+
+The sell price formula: `max(1, floor(raw × buy_rate))` where `raw = sell_cost` (if > 0)
+or `base_cost / 2` (if `sell_cost == 0`).
+
+**What is NOT implemented (design gaps):**
+
+- `personality` (Charisma analog) and `luck` stats have no effect on prices
+- No `merchant`/`bargain` proficiency exists (only combat proficiencies)
+- `transactions::sell_item()` is never called by the action system (parallel impl)
+- `npc_buy_price()` / `npc_sell_price()` helper methods are defined but not used
+  by the transaction layer
+
+### Files Changed
+
+| File                                        | Change                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| `src/game/systems/merchant_inventory_ui.rs` | Fixed sell price block; added NPC stock replenishment; updated test |
+| `campaigns/tutorial/data/npcs.ron`          | Added `economy: Some(...)` to 8 merchant NPCs                       |
+| `data/test_campaign/data/npcs.ron`          | Added `economy: Some(...)` to 2 test merchant NPCs                  |
+
+### Tests Added / Updated
+
+- `test_sell_item_action_via_click_matches_keyboard_action` — updated: reflects that
+  minimum 1 gold is received even with empty content DB
+- `test_sell_item_action_applies_sell_cost_with_economy_buy_rate` (new) — Bevy app test:
+  `sell_cost=40, buy_rate=0.5` → 20 gold
+- `test_sell_item_zero_sell_cost_falls_back_to_half_base_cost` (new) — Bevy app test:
+  `sell_cost=0, base_cost=100, buy_rate=0.5` → 25 gold
+- `test_sell_item_replenishes_npc_stock_when_merchant_carries_item` (new) — Bevy app test:
+  stock qty 2 → 3 after sell
+
+### Quality Gates
+
+```
+cargo fmt         ✅
+cargo check       ✅  0 errors
+cargo clippy      ✅  0 warnings
+cargo test (npc)  ✅  200 tests passed
+cargo test (sell) ✅  5 tests passed
+```
+
+---
 
 ### What Changed
 

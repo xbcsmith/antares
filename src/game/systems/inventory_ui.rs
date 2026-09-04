@@ -36,7 +36,7 @@ use crate::application::resources::GameContent;
 use crate::application::GameMode;
 #[cfg(test)] // used in tests via `use super::*`
 use crate::domain::character::Inventory;
-use crate::domain::character::{EquipmentSlot, PARTY_MAX_SIZE};
+use crate::domain::character::{EquipmentSlot, InventorySlot, PARTY_MAX_SIZE};
 use crate::domain::combat::item_usage::{validate_item_use_slot, ItemUseError};
 use crate::domain::items::consumable_usage::{
     apply_consumable_effect_exploration, ConsumableApplyResult,
@@ -46,6 +46,7 @@ use crate::domain::items::types::{normalize_duration, ConsumableData, Consumable
 use crate::domain::magic::exploration_casting::{cast_exploration_spell, ExplorationTarget};
 use crate::domain::magic::learning::{learn_spell, SpellLearnError};
 use crate::domain::transactions::{drop_item, equip_item, unequip_item, TransactionError};
+use crate::domain::types::ItemId;
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
@@ -67,6 +68,64 @@ pub use super::inventory_ui_common::NavigationPhase;
 /// Height of the equipment display strip shown between the header and slot grid.
 /// Two rows of cells (weapon/armor/shield, then helmet/boots/ring/ring).
 const EQUIP_STRIP_H: f32 = 76.0;
+
+/// A single display row in the grouped character-inventory list.
+///
+/// Items sharing the same `item_id` and `charges == 0` are merged into one row
+/// with `count > 1`. Charged items (wands, staves) always occupy an individual row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GroupedRow {
+    /// Actual inventory slot index used for all actions on this row.
+    first_slot_idx: usize,
+    /// Item identifier.
+    item_id: ItemId,
+    /// Non-zero only for individually-displayed charged items.
+    charges: u8,
+    /// Number of inventory slots merged into this row.
+    count: usize,
+}
+
+/// Build a grouped display list from raw inventory slots.
+///
+/// Consecutive or non-consecutive slots holding the same `item_id` with
+/// `charges == 0` are merged into a single [`GroupedRow`] whose
+/// `first_slot_idx` is the earliest matching slot.  Items with `charges > 0`
+/// always produce their own individual row.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::InventorySlot;
+///
+/// let items = vec![
+///     InventorySlot { item_id: 1, charges: 0 },
+///     InventorySlot { item_id: 1, charges: 0 },
+///     InventorySlot { item_id: 2, charges: 3 },
+/// ];
+/// // item_id=1 slots merge into one row (count=2); item_id=2 stays individual.
+/// ```
+fn build_grouped_inventory(items: &[InventorySlot]) -> Vec<GroupedRow> {
+    let mut groups: Vec<GroupedRow> = Vec::new();
+    for (slot_idx, slot) in items.iter().enumerate() {
+        if slot.charges == 0 {
+            if let Some(g) = groups
+                .iter_mut()
+                .find(|g| g.item_id == slot.item_id && g.charges == 0)
+            {
+                g.count += 1;
+                continue;
+            }
+        }
+        groups.push(GroupedRow {
+            first_slot_idx: slot_idx,
+            item_id: slot.item_id,
+            charges: slot.charges,
+            count: 1,
+        });
+    }
+    groups
+}
+
 /// Returns a short category tag string for the given item type, shown dim in the
 /// inventory text list to the right of each item name.
 fn item_type_tag(item_type: &crate::domain::items::types::ItemType) -> &'static str {
@@ -798,26 +857,34 @@ fn handle_grid_navigation(
     // All movement wraps within 0..items.len().
     // ArrowLeft and ArrowRight have no meaning in a linear list; they are
     // consumed by handle_equip_flow when the equipment strip is focused.
-    let item_count = global_state
-        .0
-        .party
-        .members
-        .get(focused_party_index)
-        .map(|ch| ch.inventory.items.len())
-        .unwrap_or(0);
+    // Build the grouped display list so navigation skips duplicates
+    let groups: Vec<GroupedRow> = {
+        let items = global_state
+            .0
+            .party
+            .members
+            .get(focused_party_index)
+            .map(|ch| ch.inventory.items.as_slice())
+            .unwrap_or(&[]);
+        build_grouped_inventory(items)
+    };
+    let group_count = groups.len();
 
     let any_arrow =
         keyboard.just_pressed(KeyCode::ArrowDown) || keyboard.just_pressed(KeyCode::ArrowUp);
 
     if any_arrow {
-        // ArrowUp from slot 0 (or no selection) → move focus to the equipment strip
+        // ArrowUp from the first group (or no selection) → move focus to the equipment strip
         if keyboard.just_pressed(KeyCode::ArrowUp) {
             let current = match &global_state.0.mode {
                 GameMode::Inventory(s) => s.selected_slot,
                 _ => None,
             };
-            if current.is_none_or(|c| c == 0) {
-                // Entering the equipment strip — clear list selection
+            let is_at_first = groups
+                .first()
+                .map(|g| current == Some(g.first_slot_idx))
+                .unwrap_or(true);
+            if current.is_none() || is_at_first {
                 if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
                     inv_state.selected_slot = None;
                 }
@@ -827,17 +894,22 @@ fn handle_grid_navigation(
             }
         }
 
-        if item_count > 0 {
+        if group_count > 0 {
             if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
-                let current = inv_state.selected_slot.unwrap_or(0);
-                let next = if keyboard.just_pressed(KeyCode::ArrowDown) {
-                    (current + 1) % item_count
+                let current_slot = inv_state.selected_slot;
+                // Find which group is currently selected; fall back to group 0
+                let current_group_idx = current_slot
+                    .and_then(|s| groups.iter().position(|g| g.first_slot_idx == s))
+                    .unwrap_or(0);
+                let next_group_idx = if keyboard.just_pressed(KeyCode::ArrowDown) {
+                    (current_group_idx + 1) % group_count
                 } else {
-                    // ArrowUp — slot > 0 case (slot 0 handled above)
-                    current.saturating_sub(1)
+                    // ArrowUp — first-group case handled above
+                    current_group_idx.saturating_sub(1)
                 };
-                inv_state.selected_slot = Some(next);
-                nav_state.selected_slot_index = Some(next);
+                let next_slot = groups[next_group_idx].first_slot_idx;
+                inv_state.selected_slot = Some(next_slot);
+                nav_state.selected_slot_index = Some(next_slot);
             }
         }
     }
@@ -1600,6 +1672,7 @@ fn render_character_panel(
     );
     egui::ScrollArea::vertical()
         .id_salt(format!("char_inv_scroll_{}", party_index))
+        .auto_shrink([true, false])
         .max_height(body_h)
         .show(&mut body_child, |ui| {
             if items.is_empty() {
@@ -1609,30 +1682,30 @@ fn render_character_panel(
                         .small(),
                 );
             } else {
-                for (slot_idx, slot) in items.iter().enumerate() {
-                    ui.push_id(format!("inv_row_{}", slot_idx), |ui| {
-                        let is_selected = selected_slot == Some(slot_idx);
+                let groups = build_grouped_inventory(items);
+                for (row_idx, group) in groups.iter().enumerate() {
+                    ui.push_id(format!("inv_row_{}", group.first_slot_idx), |ui| {
+                        let is_selected = selected_slot == Some(group.first_slot_idx);
 
                         let item_def =
-                            game_content.and_then(|gc| gc.db().items.get_item(slot.item_id));
+                            game_content.and_then(|gc| gc.db().items.get_item(group.item_id));
                         let item_name = item_def
                             .map(|it| it.name.clone())
-                            .unwrap_or_else(|| format!("#{}", slot.item_id));
+                            .unwrap_or_else(|| format!("#{}", group.item_id));
                         let type_tag = item_def
                             .map(|it| item_type_tag(&it.item_type))
                             .unwrap_or("");
 
-                        // Charge annotation for charged non-consumable magical items
-                        // (wands, staves, enchanted accessories).
-                        let is_charged_magical = item_def
-                            .map(|item| {
-                                item.spell_effect.is_some()
-                                    && item.max_charges > 0
-                                    && !matches!(item.item_type, ItemType::Consumable(_))
-                            })
-                            .unwrap_or(false);
-                        let charge_suffix = if is_charged_magical && slot.charges > 0 {
-                            format!(" \u{2728}{}", slot.charges)
+                        // Count suffix for grouped stackable items
+                        let count_suffix = if group.count > 1 {
+                            format!(" (x{})", group.count)
+                        } else {
+                            String::new()
+                        };
+
+                        // Charge annotation for individually-displayed charged magical items
+                        let charge_suffix = if group.charges > 0 {
+                            format!(" \u{2728}{}", group.charges)
                         } else {
                             String::new()
                         };
@@ -1642,6 +1715,11 @@ fn render_character_panel(
                             egui::vec2(body_rect.width(), INV_ROW_H),
                             egui::Sense::click(),
                         );
+
+                        // Scroll the view to keep the selected row visible
+                        if is_selected {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
 
                         // Selection highlight — amber fill + yellow border
                         if is_selected {
@@ -1660,20 +1738,20 @@ fn render_character_panel(
 
                         let dim_color = egui::Color32::from_rgba_premultiplied(120, 120, 120, 255);
 
-                        // Slot index (dim, left edge)
+                        // Row index (1-based group number, not slot number)
                         ui.painter().text(
                             row_rect.min + egui::vec2(4.0, INV_ROW_H / 2.0),
                             egui::Align2::LEFT_CENTER,
-                            format!("{:2}.", slot_idx + 1),
+                            format!("{:2}.", row_idx + 1),
                             egui::FontId::proportional(11.0),
                             dim_color,
                         );
 
-                        // Item name + charge annotation (white, main area)
+                        // Item name + count/charge annotation
                         ui.painter().text(
                             row_rect.min + egui::vec2(28.0, INV_ROW_H / 2.0),
                             egui::Align2::LEFT_CENTER,
-                            format!("{}{}", item_name, charge_suffix),
+                            format!("{}{}{}", item_name, count_suffix, charge_suffix),
                             egui::FontId::proportional(13.0),
                             egui::Color32::WHITE,
                         );
@@ -1690,7 +1768,7 @@ fn render_character_panel(
                         }
 
                         if response.clicked() {
-                            clicked_slot = Some(slot_idx);
+                            clicked_slot = Some(group.first_slot_idx);
                         }
                     });
                 }
@@ -3087,6 +3165,94 @@ mod tests {
             });
         });
         // No panic = test passes
+    }
+
+    // ------------------------------------------------------------------
+    // GroupedRow / build_grouped_inventory
+    // ------------------------------------------------------------------
+
+    /// Items with the same item_id and charges == 0 are merged into one row.
+    #[test]
+    fn test_build_grouped_inventory_merges_like_items() {
+        let items = vec![
+            InventorySlot {
+                item_id: 1,
+                charges: 0,
+            },
+            InventorySlot {
+                item_id: 1,
+                charges: 0,
+            },
+            InventorySlot {
+                item_id: 1,
+                charges: 0,
+            },
+        ];
+        let groups = build_grouped_inventory(&items);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].first_slot_idx, 0);
+        assert_eq!(groups[0].count, 3);
+        assert_eq!(groups[0].item_id, 1);
+    }
+
+    /// Charged items (charges > 0) are never merged.
+    #[test]
+    fn test_build_grouped_inventory_does_not_merge_charged() {
+        let items = vec![
+            InventorySlot {
+                item_id: 5,
+                charges: 3,
+            },
+            InventorySlot {
+                item_id: 5,
+                charges: 1,
+            },
+        ];
+        let groups = build_grouped_inventory(&items);
+        assert_eq!(groups.len(), 2, "charged items must not be merged");
+        assert_eq!(groups[0].first_slot_idx, 0);
+        assert_eq!(groups[1].first_slot_idx, 1);
+    }
+
+    /// Mixed inventory: some stackable, some charged, some unique.
+    #[test]
+    fn test_build_grouped_inventory_mixed() {
+        let items = vec![
+            InventorySlot {
+                item_id: 1,
+                charges: 0,
+            }, // potion
+            InventorySlot {
+                item_id: 2,
+                charges: 0,
+            }, // bread
+            InventorySlot {
+                item_id: 1,
+                charges: 0,
+            }, // potion (grouped with slot 0)
+            InventorySlot {
+                item_id: 3,
+                charges: 5,
+            }, // wand
+        ];
+        let groups = build_grouped_inventory(&items);
+        // potion (count=2, first=0), bread (count=1, first=1), wand (count=1, first=3)
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].item_id, 1);
+        assert_eq!(groups[0].count, 2);
+        assert_eq!(groups[0].first_slot_idx, 0);
+        assert_eq!(groups[1].item_id, 2);
+        assert_eq!(groups[1].first_slot_idx, 1);
+        assert_eq!(groups[2].item_id, 3);
+        assert_eq!(groups[2].charges, 5);
+        assert_eq!(groups[2].first_slot_idx, 3);
+    }
+
+    /// Empty inventory produces no groups.
+    #[test]
+    fn test_build_grouped_inventory_empty() {
+        let groups = build_grouped_inventory(&[]);
+        assert!(groups.is_empty());
     }
 
     // ------------------------------------------------------------------
