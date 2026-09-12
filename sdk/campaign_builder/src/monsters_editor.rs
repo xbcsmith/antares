@@ -5,9 +5,9 @@ use crate::creature_assets::CreatureAssetManager;
 use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_creature_selector, dispatch_list_action, handle_reload,
-    remove_autocomplete_buffer, show_standard_list_item, AttributePair16Input, AttributePairInput,
-    DispatchActionState, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    remove_autocomplete_buffer, show_standard_list_item, store_autocomplete_buffer,
+    AttributePair16Input, AttributePairInput, DispatchActionState, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
@@ -63,6 +63,13 @@ pub struct MonstersEditorState {
     /// whenever `campaign_data.creatures` changes without a campaign-dir change (e.g.
     /// after a creature is exported from the Importer tab).
     pub creature_cache_dirty: bool,
+
+    /// Whether the creature picker popup is open.
+    pub creature_picker_open: bool,
+
+    /// Search string used by the creature picker popup.
+    /// Reset to empty each time the picker opens.
+    pub creature_picker_search: String,
 }
 
 impl Default for MonstersEditorState {
@@ -84,6 +91,8 @@ impl Default for MonstersEditorState {
             last_campaign_dir: None,
             edit_session_initialized: false,
             creature_cache_dirty: false,
+            creature_picker_open: false,
+            creature_picker_search: String::new(),
         }
     }
 }
@@ -94,9 +103,11 @@ impl MonstersEditorState {
     }
 
     /// Sets the creature ID on the edit buffer and syncs the autocomplete buffer string.
+    /// Also closes the creature picker popup.
     pub fn apply_selected_creature_id(&mut self, id: Option<CreatureId>) {
         self.edit_buffer.creature_id = id;
         self.creature_id_buffer = id.map(|i| i.to_string()).unwrap_or_default();
+        self.creature_picker_open = false;
     }
 
     /// Marks the creature autocomplete cache as stale so it is rebuilt on the next
@@ -320,8 +331,7 @@ impl MonstersEditorState {
         let campaign_dir_now = ctx.campaign_dir.cloned();
         if campaign_dir_now != self.last_campaign_dir || self.creature_cache_dirty {
             self.available_creatures = creature_manager
-                .and_then(|m| m.load_all_creatures().ok())
-                .map(|cs| cs.into_iter().map(|c| (c.id, c.name)).collect::<Vec<_>>())
+                .and_then(|m| m.list_creature_stubs().ok())
                 .unwrap_or_default();
             self.last_campaign_dir = campaign_dir_now;
             self.creature_cache_dirty = false;
@@ -357,7 +367,121 @@ impl MonstersEditorState {
                     self.edit_session_initialized = true;
                 }
 
-                self.show_form(ui, monsters, creature_manager, ctx)
+                self.show_form(ui, monsters, creature_manager, ctx);
+            }
+        }
+
+        // Creature picker modal — shown when creature_picker_open is true.
+        // Mirrors the Character Editor's Select Creature picker exactly:
+        // search bar, virtualised show_rows list, Close button.
+        if self.creature_picker_open {
+            // Build filtered list once per frame (cheap — strings already in memory).
+            let search_lower = self.creature_picker_search.to_lowercase();
+            let matched: Vec<(u32, String)> = self
+                .available_creatures
+                .iter()
+                .filter(|(id, name)| {
+                    search_lower.is_empty()
+                        || name.to_lowercase().contains(&search_lower)
+                        || id.to_string().contains(&search_lower)
+                })
+                .map(|(id, name)| (*id, name.clone()))
+                .collect();
+
+            // Pre-extract the current selection to avoid a split-borrow inside
+            // the closure (we need `&mut self.creature_picker_search` there).
+            let current_id = self.creature_id_buffer.clone();
+            let mut picked_id: Option<String> = None;
+            let mut should_close = false;
+
+            egui::Window::new("Select Creature")
+                .id(egui::Id::new("monster_creature_picker"))
+                .resizable(true)
+                .default_size([420.0, 420.0])
+                .show(ui.ctx(), |ui| {
+                    // ── Search bar ──────────────────────────────────────────────
+                    ui.horizontal(|ui| {
+                        ui.label("\u{1F50D}");
+                        if ui
+                            .text_edit_singleline(&mut self.creature_picker_search)
+                            .changed()
+                        {
+                            ui.ctx().request_repaint();
+                        }
+                        if ui
+                            .button("\u{2715}")
+                            .on_hover_text("Clear search")
+                            .clicked()
+                        {
+                            self.creature_picker_search.clear();
+                        }
+                    });
+                    ui.label(format!(
+                        "{} of {} creatures",
+                        matched.len(),
+                        self.available_creatures.len()
+                    ));
+                    ui.separator();
+
+                    // ── Virtualised list ─────────────────────────────────────────
+                    let list_h = (ui.available_height() - 40.0).max(100.0);
+                    let row_h = ui.spacing().interact_size.y;
+
+                    if matched.is_empty() {
+                        ui.label(if self.creature_picker_search.is_empty() {
+                            "No creatures in campaign."
+                        } else {
+                            "No creatures match the search."
+                        });
+                    } else {
+                        let total = matched.len();
+                        egui::ScrollArea::vertical()
+                            .id_salt("monster_creature_picker_scroll")
+                            .max_height(list_h)
+                            .auto_shrink([false, false])
+                            .show_rows(ui, row_h, total, |ui, row_range| {
+                                for i in row_range {
+                                    let (id, ref name) = matched[i];
+                                    let label = format!("{id} \u{2014} {name}");
+                                    ui.push_id(id, |ui| {
+                                        if ui
+                                            .selectable_label(current_id == id.to_string(), &label)
+                                            .clicked()
+                                        {
+                                            picked_id = Some(id.to_string());
+                                        }
+                                    });
+                                }
+                            });
+                    }
+
+                    ui.separator();
+                    if ui.button("Close").clicked() {
+                        should_close = true;
+                    }
+                });
+
+            if let Some(ref id_str) = picked_id {
+                // Parse the string ID back to a u32 and apply.
+                if let Ok(id_num) = id_str.trim().parse::<u32>() {
+                    // Build the "id — name" display string so the autocomplete
+                    // field shows the selection immediately without a flash.
+                    let display = self
+                        .available_creatures
+                        .iter()
+                        .find(|(cid, _)| *cid == id_num)
+                        .map(|(cid, n)| format!("{cid} \u{2014} {n}"))
+                        .unwrap_or_else(|| id_str.clone());
+                    self.apply_selected_creature_id(Some(id_num));
+                    store_autocomplete_buffer(
+                        ui.ctx(),
+                        egui::Id::new("autocomplete:creature:monster_creature"),
+                        &display,
+                    );
+                    *ctx.unsaved_changes = true;
+                }
+            } else if should_close {
+                self.creature_picker_open = false;
             }
         }
     }
@@ -852,7 +976,7 @@ impl MonstersEditorState {
         &mut self,
         ui: &mut egui::Ui,
         monsters: &mut Vec<MonsterDefinition>,
-        _creature_manager: Option<&CreatureAssetManager>,
+        creature_manager: Option<&CreatureAssetManager>,
         ctx: &mut EditorContext<'_>,
     ) {
         let is_add = self.mode == MonstersEditorMode::Add;
@@ -909,37 +1033,48 @@ impl MonstersEditorState {
 
                 ui.add_space(10.0);
 
-                // Visual Asset section
+                // Visual Asset section — autocomplete + 🦎 browse button on one
+                // row, matching the Character Editor's Creature ID row layout.
                 ui.group(|ui| {
                     ui.heading("Visual Asset");
 
-                    // Autocomplete text box — same pattern as Character and NPC editors.
-                    // Reads from the pre-built `available_creatures` cache (rebuilt once
-                    // per campaign-dir change in `show()`), never from disk per frame.
-                    if autocomplete_creature_selector(
-                        ui,
-                        "monster_creature",
-                        "Creature Asset:",
-                        &mut self.creature_id_buffer,
-                        &self.available_creatures,
-                    ) {
-                        self.edit_buffer.creature_id = if self.creature_id_buffer.is_empty() {
-                            None
-                        } else {
-                            self.creature_id_buffer.trim().parse::<CreatureId>().ok()
-                        };
-                        *ctx.unsaved_changes = true;
-                    }
+                    ui.horizontal(|ui| {
+                        // Autocomplete: type by name or numeric ID.
+                        // Reads from the pre-built `available_creatures` cache
+                        // (rebuilt once per campaign-dir change in `show()`).
+                        if autocomplete_creature_selector(
+                            ui,
+                            "monster_creature",
+                            "Creature Asset:",
+                            &mut self.creature_id_buffer,
+                            &self.available_creatures,
+                        ) {
+                            self.edit_buffer.creature_id = if self.creature_id_buffer.is_empty() {
+                                None
+                            } else {
+                                self.creature_id_buffer.trim().parse::<CreatureId>().ok()
+                            };
+                            *ctx.unsaved_changes = true;
+                        }
 
-                    ui.label(
-                        egui::RichText::new(
+                        // Grid picker button — only active when a creature manager
+                        // is available (i.e. a campaign is open).
+                        if ui
+                            .button("\u{1F98E}")
+                            .on_hover_text("Browse creature assets")
+                            .clicked()
+                            && creature_manager.is_some()
+                        {
+                            self.creature_picker_open = true;
+                            self.creature_picker_search.clear();
+                        }
+
+                        ui.label("\u{2139}").on_hover_text(
                             "Links this monster to a procedural mesh creature definition. \
                              When set, the monster spawns as a 3-D creature mesh instead of \
                              a sprite placeholder.",
-                        )
-                        .weak()
-                        .small(),
-                    );
+                        );
+                    });
                 });
 
                 ui.add_space(10.0);
@@ -1083,6 +1218,7 @@ impl MonstersEditorState {
                         self.monster_name_input_buffer.clear();
                         self.creature_id_buffer.clear();
                         self.edit_session_initialized = false;
+                        self.creature_picker_open = false;
                         ui.ctx().request_repaint();
                     }
 
@@ -1099,6 +1235,7 @@ impl MonstersEditorState {
                         self.monster_name_input_buffer.clear();
                         self.creature_id_buffer.clear();
                         self.edit_session_initialized = false;
+                        self.creature_picker_open = false;
                         if saved_to_disk {
                             *ctx.status_message = "Monster saved".to_string();
                         }
@@ -1110,6 +1247,7 @@ impl MonstersEditorState {
                         self.monster_name_input_buffer.clear();
                         self.creature_id_buffer.clear();
                         self.edit_session_initialized = false;
+                        self.creature_picker_open = false;
                         ui.ctx().request_repaint();
                     }
                 });
@@ -1966,5 +2104,41 @@ mod tests {
         state.invalidate_creature_cache();
         state.invalidate_creature_cache();
         assert!(state.creature_cache_dirty);
+    }
+
+    /// `creature_picker_open` must start as `false` so the modal is not shown
+    /// on the first frame before the user clicks the browse button.
+    #[test]
+    fn test_creature_picker_open_starts_false() {
+        let state = MonstersEditorState::default();
+        assert!(
+            !state.creature_picker_open,
+            "creature_picker_open must be false by default"
+        );
+    }
+
+    /// `creature_picker_search` must start as an empty string.
+    #[test]
+    fn test_creature_picker_search_starts_empty() {
+        let state = MonstersEditorState::default();
+        assert!(
+            state.creature_picker_search.is_empty(),
+            "creature_picker_search must be empty by default"
+        );
+    }
+
+    /// `apply_selected_creature_id` must close the picker and update the
+    /// edit buffer and the string buffer simultaneously.
+    #[test]
+    fn test_apply_selected_creature_id_closes_picker() {
+        let mut state = MonstersEditorState::default();
+        state.creature_picker_open = true;
+        state.apply_selected_creature_id(Some(42));
+        assert!(
+            !state.creature_picker_open,
+            "picker must be closed after selection"
+        );
+        assert_eq!(state.creature_id_buffer, "42");
+        assert_eq!(state.edit_buffer.creature_id, Some(42));
     }
 }

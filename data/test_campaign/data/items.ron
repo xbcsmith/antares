@@ -621,7 +621,7 @@
         id: 52,
         name: "Cure Poison Potion",
         item_type: Consumable((
-            effect: CureCondition(4),
+            effect: CureCondition(16),
             is_combat_usable: true,
         )),
         base_cost: 75,

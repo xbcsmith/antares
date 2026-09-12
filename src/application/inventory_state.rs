@@ -15,18 +15,43 @@
 //!
 //! ```
 //! use antares::application::GameMode;
-//! use antares::application::inventory_state::InventoryState;
+//! use antares::application::inventory_state::{InventoryState, InventoryViewMode};
 //!
 //! let state = InventoryState::new(GameMode::Exploration);
 //! assert_eq!(state.focused_index, 0);
 //! assert_eq!(state.open_panels, vec![0usize]);
 //! assert_eq!(state.selected_slot, None);
+//! assert_eq!(state.view_mode, InventoryViewMode::Multi);
 //! assert!(matches!(state.get_resume_mode(), GameMode::Exploration));
 //! ```
 
 use crate::application::GameMode;
 use crate::domain::character::PARTY_MAX_SIZE;
 use serde::{Deserialize, Serialize};
+
+/// Controls whether the inventory screen shows all open panels in a grid
+/// or focuses on a single character panel at full width.
+///
+/// `Multi` is the default view that displays all open character panels
+/// simultaneously in a grid layout.  `Single` zooms into one panel,
+/// giving it the full available width for detailed item management.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::inventory_state::InventoryViewMode;
+///
+/// let mode = InventoryViewMode::default();
+/// assert_eq!(mode, InventoryViewMode::Multi);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum InventoryViewMode {
+    /// All `open_panels` are shown simultaneously in a grid.
+    #[default]
+    Multi,
+    /// Only the `focused_index` panel is shown at full width.
+    Single,
+}
 
 /// State for the inventory management screen.
 ///
@@ -72,14 +97,22 @@ pub struct InventoryState {
     /// [`select_next_slot`]: InventoryState::select_next_slot
     /// [`select_prev_slot`]: InventoryState::select_prev_slot
     pub selected_slot: Option<usize>,
+
+    /// Whether the inventory screen is displaying all open panels (`Multi`) or
+    /// zooming into a single panel (`Single`).
+    ///
+    /// Deserialises to [`InventoryViewMode::Multi`] when absent from a save file
+    /// (via `#[serde(default)]`).
+    #[serde(default)]
+    pub view_mode: InventoryViewMode,
 }
 
 impl InventoryState {
     /// Create a new `InventoryState`, storing the mode that was active before
     /// opening the inventory.
     ///
-    /// The new state has `focused_index = 0`, `open_panels = vec![0]`, and
-    /// `selected_slot = None`.
+    /// The new state has `focused_index = 0`, `open_panels = vec![0]`,
+    /// `selected_slot = None`, and `view_mode = InventoryViewMode::Multi`.
     ///
     /// # Arguments
     ///
@@ -89,12 +122,13 @@ impl InventoryState {
     ///
     /// ```
     /// use antares::application::GameMode;
-    /// use antares::application::inventory_state::InventoryState;
+    /// use antares::application::inventory_state::{InventoryState, InventoryViewMode};
     ///
     /// let state = InventoryState::new(GameMode::Exploration);
     /// assert_eq!(state.focused_index, 0);
     /// assert_eq!(state.open_panels, vec![0usize]);
     /// assert_eq!(state.selected_slot, None);
+    /// assert_eq!(state.view_mode, InventoryViewMode::Multi);
     /// ```
     pub fn new(previous_mode: GameMode) -> Self {
         Self {
@@ -102,6 +136,7 @@ impl InventoryState {
             focused_index: 0,
             open_panels: vec![0],
             selected_slot: None,
+            view_mode: InventoryViewMode::Multi,
         }
     }
 
@@ -123,13 +158,87 @@ impl InventoryState {
         (*self.previous_mode).clone()
     }
 
+    /// Switch to `Single` view, focusing on the specified character index.
+    ///
+    /// Sets `view_mode` to [`InventoryViewMode::Single`], updates `focused_index`
+    /// to `character_index`, and clears `selected_slot`.  The current
+    /// `open_panels` list is preserved so the multi-view state is intact when
+    /// the player returns via [`enter_multi_view`] or a Tab press.
+    ///
+    /// [`enter_multi_view`]: InventoryState::enter_multi_view
+    ///
+    /// # Arguments
+    ///
+    /// * `character_index` – Zero-based party index of the character to focus on.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameMode;
+    /// use antares::application::inventory_state::{InventoryState, InventoryViewMode};
+    ///
+    /// let mut state = InventoryState::new(GameMode::Exploration);
+    /// state.open_panels = vec![0, 1, 2];
+    /// state.enter_single_view(2);
+    ///
+    /// assert_eq!(state.view_mode, InventoryViewMode::Single);
+    /// assert_eq!(state.focused_index, 2);
+    /// assert_eq!(state.selected_slot, None);
+    /// assert_eq!(state.open_panels, vec![0, 1, 2]); // preserved
+    /// ```
+    pub fn enter_single_view(&mut self, character_index: usize) {
+        self.view_mode = InventoryViewMode::Single;
+        self.focused_index = character_index;
+        self.selected_slot = None;
+    }
+
+    /// Switch to `Multi` view, rebuilding `open_panels` from `party_size`.
+    ///
+    /// Sets `view_mode` to [`InventoryViewMode::Multi`] and replaces
+    /// `open_panels` with `(0..party_size).collect()`.  If the resulting
+    /// `open_panels` is empty (i.e. `party_size == 0`), index `0` is pushed as
+    /// a fallback so there is always at least one visible panel.  `focused_index`
+    /// is left unchanged.
+    ///
+    /// # Arguments
+    ///
+    /// * `party_size` – Number of members currently in the party.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameMode;
+    /// use antares::application::inventory_state::{InventoryState, InventoryViewMode};
+    ///
+    /// let mut state = InventoryState::new(GameMode::Exploration);
+    /// state.focused_index = 1;
+    /// state.enter_multi_view(3);
+    ///
+    /// assert_eq!(state.view_mode, InventoryViewMode::Multi);
+    /// assert_eq!(state.open_panels, vec![0, 1, 2]);
+    /// assert_eq!(state.focused_index, 1); // unchanged
+    /// ```
+    pub fn enter_multi_view(&mut self, party_size: usize) {
+        self.view_mode = InventoryViewMode::Multi;
+        self.open_panels = (0..party_size).collect();
+        if self.open_panels.is_empty() {
+            self.open_panels.push(0);
+        }
+    }
+
     /// Advance focus to the next character panel, wrapping around.
+    ///
+    /// If the state is currently in [`InventoryViewMode::Single`], calling
+    /// `tab_next` first transitions back to Multi view (via [`enter_multi_view`])
+    /// before advancing `focused_index`.
     ///
     /// If the newly focused index is not yet in `open_panels` **and** fewer than
     /// `PARTY_MAX_SIZE` panels are already open, the index is appended to
     /// `open_panels`.
     ///
     /// This is a no-op when `party_size == 0`.
+    ///
+    /// [`enter_multi_view`]: InventoryState::enter_multi_view
     ///
     /// # Arguments
     ///
@@ -147,6 +256,10 @@ impl InventoryState {
     /// assert!(state.open_panels.contains(&1));
     /// ```
     pub fn tab_next(&mut self, party_size: usize) {
+        // If in Single view, pressing Tab expands back to Multi first, then cycles.
+        if self.view_mode == InventoryViewMode::Single {
+            self.enter_multi_view(party_size);
+        }
         if party_size == 0 {
             return;
         }
@@ -160,11 +273,17 @@ impl InventoryState {
 
     /// Move focus to the previous character panel, wrapping around.
     ///
+    /// If the state is currently in [`InventoryViewMode::Single`], calling
+    /// `tab_prev` first transitions back to Multi view (via [`enter_multi_view`])
+    /// before decrementing `focused_index`.
+    ///
     /// If the newly focused index is not yet in `open_panels` **and** fewer than
     /// `PARTY_MAX_SIZE` panels are already open, the index is appended to
     /// `open_panels`.
     ///
     /// This is a no-op when `party_size == 0`.
+    ///
+    /// [`enter_multi_view`]: InventoryState::enter_multi_view
     ///
     /// # Arguments
     ///
@@ -182,6 +301,10 @@ impl InventoryState {
     /// assert!(state.open_panels.contains(&2));
     /// ```
     pub fn tab_prev(&mut self, party_size: usize) {
+        // If in Single view, pressing Tab expands back to Multi first, then cycles.
+        if self.view_mode == InventoryViewMode::Single {
+            self.enter_multi_view(party_size);
+        }
         if party_size == 0 {
             return;
         }
@@ -531,5 +654,171 @@ mod tests {
         let default_state = InventoryState::default();
         let explicit_state = InventoryState::new(GameMode::Exploration);
         assert_eq!(default_state, explicit_state);
+    }
+
+    // -------------------------------------------------------------------------
+    // InventoryViewMode
+    // -------------------------------------------------------------------------
+
+    /// `InventoryViewMode::default()` must return `InventoryViewMode::Multi`.
+    #[test]
+    fn test_inventory_view_mode_default_is_multi() {
+        assert_eq!(
+            InventoryViewMode::default(),
+            InventoryViewMode::Multi,
+            "default view mode must be Multi"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // enter_single_view
+    // -------------------------------------------------------------------------
+
+    /// `enter_single_view(2)` on a state with `focused_index = 0` must set
+    /// `view_mode = Single`, `focused_index = 2`, and `selected_slot = None`.
+    #[test]
+    fn test_enter_single_view_sets_mode_and_updates_index() {
+        let mut state = InventoryState::new(GameMode::Exploration);
+        state.focused_index = 0;
+        state.selected_slot = Some(3);
+        state.enter_single_view(2);
+        assert_eq!(
+            state.view_mode,
+            InventoryViewMode::Single,
+            "view_mode must be Single after enter_single_view"
+        );
+        assert_eq!(
+            state.focused_index, 2,
+            "focused_index must be updated to the supplied character_index"
+        );
+        assert_eq!(
+            state.selected_slot, None,
+            "selected_slot must be cleared by enter_single_view"
+        );
+    }
+
+    /// `enter_single_view` must not modify `open_panels`.
+    #[test]
+    fn test_enter_single_view_preserves_open_panels() {
+        let mut state = InventoryState::new(GameMode::Exploration);
+        state.open_panels = vec![0, 1, 2];
+        state.enter_single_view(1);
+        assert_eq!(
+            state.open_panels,
+            vec![0, 1, 2],
+            "open_panels must be unchanged after enter_single_view"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // enter_multi_view
+    // -------------------------------------------------------------------------
+
+    /// `enter_multi_view(3)` must set `view_mode = Multi` and rebuild
+    /// `open_panels` as `[0, 1, 2]`.
+    #[test]
+    fn test_enter_multi_view_sets_mode_and_restores_panels() {
+        let mut state = InventoryState::new(GameMode::Exploration);
+        state.enter_multi_view(3);
+        assert_eq!(
+            state.view_mode,
+            InventoryViewMode::Multi,
+            "view_mode must be Multi after enter_multi_view"
+        );
+        assert_eq!(
+            state.open_panels,
+            vec![0, 1, 2],
+            "open_panels must be rebuilt as [0, 1, 2] for party_size 3"
+        );
+    }
+
+    /// When `party_size == 0`, `enter_multi_view` must push index 0 as fallback
+    /// so `open_panels` is never empty.
+    #[test]
+    fn test_enter_multi_view_empty_party_keeps_panel_zero() {
+        let mut state = InventoryState::new(GameMode::Exploration);
+        state.enter_multi_view(0);
+        assert_eq!(
+            state.open_panels,
+            vec![0],
+            "open_panels must fall back to [0] when party_size is 0"
+        );
+    }
+
+    /// `enter_multi_view` must not change `focused_index`.
+    #[test]
+    fn test_enter_multi_view_preserves_focused_index() {
+        let mut state = InventoryState::new(GameMode::Exploration);
+        state.focused_index = 2;
+        state.enter_multi_view(4);
+        assert_eq!(
+            state.focused_index, 2,
+            "focused_index must be unchanged after enter_multi_view"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // tab_next / tab_prev — Single-view interactions
+    // -------------------------------------------------------------------------
+
+    /// `tab_next` called while in Single view must first expand to Multi view
+    /// and then advance `focused_index` by one.
+    #[test]
+    fn test_tab_next_from_single_view_enters_multi_and_advances() {
+        let mut state = InventoryState::new(GameMode::Exploration);
+        state.enter_single_view(0);
+        assert_eq!(state.view_mode, InventoryViewMode::Single);
+
+        state.tab_next(3);
+
+        assert_eq!(
+            state.view_mode,
+            InventoryViewMode::Multi,
+            "tab_next must transition to Multi view when called from Single"
+        );
+        assert_eq!(
+            state.focused_index, 1,
+            "focused_index must advance from 0 to 1 after tab_next"
+        );
+        assert!(
+            state.open_panels.contains(&1),
+            "open_panels must contain 1 after tab_next"
+        );
+    }
+
+    /// `tab_prev` called while in Single view must first expand to Multi view
+    /// and then decrement `focused_index` by one.
+    #[test]
+    fn test_tab_prev_from_single_view_enters_multi_and_retreats() {
+        let mut state = InventoryState::new(GameMode::Exploration);
+        state.enter_single_view(2);
+        assert_eq!(state.view_mode, InventoryViewMode::Single);
+
+        state.tab_prev(3);
+
+        assert_eq!(
+            state.view_mode,
+            InventoryViewMode::Multi,
+            "tab_prev must transition to Multi view when called from Single"
+        );
+        assert_eq!(
+            state.focused_index, 1,
+            "focused_index must decrement from 2 to 1 after tab_prev"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // new() — view_mode default
+    // -------------------------------------------------------------------------
+
+    /// `InventoryState::new` must initialise `view_mode` as `InventoryViewMode::Multi`.
+    #[test]
+    fn test_inventory_state_new_view_mode_defaults_to_multi() {
+        let state = InventoryState::new(GameMode::Exploration);
+        assert_eq!(
+            state.view_mode,
+            InventoryViewMode::Multi,
+            "view_mode must default to Multi on construction"
+        );
     }
 }

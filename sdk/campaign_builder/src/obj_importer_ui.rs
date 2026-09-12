@@ -490,13 +490,13 @@ fn suggest_next_creature_id_from_dir(
     let used_ids: std::collections::HashSet<u32> = campaign_dir
         .map(|dir| {
             CreatureAssetManager::new(dir.to_path_buf())
-                .load_all_creatures()
+                .list_creature_stubs()
                 .unwrap_or_default()
         })
         .unwrap_or_default()
         .iter()
-        .filter(|c| range.contains(&c.id))
-        .map(|c| c.id)
+        .filter(|(id, _)| range.contains(id))
+        .map(|(id, _)| *id)
         .collect();
     for id in range.clone() {
         if !used_ids.contains(&id) {

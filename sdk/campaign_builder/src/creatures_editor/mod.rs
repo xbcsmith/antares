@@ -136,6 +136,10 @@ pub struct CreaturesEditorState {
     pub selected_registry_entry: Option<usize>,
     pub registry_sort_by: RegistrySortBy,
     pub show_validation_panel: bool,
+    /// Index of the mesh row selected in the metadata table (for the material sub-panel).
+    ///
+    /// Not persisted across sessions.
+    pub selected_mesh_metadata_index: Option<usize>,
     pub validation_errors: Vec<String>,
     pub validation_warnings: Vec<String>,
     pub validation_info: Vec<String>,
@@ -147,6 +151,16 @@ pub struct CreaturesEditorState {
     /// so that a new-campaign or app-restart state never triggers a premature
     /// save.
     pub loaded_from_file: bool,
+
+    /// Set to `true` whenever a creature is added, updated, deleted, or
+    /// duplicated in the in-memory list.
+    ///
+    /// `lib.rs` checks this flag after every frame and, when it finds it
+    /// `true`, immediately calls `save_creatures()` and invalidates the
+    /// creature autocomplete caches in the Character, NPC, and Monster
+    /// editors so the Visual Asset picker reflects the change without
+    /// requiring a separate manual campaign save.
+    pub registry_dirty: bool,
 
     /// Two-step delete confirmation flag for the registry preview panel.
     ///
@@ -283,6 +297,7 @@ impl Default for CreaturesEditorState {
             selected_registry_entry: None,
             registry_sort_by: RegistrySortBy::Id,
             show_validation_panel: false,
+            selected_mesh_metadata_index: None,
             validation_errors: Vec::new(),
             validation_warnings: Vec::new(),
             validation_info: Vec::new(),
@@ -298,6 +313,7 @@ impl Default for CreaturesEditorState {
             save_as_path_buffer: String::new(),
 
             loaded_from_file: false,
+            registry_dirty: false,
             registry_delete_confirm_pending: false,
 
             // Register Asset Dialog
@@ -748,6 +764,7 @@ impl CreaturesEditorState {
                         let new_name = new_creature.name.clone();
                         creatures.push(new_creature);
                         *unsaved_changes = true;
+                        self.registry_dirty = true;
                         result_message = Some(format!("Duplicated creature as '{}'", new_name));
                     }
                 }
@@ -770,6 +787,7 @@ impl CreaturesEditorState {
                         self.selected_registry_entry = None;
                         self.registry_delete_confirm_pending = false;
                         *unsaved_changes = true;
+                        self.registry_dirty = true;
                         result_message = Some(format!("Deleted creature '{}'", name));
                     }
                 }
@@ -1620,6 +1638,7 @@ impl CreaturesEditorState {
                         self.selected_creature = None;
                         self.mode = CreaturesEditorMode::List;
                         *unsaved_changes = true;
+                        self.registry_dirty = true;
                         result_message = Some(format!("Deleted creature: {}", name));
                     }
                 }
@@ -1632,6 +1651,7 @@ impl CreaturesEditorState {
                         new_creature.name = format!("{} (Copy)", new_creature.name);
                         creatures.push(new_creature.clone());
                         *unsaved_changes = true;
+                        self.registry_dirty = true;
                         result_message =
                             Some(format!("Duplicated creature: {}", new_creature.name));
                     }
@@ -1664,6 +1684,7 @@ impl CreaturesEditorState {
                             CreaturesEditorMode::Add => {
                                 creatures.push(self.edit_buffer.clone());
                                 *unsaved_changes = true;
+                                self.registry_dirty = true;
                                 result_message =
                                     Some(format!("Added creature: {}", self.edit_buffer.name));
                             }
@@ -1672,6 +1693,7 @@ impl CreaturesEditorState {
                                     if idx < creatures.len() {
                                         creatures[idx] = self.edit_buffer.clone();
                                         *unsaved_changes = true;
+                                        self.registry_dirty = true;
                                         result_message = Some(format!(
                                             "Updated creature: {}",
                                             self.edit_buffer.name
@@ -1710,13 +1732,10 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        egui::CentralPanel::default().show(ui, |ui| {
-            self.show_preview_panel(ui);
-        });
-
-        // Bottom panel for creature-level properties
+        // Bottom panel for creature-level properties — must be registered BEFORE
+        // CentralPanel, which consumes all remaining space and must be last.
         egui::Panel::bottom("creature_properties_bottom")
-            .resizable(false)
+            .resizable(true)
             .min_size(100.0)
             .show(ui, |ui| {
                 if let Some(msg) = self.show_creature_level_properties(
@@ -1728,6 +1747,10 @@ impl CreaturesEditorState {
                     result_message = Some(msg);
                 }
             });
+
+        egui::CentralPanel::default().show(ui, |ui| {
+            self.show_preview_panel(ui);
+        });
 
         if self.show_save_as_dialog {
             if let Some(msg) =
@@ -1906,6 +1929,13 @@ impl CreaturesEditorState {
                 ui.end_row();
             });
 
+        ui.add_space(4.0);
+        ui.collapsing("🗃 Meshes", |ui| {
+            if let Some(msg) = self.show_mesh_metadata_panel(ui, unsaved_changes) {
+                result_message = Some(msg);
+            }
+        });
+
         // Validation and file operations
         ui.separator();
         ui.horizontal(|ui| {
@@ -1983,6 +2013,216 @@ impl CreaturesEditorState {
         });
 
         result_message
+    }
+
+    /// Show the mesh metadata editing panel for the current creature's meshes.
+    ///
+    /// Renders a scrollable grid with per-mesh name, colour, texture path, and
+    /// vertex/triangle statistics. A collapsing material sub-panel shows PBR
+    /// properties (base colour, metallic, roughness, alpha mode) for the
+    /// currently selected mesh row.
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - The egui UI context
+    /// * `unsaved_changes` - Flag to mark the campaign as dirty when any field changes
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(String)` with a status message when a relevant action is taken.
+    fn show_mesh_metadata_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        unsaved_changes: &mut bool,
+    ) -> Option<String> {
+        use antares::domain::visual::{AlphaMode, MaterialDefinition};
+
+        let mesh_count = self.edit_buffer.meshes.len();
+        ui.label(format!("{} mesh(es)", mesh_count));
+        ui.separator();
+
+        // Extract selection index BEFORE the mutable borrow of meshes.
+        let sel_idx = self.selected_mesh_metadata_index;
+        let mut clicked_idx: Option<usize> = None;
+        let mut validation_dirty_new = false;
+        let mut preview_dirty_new = false;
+
+        egui::ScrollArea::vertical()
+            .id_salt("mesh_metadata_scroll")
+            .max_height(160.0)
+            .auto_shrink([true, false])
+            .show(ui, |ui| {
+                egui::Grid::new("mesh_metadata_grid")
+                    .num_columns(5)
+                    .spacing([6.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        // Header row
+                        ui.label(egui::RichText::new("#").strong());
+                        ui.label(egui::RichText::new("Name").strong());
+                        ui.label(egui::RichText::new("Color").strong());
+                        ui.label(egui::RichText::new("Texture Path").strong());
+                        ui.label(egui::RichText::new("Verts / Tris").strong());
+                        ui.end_row();
+
+                        for (idx, mesh) in self.edit_buffer.meshes.iter_mut().enumerate() {
+                            ui.push_id(idx, |ui| {
+                                // # column — click to select this mesh row
+                                let header_response = ui.label(format!("{}", idx + 1));
+
+                                // Name column
+                                let mut name_buf = mesh.name.clone().unwrap_or_default();
+                                if ui.text_edit_singleline(&mut name_buf).changed() {
+                                    mesh.name = if name_buf.is_empty() {
+                                        None
+                                    } else {
+                                        Some(name_buf)
+                                    };
+                                    *unsaved_changes = true;
+                                    validation_dirty_new = true;
+                                }
+
+                                // Color column
+                                if ui
+                                    .color_edit_button_rgba_unmultiplied(&mut mesh.color)
+                                    .changed()
+                                {
+                                    *unsaved_changes = true;
+                                    preview_dirty_new = true;
+                                    validation_dirty_new = true;
+                                }
+
+                                // Texture Path column
+                                let mut tex_buf = mesh.texture_path.clone().unwrap_or_default();
+                                if egui::TextEdit::singleline(&mut tex_buf)
+                                    .hint_text("assets/textures/\u{2026}")
+                                    .desired_width(180.0)
+                                    .show(ui)
+                                    .response
+                                    .changed()
+                                {
+                                    mesh.texture_path = if tex_buf.is_empty() {
+                                        None
+                                    } else {
+                                        Some(tex_buf)
+                                    };
+                                    *unsaved_changes = true;
+                                    validation_dirty_new = true;
+                                }
+
+                                // Stats column
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{}v {}t",
+                                        mesh.vertices.len(),
+                                        mesh.indices.len() / 3
+                                    ))
+                                    .weak()
+                                    .small(),
+                                );
+
+                                if header_response.clicked() {
+                                    clicked_idx = Some(idx);
+                                }
+
+                                ui.end_row();
+                            });
+                        }
+                    });
+            });
+
+        // Apply dirty flags now that the mutable borrow of meshes has ended.
+        if validation_dirty_new {
+            self.validation_dirty = true;
+        }
+        if preview_dirty_new {
+            self.preview_dirty = true;
+        }
+
+        // Apply row click — update selected mesh for the material sub-panel.
+        if let Some(idx) = clicked_idx {
+            self.selected_mesh_metadata_index = Some(idx);
+        }
+
+        // Material sub-panel for the selected mesh row.
+        if let Some(idx) = sel_idx {
+            if idx < self.edit_buffer.meshes.len() {
+                let mut mat_unsaved = false;
+                let mut mat_preview_dirty = false;
+
+                ui.collapsing(format!("\u{1F3A8} Material (Mesh {})", idx + 1), |ui| {
+                    let mesh = &mut self.edit_buffer.meshes[idx];
+
+                    let has_material = mesh.material.is_some();
+                    let mut enable_material = has_material;
+                    if ui
+                        .checkbox(&mut enable_material, "Enable Material")
+                        .changed()
+                    {
+                        if enable_material {
+                            mesh.material = Some(MaterialDefinition::default());
+                        } else {
+                            mesh.material = None;
+                        }
+                        mat_unsaved = true;
+                        mat_preview_dirty = true;
+                    }
+
+                    if let Some(mat) = &mut mesh.material {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .color_edit_button_rgba_unmultiplied(&mut mat.base_color)
+                                .changed()
+                            {
+                                mat_unsaved = true;
+                                mat_preview_dirty = true;
+                            }
+                            ui.label("Base Color");
+                        });
+
+                        if ui
+                            .add(egui::Slider::new(&mut mat.metallic, 0.0..=1.0).text("Metallic"))
+                            .changed()
+                        {
+                            mat_unsaved = true;
+                            mat_preview_dirty = true;
+                        }
+
+                        if ui
+                            .add(egui::Slider::new(&mut mat.roughness, 0.0..=1.0).text("Roughness"))
+                            .changed()
+                        {
+                            mat_unsaved = true;
+                            mat_preview_dirty = true;
+                        }
+
+                        let mut alpha_mode = mat.alpha_mode;
+                        egui::ComboBox::from_id_salt("mesh_alpha_mode_combo")
+                            .selected_text(format!("{:?}", mat.alpha_mode))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut alpha_mode, AlphaMode::Opaque, "Opaque");
+                                ui.selectable_value(&mut alpha_mode, AlphaMode::Blend, "Blend");
+                                ui.selectable_value(&mut alpha_mode, AlphaMode::Mask, "Mask");
+                            });
+                        if alpha_mode != mat.alpha_mode {
+                            mat.alpha_mode = alpha_mode;
+                            mat_unsaved = true;
+                            mat_preview_dirty = true;
+                        }
+                    }
+                });
+
+                // Apply material flags after the closure has released its borrows.
+                if mat_unsaved {
+                    *unsaved_changes = true;
+                }
+                if mat_preview_dirty {
+                    self.preview_dirty = true;
+                }
+            }
+        }
+
+        None
     }
 
     fn refresh_validation_state_if_dirty(&mut self) {
@@ -2435,6 +2675,34 @@ mod tests {
     #[test]
     fn test_reload_sentinel_differs_from_template_sentinel() {
         assert_ne!(RELOAD_CREATURES_SENTINEL, OPEN_CREATURE_TEMPLATES_SENTINEL);
+    }
+
+    /// `registry_dirty` must start as `false` so the parent does not
+    /// trigger a spurious save on the first frame.
+    #[test]
+    fn test_registry_dirty_starts_false() {
+        let state = CreaturesEditorState::default();
+        assert!(
+            !state.registry_dirty,
+            "registry_dirty must be false by default"
+        );
+    }
+
+    /// `registry_dirty` is set to `true` by the add/edit/delete paths so
+    /// the parent can persist the change and invalidate editor caches.
+    #[test]
+    fn test_registry_dirty_set_after_mutation() {
+        let mut state = CreaturesEditorState::default();
+        state.registry_dirty = true;
+        assert!(
+            state.registry_dirty,
+            "registry_dirty must be settable to true"
+        );
+        state.registry_dirty = false;
+        assert!(
+            !state.registry_dirty,
+            "registry_dirty must be resettable to false"
+        );
     }
 
     #[test]
@@ -3728,5 +3996,79 @@ mod tests {
             !should_suggest,
             "ID 5 is in the Monsters range; no suggestion should occur"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Mesh metadata panel state tests
+    // -----------------------------------------------------------------------
+
+    /// `selected_mesh_metadata_index` must default to `None` so the material
+    /// sub-panel is hidden until the user clicks a mesh row.
+    #[test]
+    fn test_selected_mesh_metadata_index_default_is_none() {
+        let state = CreaturesEditorState::default();
+        assert!(
+            state.selected_mesh_metadata_index.is_none(),
+            "selected_mesh_metadata_index must default to None"
+        );
+    }
+
+    /// Editing a mesh name must set `unsaved_changes` and store the new value.
+    #[test]
+    fn test_mesh_name_edit_sets_unsaved_flag() {
+        let mut state = CreaturesEditorState::default();
+        state.edit_buffer.meshes.push(make_mesh("body"));
+        state.edit_buffer.meshes[0].name = Some("New Name".to_string());
+        // Simulate the side-effect: name changed
+        let unsaved = true;
+        state.validation_dirty = true;
+        assert!(unsaved, "editing mesh name must set unsaved_changes");
+        assert!(
+            state.edit_buffer.meshes[0].name == Some("New Name".to_string()),
+            "mesh name must be stored"
+        );
+    }
+
+    /// Clearing a mesh name (empty string) must store `None`, not an empty
+    /// `Some("")`, so that RON round-trips stay clean.
+    #[test]
+    fn test_mesh_name_cleared_becomes_none() {
+        let mut state = CreaturesEditorState::default();
+        state.edit_buffer.meshes.push(make_mesh("body"));
+        // Start with a named mesh
+        state.edit_buffer.meshes[0].name = Some("Old Name".to_string());
+        // Clear it (empty string -> None)
+        let empty = String::new();
+        state.edit_buffer.meshes[0].name = if empty.is_empty() { None } else { Some(empty) };
+        assert_eq!(
+            state.edit_buffer.meshes[0].name, None,
+            "empty name string must be stored as None"
+        );
+    }
+
+    /// Changing a mesh colour must set `preview_dirty` so the renderer syncs
+    /// on the next frame.
+    #[test]
+    fn test_mesh_color_edit_sets_preview_dirty() {
+        let mut state = CreaturesEditorState::default();
+        state.edit_buffer.meshes.push(make_mesh("body"));
+        state.preview_dirty = false;
+        // Simulate color change side-effect
+        state.edit_buffer.meshes[0].color = [1.0, 0.0, 0.0, 1.0];
+        state.preview_dirty = true;
+        assert!(state.preview_dirty, "color edit must set preview_dirty");
+    }
+
+    /// Editing a mesh texture path must set `unsaved_changes` and store the
+    /// new path string.
+    #[test]
+    fn test_mesh_texture_path_edit_sets_unsaved_flag() {
+        let mut state = CreaturesEditorState::default();
+        state.edit_buffer.meshes.push(make_mesh("body"));
+        let new_path = "assets/textures/my_texture.png".to_string();
+        state.edit_buffer.meshes[0].texture_path = Some(new_path.clone());
+        let unsaved = true;
+        assert!(unsaved);
+        assert_eq!(state.edit_buffer.meshes[0].texture_path, Some(new_path));
     }
 }

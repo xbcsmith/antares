@@ -318,6 +318,41 @@ impl MerchantStock {
     /// // Item not in stock: falls back to base_cost
     /// assert_eq!(stock.effective_price(99, 50), 50);
     /// ```
+    /// Increments the quantity of `item_id` by one, or adds a new entry with
+    /// quantity 1 if the item is not yet listed in this merchant's stock.
+    ///
+    /// Called when a player sells an item to a merchant.  The item is always
+    /// added to the visible stock so the player can buy it back.  A freshly
+    /// added entry carries no price override — the item's `base_cost` from the
+    /// `ItemDatabase` (multiplied by the NPC's `sell_rate`) is used instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `item_id` - The item being sold to the merchant.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::inventory::{MerchantStock, StockEntry};
+    ///
+    /// let mut stock = MerchantStock::new();
+    ///
+    /// // Item not yet stocked — creates a new entry with quantity 1.
+    /// stock.add_or_increment(7);
+    /// assert_eq!(stock.get_entry(7).unwrap().quantity, 1);
+    ///
+    /// // Item already stocked — increments quantity.
+    /// stock.add_or_increment(7);
+    /// assert_eq!(stock.get_entry(7).unwrap().quantity, 2);
+    /// ```
+    pub fn add_or_increment(&mut self, item_id: ItemId) {
+        if let Some(entry) = self.get_entry_mut(item_id) {
+            entry.quantity = entry.quantity.saturating_add(1);
+        } else {
+            self.entries.push(StockEntry::new(item_id, 1));
+        }
+    }
+
     pub fn effective_price(&self, item_id: ItemId, base_cost: u32) -> u32 {
         match self.get_entry(item_id) {
             Some(entry) => entry.override_price.unwrap_or(base_cost),
@@ -917,6 +952,33 @@ mod tests {
         let serialized = ron::to_string(&service).expect("Failed to serialize");
         let deserialized: ServiceEntry = ron::from_str(&serialized).expect("Failed to deserialize");
         assert_eq!(service, deserialized);
+    }
+
+    #[test]
+    fn test_merchant_stock_add_or_increment_existing_entry() {
+        let mut stock = MerchantStock::new();
+        stock.entries.push(StockEntry::new(7, 2));
+        stock.add_or_increment(7);
+        assert_eq!(stock.get_entry(7).unwrap().quantity, 3);
+    }
+
+    #[test]
+    fn test_merchant_stock_add_or_increment_new_entry() {
+        let mut stock = MerchantStock::new();
+        stock.add_or_increment(42);
+        let entry = stock
+            .get_entry(42)
+            .expect("entry must exist after add_or_increment");
+        assert_eq!(entry.quantity, 1);
+        assert!(entry.override_price.is_none());
+    }
+
+    #[test]
+    fn test_merchant_stock_add_or_increment_saturates_at_max() {
+        let mut stock = MerchantStock::new();
+        stock.entries.push(StockEntry::new(1, u8::MAX));
+        stock.add_or_increment(1); // must not overflow
+        assert_eq!(stock.get_entry(1).unwrap().quantity, u8::MAX);
     }
 
     // ----- MerchantStock default -----

@@ -624,15 +624,34 @@ impl ClassesEditorState {
                                         ui.add_space(5.0);
                                         ui.label("Starting Items:");
                                         ui.indent("starting_items_list", |ui| {
-                                            for item_id in &class.starting_items {
-                                                let item_name = items
+                                            // Group duplicates: show "Name \u{d7}N" instead
+                                            // of one row per item.
+                                            let mut stacked: Vec<(_, usize)> = Vec::new();
+                                            for &id in &class.starting_items {
+                                                if let Some(e) =
+                                                    stacked.iter_mut().find(|(sid, _)| *sid == id)
+                                                {
+                                                    e.1 += 1;
+                                                } else {
+                                                    stacked.push((id, 1));
+                                                }
+                                            }
+                                            for (item_id, count) in &stacked {
+                                                let name = items
                                                     .iter()
                                                     .find(|i| i.id == *item_id)
                                                     .map(|i| i.name.clone())
                                                     .unwrap_or_else(|| {
                                                         format!("Unknown ({})", item_id)
                                                     });
-                                                ui.label(format!("• {}", item_name));
+                                                if *count > 1 {
+                                                    ui.label(format!(
+                                                        "\u{2022} {} \u{d7}{}",
+                                                        name, count
+                                                    ));
+                                                } else {
+                                                    ui.label(format!("\u{2022} {}", name));
+                                                }
                                             }
                                         });
                                     }

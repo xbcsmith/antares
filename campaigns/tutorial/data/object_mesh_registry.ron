@@ -34,4 +34,9 @@
         name: "Ironbound Barrel",
         filepath: "assets/meshes/objects/ironbound_barrel.ron",
     ),
+    (
+        id: 12009,
+        name: "Old Treasure Chest Small",
+        filepath: "assets/meshes/objects/old_treasure_chest_copy.ron",
+    ),
 ]

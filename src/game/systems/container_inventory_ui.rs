@@ -46,15 +46,15 @@
 use crate::application::container_inventory_state::{ContainerFocus, ContainerInventoryState};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
-use crate::domain::character::{Inventory, InventorySlot};
+use crate::domain::character::InventorySlot;
 use crate::domain::world::MapEvent;
 
 use crate::game::resources::GlobalState;
 use crate::game::systems::input::GlobalInputSet;
 use crate::game::systems::inventory_ui_common::{
     render_character_strip, split_panel, NavigationPhase, ACTION_FOCUSED_COLOR,
-    FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H, PANEL_BG_COLOR,
-    PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS, SLOT_NAV_HINT, UNFOCUSED_BORDER_COLOR,
+    FOCUSED_BORDER_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H, PANEL_BG_COLOR, PANEL_HEADER_H,
+    SELECT_HIGHLIGHT_COLOR, SLOT_NAV_HINT, UNFOCUSED_BORDER_COLOR,
 };
 
 use bevy::prelude::*;
@@ -71,6 +71,20 @@ const CONTAINER_ITEM_COLOR: egui::Color32 =
 const TAKE_COLOR: egui::Color32 = egui::Color32::from_rgb(80, 200, 200);
 /// Stash button accent colour.
 const STASH_COLOR: egui::Color32 = egui::Color32::from_rgb(200, 160, 80);
+
+/// Returns a short category tag string for the given item type, shown dim in the
+/// inventory text list to the right of each item name.
+fn item_type_tag(item_type: &crate::domain::items::types::ItemType) -> &'static str {
+    use crate::domain::items::types::ItemType;
+    match item_type {
+        ItemType::Weapon(_) => "[Weapon]",
+        ItemType::Armor(_) => "[Armor]",
+        ItemType::Accessory(_) => "[Accessory]",
+        ItemType::Consumable(_) => "[Potion]",
+        ItemType::Ammo(_) => "[Ammo]",
+        ItemType::Quest(_) => "[Quest]",
+    }
+}
 
 // ===== Plugin =====
 
@@ -527,27 +541,31 @@ fn container_inventory_input_system(
 
     match container_state.focus {
         ContainerFocus::Left => {
-            // Character panel: 2-D grid navigation (same as inventory_ui)
-            let max_slots = Inventory::MAX_ITEMS;
+            // Character panel: linear list navigation (Up/Down ±1; Left/Right
+            // also move through the list for discoverability, matching the
+            // Right panel behaviour)
+            let char_idx = container_state.active_character_index;
+            let item_count = global_state
+                .0
+                .party
+                .members
+                .get(char_idx)
+                .map(|ch| ch.inventory.items.len())
+                .unwrap_or(0);
+            if item_count == 0 {
+                return;
+            }
             let current = nav_state.selected_slot_index.unwrap_or(0);
-            let next = if keyboard.just_pressed(KeyCode::ArrowRight) {
-                (current + 1) % max_slots
-            } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
+            let next = if keyboard.just_pressed(KeyCode::ArrowDown)
+                || keyboard.just_pressed(KeyCode::ArrowRight)
+            {
+                (current + 1) % item_count
+            } else {
+                // ArrowUp / ArrowLeft
                 if current == 0 {
-                    max_slots - 1
+                    item_count - 1
                 } else {
                     current - 1
-                }
-            } else if keyboard.just_pressed(KeyCode::ArrowDown) {
-                (current + SLOT_COLS) % max_slots
-            } else {
-                // ArrowUp
-                if current < SLOT_COLS {
-                    let last_row_start = (max_slots / SLOT_COLS).saturating_sub(1) * SLOT_COLS;
-                    let col = current % SLOT_COLS;
-                    (last_row_start + col).min(max_slots - 1)
-                } else {
-                    current - SLOT_COLS
                 }
             };
             nav_state.selected_slot_index = Some(next);
@@ -927,10 +945,9 @@ fn render_character_stash_panel(
     };
     let (panel_rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
 
-    // All static painting (border, header, body background, grid lines) is
-    // grouped in this block so the painter borrow is dropped before the
-    // first `ui.new_child()` call below, which requires a mutable borrow.
-    let (body_rect, cell_w, cell_h, cell_size) = {
+    // ── Painting: border, header, body background (painter borrow dropped before
+    // ui.new_child() below, which requires a mutable borrow of ui) ──────────
+    let body_rect = {
         let painter = ui.painter();
         painter.rect_stroke(
             panel_rect,
@@ -958,115 +975,110 @@ fn render_character_stash_panel(
             egui::Color32::from_rgb(160, 160, 160),
         );
 
-        // ── Body: inventory grid ──────────────────────────────────────────
+        // ── Body background ───────────────────────────────────────────────
         let body_rect = egui::Rect::from_min_size(
             panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H),
             egui::vec2(size.x, body_h),
         );
         painter.rect_filled(body_rect, 0.0, PANEL_BG_COLOR);
-
-        let slot_rows = Inventory::MAX_ITEMS.div_ceil(SLOT_COLS);
-        let cell_w = (body_rect.width() / SLOT_COLS as f32).floor();
-        let cell_h = (body_rect.height() / slot_rows as f32).floor();
-        let cell_size = cell_w.min(cell_h).max(8.0);
-
-        // Grid lines
-        for col in 0..=SLOT_COLS {
-            let x = body_rect.min.x + col as f32 * cell_w;
-            painter.line_segment(
-                [
-                    egui::pos2(x, body_rect.min.y),
-                    egui::pos2(x, body_rect.max.y),
-                ],
-                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
-            );
-        }
-        for row in 0..=slot_rows {
-            let y = body_rect.min.y + row as f32 * cell_h;
-            painter.line_segment(
-                [
-                    egui::pos2(body_rect.min.x, y),
-                    egui::pos2(body_rect.max.x, y),
-                ],
-                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
-            );
-        }
-        // painter borrow ends here.
-        (body_rect, cell_w, cell_h, cell_size)
+        // painter borrow ends here — dropped at end of block.
+        body_rect
     };
 
-    // ── Interactive cell grid ─────────────────────────────────────────────
-    // A child UI is created over body_rect so each cell gets a click/hover
-    // Response from egui.  The painter borrow above has been dropped.
-    let mut cell_child = ui.new_child(
+    // ── Body: scrollable inventory text list ──────────────────────────────
+    let mut body_child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(body_rect)
             .layout(egui::Layout::top_down(egui::Align::LEFT)),
     );
-
-    for slot_idx in 0..Inventory::MAX_ITEMS {
-        let col = slot_idx % SLOT_COLS;
-        let row = slot_idx / SLOT_COLS;
-        let cell_min = body_rect.min + egui::vec2(col as f32 * cell_w, row as f32 * cell_h);
-        let cell_rect = egui::Rect::from_min_size(cell_min, egui::vec2(cell_w, cell_h));
-
-        cell_child.push_id(format!("stash_cell_{}", slot_idx), |ui| {
-            let cell_response = ui.allocate_rect(cell_rect, egui::Sense::click_and_drag());
-
-            let is_hovered = cell_response.hovered();
-            let is_selected = selected_slot == Some(slot_idx);
-
-            // Selection highlight
-            if is_selected {
-                ui.painter().rect_filled(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Color32::from_rgba_premultiplied(180, 150, 0, 60),
+    egui::ScrollArea::vertical()
+        .id_salt("cont_char_inv_scroll")
+        .max_height(body_h)
+        .auto_shrink([true, false])
+        .show(&mut body_child, |ui| {
+            if items.is_empty() {
+                ui.label(
+                    egui::RichText::new("(empty)")
+                        .color(egui::Color32::from_rgba_premultiplied(120, 120, 120, 255))
+                        .small(),
                 );
-                ui.painter().rect_stroke(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR),
-                    egui::StrokeKind::Outside,
-                );
-            } else if is_hovered && slot_idx < items.len() {
-                // Hover highlight for cells that contain an item
-                ui.painter().rect_filled(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Color32::from_rgba_premultiplied(180, 150, 0, 25),
-                );
-                ui.painter().rect_stroke(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Stroke::new(1.0_f32, SELECT_HIGHLIGHT_COLOR),
-                    egui::StrokeKind::Outside,
-                );
-            }
+            } else {
+                for (slot_idx, slot) in items.iter().enumerate() {
+                    ui.push_id(format!("stash_row_{}", slot_idx), |ui| {
+                        let is_selected = selected_slot == Some(slot_idx);
 
-            // Item silhouette
-            if slot_idx < items.len() {
-                let item_type = game_content
-                    .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
-                    .map(|it| &it.item_type);
-                crate::game::systems::inventory_ui::paint_item_silhouette_pub(
-                    ui.painter(),
-                    cell_rect,
-                    cell_size,
-                    item_type,
-                    egui::Color32::from_rgba_premultiplied(230, 230, 230, 255),
-                );
-            }
+                        let item_def =
+                            game_content.and_then(|gc| gc.db().items.get_item(slot.item_id));
+                        let item_name = item_def
+                            .map(|it| it.name.clone())
+                            .unwrap_or_else(|| format!("#{}", slot.item_id));
+                        let type_tag = item_def
+                            .map(|it| item_type_tag(&it.item_type))
+                            .unwrap_or("");
 
-            // Mouse click → select this slot and report whether it contains an item
-            if cell_response.clicked() {
-                result = Some(CharacterStashPanelResult::SelectSlot {
-                    slot_index: slot_idx,
-                    has_item: slot_idx < items.len(),
-                });
+                        const STASH_ROW_H: f32 = 24.0;
+                        let (row_rect, response) = ui.allocate_exact_size(
+                            egui::vec2(body_rect.width(), STASH_ROW_H),
+                            egui::Sense::click(),
+                        );
+
+                        // Selection highlight — amber fill + yellow border
+                        if is_selected {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                0.0,
+                                egui::Color32::from_rgba_premultiplied(100, 85, 0, 80),
+                            );
+                            ui.painter().rect_stroke(
+                                row_rect.shrink(1.0),
+                                0.0,
+                                egui::Stroke::new(1.5_f32, SELECT_HIGHLIGHT_COLOR),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+
+                        let dim_color = egui::Color32::from_rgba_premultiplied(120, 120, 120, 255);
+
+                        // Slot index (dim, left edge)
+                        ui.painter().text(
+                            row_rect.min + egui::vec2(4.0, STASH_ROW_H / 2.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{:2}.", slot_idx + 1),
+                            egui::FontId::proportional(11.0),
+                            dim_color,
+                        );
+
+                        // Item name (white, main area)
+                        ui.painter().text(
+                            row_rect.min + egui::vec2(28.0, STASH_ROW_H / 2.0),
+                            egui::Align2::LEFT_CENTER,
+                            &item_name,
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::WHITE,
+                        );
+
+                        // Type tag (dim, right side)
+                        if !type_tag.is_empty() {
+                            ui.painter().text(
+                                row_rect.right_center() - egui::vec2(4.0, 0.0),
+                                egui::Align2::RIGHT_CENTER,
+                                type_tag,
+                                egui::FontId::proportional(11.0),
+                                dim_color,
+                            );
+                        }
+
+                        // Click → select this slot (all visible slots have items)
+                        if response.clicked() {
+                            result = Some(CharacterStashPanelResult::SelectSlot {
+                                slot_index: slot_idx,
+                                has_item: true,
+                            });
+                        }
+                    });
+                }
             }
         });
-    }
 
     // ── Action strip: Stash button ────────────────────────────────────────
     if has_action {

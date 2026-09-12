@@ -1019,7 +1019,7 @@
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
-        max_charges: 0,
+        max_charges: 1,
         is_cursed: false,
         icon_path: None,
         tags: [],

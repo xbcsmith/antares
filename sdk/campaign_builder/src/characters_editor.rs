@@ -1375,13 +1375,7 @@ impl CharactersEditorState {
             // or when invalidate_creature_cache() has been called.
             self.available_creatures = data
                 .creature_manager
-                .and_then(|m| m.load_all_creatures().ok())
-                .map(|creatures| {
-                    creatures
-                        .into_iter()
-                        .map(|c| (c.id, c.name))
-                        .collect::<Vec<_>>()
-                })
+                .and_then(|m| m.list_creature_stubs().ok())
                 .unwrap_or_default();
             self.creature_cache_dirty = false;
             self.last_campaign_dir = ctx.campaign_dir.cloned();
@@ -1985,14 +1979,27 @@ impl CharactersEditorState {
                 });
         }
 
-        // Show starting items
+        // Show starting items — grouped by ID so duplicates show as "Name ×N".
         if !character.starting_items.is_empty() {
             ui.add_space(10.0);
             ui.heading("Starting Items");
             ui.separator();
 
-            for item_id in &character.starting_items {
-                ui.label(format!("• {}", item_name_by_id(items, *item_id)));
+            let mut stacked: Vec<(ItemId, usize)> = Vec::new();
+            for &id in &character.starting_items {
+                if let Some(entry) = stacked.iter_mut().find(|(sid, _)| *sid == id) {
+                    entry.1 += 1;
+                } else {
+                    stacked.push((id, 1));
+                }
+            }
+            for (item_id, count) in &stacked {
+                let name = item_name_by_id(items, *item_id);
+                if *count > 1 {
+                    ui.label(format!("\u{2022} {} \u{d7}{}", name, count));
+                } else {
+                    ui.label(format!("\u{2022} {}", name));
+                }
             }
         }
 
@@ -3447,6 +3454,65 @@ mod tests {
             ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
 
         assert_eq!(parsed.starting_items, vec![50, 50]);
+    }
+
+    /// Stacking algorithm correctly groups duplicates and preserves first-seen order.
+    #[test]
+    fn test_starting_items_stacking_groups_duplicates() {
+        // 15 food rations (ID 53) plus 1 healing potion (ID 10)
+        let ids: Vec<u8> = std::iter::repeat(53u8)
+            .take(15)
+            .chain(std::iter::once(10u8))
+            .collect();
+
+        let mut stacked: Vec<(u8, usize)> = Vec::new();
+        for &id in &ids {
+            if let Some(e) = stacked.iter_mut().find(|(sid, _)| *sid == id) {
+                e.1 += 1;
+            } else {
+                stacked.push((id, 1));
+            }
+        }
+
+        assert_eq!(stacked.len(), 2, "two unique items");
+        assert_eq!(stacked[0], (53, 15), "food rations stacked as 15");
+        assert_eq!(stacked[1], (10, 1), "healing potion appears once");
+    }
+
+    /// Stacking algorithm preserves first-seen insertion order across
+    /// interleaved duplicate IDs.
+    #[test]
+    fn test_starting_items_stacking_preserves_first_seen_order() {
+        let ids: Vec<u8> = vec![2, 1, 2, 3, 1];
+        let mut stacked: Vec<(u8, usize)> = Vec::new();
+        for &id in &ids {
+            if let Some(e) = stacked.iter_mut().find(|(sid, _)| *sid == id) {
+                e.1 += 1;
+            } else {
+                stacked.push((id, 1));
+            }
+        }
+        assert_eq!(stacked[0], (2, 2));
+        assert_eq!(stacked[1], (1, 2));
+        assert_eq!(stacked[2], (3, 1));
+    }
+
+    /// Single-occurrence items are not affected by the stacking pass.
+    #[test]
+    fn test_starting_items_stacking_single_items_unchanged() {
+        let ids: Vec<u8> = vec![1, 2, 3];
+        let mut stacked: Vec<(u8, usize)> = Vec::new();
+        for &id in &ids {
+            if let Some(e) = stacked.iter_mut().find(|(sid, _)| *sid == id) {
+                e.1 += 1;
+            } else {
+                stacked.push((id, 1));
+            }
+        }
+        assert_eq!(stacked.len(), 3);
+        for (_, count) in &stacked {
+            assert_eq!(*count, 1);
+        }
     }
 
     #[test]

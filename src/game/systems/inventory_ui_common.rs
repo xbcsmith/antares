@@ -23,11 +23,6 @@ pub(crate) const PANEL_HEADER_H: f32 = 36.0;
 /// Height of the action-button strip below the grid when a slot is selected.
 pub(crate) const PANEL_ACTION_H: f32 = 48.0;
 
-/// Number of slot columns in the inventory grid inside each character panel.
-///
-/// With `Inventory::MAX_ITEMS = 64` and `SLOT_COLS = 8` the grid is 8×8.
-pub(crate) const SLOT_COLS: usize = 8;
-
 // ===== Colour constants =====
 
 /// Faint grid-line colour.

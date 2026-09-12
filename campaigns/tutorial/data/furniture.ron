@@ -305,7 +305,7 @@
         category: Utility,
         base_type: Table,
         material: Wood,
-        scale: 1.0,
+        scale: 0.5,
         color_tint: None,
         flags: (
             lit: false,
@@ -325,7 +325,7 @@
         category: Utility,
         base_type: Table,
         material: Wood,
-        scale: 1.0,
+        scale: 0.85,
         color_tint: None,
         flags: (
             lit: false,

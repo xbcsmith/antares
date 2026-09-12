@@ -248,6 +248,11 @@ pub const CLOCK_PADDING: f32 = 4.0;
 pub const PORTRAIT_SIZE: f32 = 40.0;
 pub const PORTRAIT_MARGIN: Val = Val::Px(4.0);
 pub const PORTRAIT_PLACEHOLDER_COLOR: Color = Color::srgba(0.3, 0.3, 0.4, 1.0);
+/// Width of the grey border drawn around every HUD portrait, providing a
+/// consistent frame regardless of whether the portrait image has loaded.
+pub const PORTRAIT_BORDER_WIDTH: Val = Val::Px(2.0);
+/// Color of the grey border drawn around every HUD portrait.
+pub const PORTRAIT_BORDER_COLOR: Color = Color::srgba(0.45, 0.45, 0.45, 1.0);
 
 // ===== Marker Components =====
 
@@ -603,16 +608,18 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                         CharacterCard { party_index },
                     ))
                     .with_children(|card| {
-                        // Portrait (90% of card width, maintains border)
+                        // Portrait (80% of card width, explicit grey border maintains frame)
                         card.spawn((
                             Node {
                                 width: Val::Percent(PORTRAIT_PERCENT_OF_CARD),
                                 height: Val::Percent(PORTRAIT_PERCENT_OF_CARD),
                                 margin: UiRect::all(Val::Auto),
+                                border: UiRect::all(PORTRAIT_BORDER_WIDTH),
                                 border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR),
+                            BorderColor::all(PORTRAIT_BORDER_COLOR),
                             ImageNode::default(),
                             Button,
                             Interaction::None,
@@ -3300,6 +3307,36 @@ mod layout_tests {
         let display = format_hp_display(0, 100);
         assert_eq!(display, "HP: 0/100");
     }
+
+    #[test]
+    fn test_portrait_border_width_is_positive() {
+        match PORTRAIT_BORDER_WIDTH {
+            Val::Px(w) => assert!(w > 0.0, "PORTRAIT_BORDER_WIDTH must be positive"),
+            _ => panic!("PORTRAIT_BORDER_WIDTH must be Val::Px"),
+        }
+    }
+
+    #[test]
+    fn test_portrait_border_color_is_opaque() {
+        let alpha = PORTRAIT_BORDER_COLOR.to_srgba().alpha;
+        assert!(
+            alpha > 0.5,
+            "PORTRAIT_BORDER_COLOR alpha ({alpha}) must be clearly visible"
+        );
+    }
+
+    #[test]
+    fn test_portrait_border_color_is_grey() {
+        let srgba = PORTRAIT_BORDER_COLOR.to_srgba();
+        // Grey: all channels within 0.05 of each other.
+        let max_channel = srgba.red.max(srgba.green).max(srgba.blue);
+        let min_channel = srgba.red.min(srgba.green).min(srgba.blue);
+        assert!(
+            (max_channel - min_channel) < 0.05,
+            "PORTRAIT_BORDER_COLOR should be near-grey (max-min={:.3})",
+            max_channel - min_channel
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4358,6 +4395,40 @@ mod tests {
     fn test_portrait_constants_valid() {
         // Verify portrait constants are defined with reasonable values
         assert_eq!(PORTRAIT_SIZE, 40.0);
+    }
+
+    /// Every `CharacterPortrait` entity spawned by `setup_hud` must carry a
+    /// `BorderColor` component so the grey frame is visible regardless of
+    /// whether the portrait image has loaded (fixing the bug where starting
+    /// characters lacked the frame that recruited characters displayed).
+    #[test]
+    fn test_portrait_nodes_have_border_color_component() {
+        use crate::application::GameState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Image>();
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(GameState::new()));
+        app.update();
+
+        let world = app.world_mut();
+        let mut portrait_query = world.query::<(&CharacterPortrait, &BorderColor)>();
+        let portrait_count = portrait_query.iter(world).count();
+        assert_eq!(
+            portrait_count, PARTY_MAX_SIZE,
+            "every CharacterPortrait entity must have a BorderColor component"
+        );
+
+        for (_portrait, border_color) in portrait_query.iter(world) {
+            let alpha = border_color.top.to_srgba().alpha;
+            assert!(
+                alpha > 0.5,
+                "portrait BorderColor alpha ({alpha:.2}) must be clearly visible"
+            );
+        }
     }
 
     #[test]

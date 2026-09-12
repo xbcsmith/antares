@@ -1195,29 +1195,94 @@ pub fn autocomplete_item_list_selector(
     selected_items: &mut Vec<antares::domain::types::ItemId>,
     items: &[antares::domain::items::types::Item],
 ) -> bool {
-    let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
-    let cfg = AutocompleteListSelectorConfig {
-        id_salt,
-        buffer_tag: "item_add",
-        label,
-        add_label: "Add item:",
-        placeholder: "Start typing item name...",
-    };
-    autocomplete_list_selector_generic(
-        ui,
-        &cfg,
-        selected_items,
-        |id| {
-            items
-                .iter()
-                .find(|i| i.id == *id)
-                .map(|i| i.name.clone())
-                .unwrap_or_else(|| format!("Unknown item (ID: {})", id))
-        },
-        candidates,
-        |text| items.iter().find(|i| i.name == text).map(|i| i.id),
-        |text| items.iter().find(|i| i.name == text).map(|i| i.id),
-    )
+    let mut changed = false;
+
+    ui.group(|ui| {
+        ui.label(label);
+
+        // ── Stacked display ───────────────────────────────────────────────
+        // Group consecutive and non-consecutive duplicates so that, e.g.,
+        // fifteen Food Rations show as "Food Ration ×15" instead of fifteen
+        // separate rows.  Preserves first-seen order.
+        let mut stacked: Vec<(antares::domain::types::ItemId, usize)> = Vec::new();
+        for &id in selected_items.iter() {
+            if let Some(entry) = stacked.iter_mut().find(|(sid, _)| *sid == id) {
+                entry.1 += 1;
+            } else {
+                stacked.push((id, 1));
+            }
+        }
+
+        let mut remove_one_id: Option<antares::domain::types::ItemId> = None;
+        for (idx, (item_id, count)) in stacked.iter().enumerate() {
+            ui.push_id(idx, |ui| {
+                ui.horizontal(|ui| {
+                    let name = items
+                        .iter()
+                        .find(|i| i.id == *item_id)
+                        .map(|i| i.name.as_str())
+                        .unwrap_or("Unknown");
+                    if *count > 1 {
+                        ui.label(format!("{} \u{d7}{}", name, count));
+                    } else {
+                        ui.label(name);
+                    }
+                    if ui.small_button("\u{2716}").clicked() {
+                        remove_one_id = Some(*item_id);
+                    }
+                });
+            });
+        }
+
+        // Remove exactly one instance of the clicked item.
+        if let Some(id) = remove_one_id {
+            if let Some(pos) = selected_items.iter().position(|&sid| sid == id) {
+                selected_items.remove(pos);
+                changed = true;
+            }
+        }
+
+        ui.separator();
+
+        // ── Add row ───────────────────────────────────────────────────────
+        // Duplicates are intentionally allowed: a character can carry N copies
+        // of the same consumable (e.g. 15 Food Rations).
+        let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+        let buffer_id = make_autocomplete_id(ui, "item_add", id_salt);
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
+
+        ui.horizontal(|ui| {
+            ui.label("Add item:");
+            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
+                .with_placeholder("Start typing item name...")
+                .show(ui, &mut text_buffer);
+
+            let tb = text_buffer.trim().to_string();
+
+            if response.changed() && !tb.is_empty() {
+                if let Some(new_id) = items.iter().find(|i| i.name == tb).map(|i| i.id) {
+                    selected_items.push(new_id);
+                    changed = true;
+                    text_buffer.clear();
+                }
+            }
+
+            if response.has_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && !tb.is_empty()
+            {
+                if let Some(new_id) = items.iter().find(|i| i.name == tb).map(|i| i.id) {
+                    selected_items.push(new_id);
+                    changed = true;
+                }
+                text_buffer.clear();
+            }
+        });
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
 }
 
 /// Shows an autocomplete list selector for proficiencies.

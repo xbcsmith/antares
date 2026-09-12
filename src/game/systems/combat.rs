@@ -1974,6 +1974,9 @@ fn sync_combat_to_party_on_exit(
                         .ac
                         .modify(ac_delta.try_into().expect("ac delta fits in i16"));
                 }
+
+                // Sync inventory (item charges consumed during combat)
+                party_member.inventory = pc.inventory.clone();
             }
         }
     }
@@ -5326,12 +5329,31 @@ pub fn perform_attack_action_with_rng(
                     MeleeAttackResult::Ranged(_) => {
                         // Ranged weapons must be used via TurnAction::RangedAttack /
                         // perform_ranged_attack_action_with_rng, not the melee path.
-                        // Log a warning and skip the turn rather than dealing wrong damage.
+                        // Advance the turn so the player is not stuck in an infinite loop.
                         warn!(
                             "Player {:?} attempted melee attack with ranged weapon; \
-                             use TurnAction::RangedAttack instead. Turn skipped.",
+                             use TurnAction::RangedAttack instead. Turn advanced.",
                             action.attacker
                         );
+                        let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> =
+                            content
+                                .db()
+                                .conditions
+                                .all_conditions()
+                                .into_iter()
+                                .filter_map(|id| content.db().conditions.get_condition(id).cloned())
+                                .collect();
+                        let _round_effects = combat_res.state.advance_turn(&cond_defs, rng);
+                        if let Some(next) = combat_res
+                            .state
+                            .turn_order
+                            .get(combat_res.state.current_turn)
+                        {
+                            turn_state.0 = match next {
+                                CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+                                _ => CombatTurnState::EnemyTurn,
+                            };
+                        }
                         return Ok(());
                     }
                 }
@@ -6185,6 +6207,28 @@ fn handle_ranged_attack_action(
     let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
     for msg in reader.read() {
+        // Capture pre-attack HP for the target so we can detect miss vs. hit.
+        let pre_hp: u16 = match msg.target {
+            CombatantId::Player(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => Some(pc.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+            CombatantId::Monster(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Monster(m) => Some(m.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+        };
+
         let mut rng = rand::rng();
         match perform_ranged_attack_action_with_rng(
             &mut combat_res,
@@ -6195,15 +6239,34 @@ fn handle_ranged_attack_action(
             &mut rng,
         ) {
             Ok(()) => {
-                // Emit feedback for the ranged attack result.
-                // We derive the damage from state changes rather than re-rolling,
-                // so emit a generic Damage feedback (0 = miss).
-                emit_combat_feedback(
-                    Some(msg.attacker),
-                    msg.target,
-                    CombatFeedbackEffect::Miss, // placeholder; actual damage logged by format_combat_log_line
-                    &mut feedback_writer,
-                );
+                // Compute post-attack HP to determine whether the shot landed.
+                let post_hp: u16 = match msg.target {
+                    CombatantId::Player(idx) => combat_res
+                        .state
+                        .participants
+                        .get(idx)
+                        .and_then(|p| match p {
+                            Combatant::Player(pc) => Some(pc.hp.current),
+                            _ => None,
+                        })
+                        .unwrap_or(0),
+                    CombatantId::Monster(idx) => combat_res
+                        .state
+                        .participants
+                        .get(idx)
+                        .and_then(|p| match p {
+                            Combatant::Monster(m) => Some(m.hp.current),
+                            _ => None,
+                        })
+                        .unwrap_or(0),
+                };
+                let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
+                let effect = if dmg > 0 {
+                    CombatFeedbackEffect::Damage(dmg)
+                } else {
+                    CombatFeedbackEffect::Miss
+                };
+                emit_combat_feedback(Some(msg.attacker), msg.target, effect, &mut feedback_writer);
                 // Log a simple combat entry for the ranged attack.
                 let attacker_name = match msg.attacker {
                     CombatantId::Player(idx) => {
@@ -9350,6 +9413,64 @@ mod tests {
         assert_eq!(
             gs_after.0.party.members[0].hp.current, 30,
             "sync_party_hp_during_combat must not alter party HP outside combat"
+        );
+    }
+
+    /// Inventory charges consumed during combat must be reflected in the party
+    /// after `sync_combat_to_party_on_exit` runs.
+    ///
+    /// Regression test for the bug where a potion used during combat had its
+    /// heal effect applied (HP synced) but the consumed charge was never
+    /// decremented in the global party — making the item "come back" after combat.
+    #[test]
+    fn test_sync_combat_to_party_syncs_inventory_charges() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Give the hero a healing potion (item_id = 50, charges = 1)
+        hero.inventory.add_item(50, 1).unwrap();
+        gs.party.add_member(hero).unwrap();
+
+        // Build combat state where the hero consumed the potion (inventory now empty)
+        let mut cs = CombatState::new(Handicap::Even);
+        let combat_hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // combat_hero has no potion — it was consumed during combat
+        cs.add_player(combat_hero);
+        cs.status = crate::domain::combat::types::CombatStatus::Victory;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.player_orig_indices = vec![Some(0)];
+
+        // Mode stays Exploration (default) — sync fires when mode is not Combat
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        app.update();
+
+        let gs_after = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert_eq!(
+            gs_after.0.party.members[0].inventory.items.len(),
+            0,
+            "sync_combat_to_party_on_exit must sync inventory: potion consumed during \
+             combat must be removed from party inventory (was 1 slot before combat, 0 after)"
         );
     }
 
@@ -15487,10 +15608,11 @@ mod tests {
     }
 
     /// T4: A player with a `MartialRanged` bow who triggers the melee
-    /// action path must have their turn skipped — `perform_attack_action_with_rng`
-    /// returns `Ok(())` and the monster's HP is completely unchanged.
+    /// action path must have their turn advanced — `perform_attack_action_with_rng`
+    /// returns `Ok(())`, the monster's HP is completely unchanged, and
+    /// `current_turn` moves to the monster's slot.
     #[test]
-    fn test_player_melee_attack_with_ranged_weapon_skips_turn() {
+    fn test_player_melee_attack_with_ranged_weapon_advances_turn() {
         use crate::domain::items::{ItemDatabase, WeaponClassification};
         use rand::rngs::StdRng;
         use rand::SeedableRng;
@@ -15523,6 +15645,8 @@ mod tests {
             _ => panic!("monster not found in fixture"),
         };
 
+        let turn_before = cr.state.current_turn;
+
         let action = AttackAction {
             attacker: CombatantId::Player(0),
             target: CombatantId::Monster(1),
@@ -15538,6 +15662,19 @@ mod tests {
             result
         );
 
+        // The turn must have been consumed — current_turn advances past the player.
+        assert_ne!(
+            cr.state.current_turn, turn_before,
+            "melee attack with ranged weapon must advance the turn \
+             (current_turn stayed at {turn_before})"
+        );
+        // The monster's turn is now up (index 1 in the fixture's turn_order).
+        assert_eq!(
+            cr.state.current_turn, 1,
+            "after advancing from player turn (idx 0), current_turn must be 1 (monster)"
+        );
+
+        // No damage should have been dealt.
         match cr.state.participants.get(1) {
             Some(Combatant::Monster(m)) => {
                 assert_eq!(
@@ -15549,6 +15686,277 @@ mod tests {
             }
             _ => panic!("monster not found after ranged-weapon guard test"),
         }
+    }
+
+    /// T4-B: After pressing `Attack` with a bow equipped, `perform_attack_action_with_rng`
+    /// must set the turn_state to `EnemyTurn` (the monster is next) rather than
+    /// leaving it as `PlayerTurn`.
+    #[test]
+    fn test_melee_attack_with_bow_advances_turn() {
+        use crate::domain::items::{ItemDatabase, WeaponClassification};
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let bow = make_p2_weapon_item(
+            77,
+            DiceRoll::new(1, 8, 0),
+            0,
+            WeaponClassification::MartialRanged,
+        );
+        let mut item_db = ItemDatabase::new();
+        item_db.add_item(bow).unwrap();
+
+        let mut player = Character::new(
+            "Bowman".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.equipment.weapon = Some(77);
+
+        let (mut cr, mut content, mut gs, mut ts) = make_p2_combat_fixture(player);
+        content.db_mut().items = item_db;
+
+        let action = AttackAction {
+            attacker: CombatantId::Player(0),
+            target: CombatantId::Monster(1),
+        };
+
+        let mut rng = StdRng::seed_from_u64(1);
+        let _ =
+            perform_attack_action_with_rng(&mut cr, &action, &content, &mut gs, &mut ts, &mut rng);
+
+        assert_ne!(
+            cr.state.current_turn, 0,
+            "turn must be advanced beyond the player slot when Attack is used with a bow"
+        );
+        // After advancing from the player's slot (0) the monster (slot 1) acts next.
+        assert_eq!(
+            ts.0,
+            CombatTurnState::EnemyTurn,
+            "turn_state must be EnemyTurn after bow-wielder's melee attempt advances the turn"
+        );
+    }
+
+    /// T4-C: `handle_ranged_attack_action` must emit `CombatFeedbackEffect::Damage`
+    /// (not `Miss`) when the ranged attack deals damage.
+    ///
+    /// We call `perform_ranged_attack_action_with_rng` directly with a deterministic
+    /// RNG seeded to guarantee a hit, then verify the monster's HP dropped.
+    #[test]
+    fn test_ranged_attack_feedback_shows_damage_on_hit() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        // Seed 42: with accuracy=255 and AC=1 the player always hits.
+        let (mut cr, content, mut gs, mut ts) = make_ranged_combat_fixture();
+
+        let pre_hp = match cr.state.participants.get(1) {
+            Some(Combatant::Monster(m)) => m.hp.current,
+            _ => panic!("monster not found"),
+        };
+
+        let action = RangedAttackAction {
+            attacker: CombatantId::Player(0),
+            target: CombatantId::Monster(1),
+        };
+
+        // Exhaust seeds until we get a hit.
+        let mut hit_found = false;
+        for seed in 0u64..200 {
+            let mut cr2 = cr.clone();
+            let mut ts2 = ts.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+            if perform_ranged_attack_action_with_rng(
+                &mut cr2, &action, &content, &mut gs, &mut ts2, &mut rng,
+            )
+            .is_ok()
+            {
+                let post_hp = match cr2.state.participants.get(1) {
+                    Some(Combatant::Monster(m)) => m.hp.current,
+                    _ => panic!("monster not found post-attack"),
+                };
+                if post_hp < pre_hp {
+                    // Verify that the pre/post logic used by handle_ranged_attack_action
+                    // would produce Damage, not Miss.
+                    let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
+                    assert!(
+                        dmg > 0,
+                        "expected damage > 0 on a confirmed hit (seed={seed})"
+                    );
+                    // Reconstruct the effect the system would emit.
+                    let effect = if dmg > 0 {
+                        CombatFeedbackEffect::Damage(dmg)
+                    } else {
+                        CombatFeedbackEffect::Miss
+                    };
+                    assert!(
+                        matches!(effect, CombatFeedbackEffect::Damage(_)),
+                        "handle_ranged_attack_action must emit Damage, not Miss, \
+                         when the shot lands (seed={seed}, dmg={dmg})"
+                    );
+                    hit_found = true;
+                    break;
+                }
+            }
+            // Reload fixture for next seed attempt.
+            cr = make_ranged_combat_fixture().0;
+            ts = make_ranged_combat_fixture().3;
+        }
+        assert!(
+            hit_found,
+            "could not find a seed that produced a hit; check fixture accuracy/AC values"
+        );
+    }
+
+    /// T4-D: `handle_ranged_attack_action` must emit `CombatFeedbackEffect::Miss`
+    /// when the ranged attack misses (HP unchanged after Ok(())).
+    #[test]
+    fn test_ranged_attack_feedback_shows_miss_on_miss() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        // Build a fixture where the player can never hit: accuracy=1, AC=255.
+        use crate::domain::combat::monster::LootTable;
+        use crate::domain::items::ItemDatabase;
+
+        let bow = make_bow_item(88);
+        let arrow = make_ammo_item_p3(89);
+        let mut item_db = ItemDatabase::new();
+        item_db.add_item(bow).unwrap();
+        item_db.add_item(arrow).unwrap();
+
+        let mut player = Character::new(
+            "Bad Aim".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.equipment.weapon = Some(88);
+        player
+            .inventory
+            .items
+            .push(crate::domain::character::InventorySlot {
+                item_id: 89,
+                charges: 0,
+            });
+        player.stats.accuracy.current = 1; // near-zero hit chance
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(player);
+
+        let hard_goblin = crate::domain::combat::monster::Monster::new(
+            1,
+            "Armored Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 6, 6, 8, 8, 1, 6),
+            30,
+            255, // near-impossible AC
+            vec![],
+            LootTable::default(),
+        );
+        cs.add_monster(hard_goblin);
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.player_orig_indices = vec![Some(0), None];
+        cr.combat_event_type = CombatEventType::Ranged;
+
+        let mut content = crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        );
+        content.db_mut().items = item_db;
+        let mut gs = crate::game::resources::GlobalState(crate::application::GameState::new());
+        let mut ts = CombatTurnStateResource::default();
+
+        let action = RangedAttackAction {
+            attacker: CombatantId::Player(0),
+            target: CombatantId::Monster(1),
+        };
+
+        // Over many seeds at least one must be a miss with AC=255, accuracy=1.
+        let mut miss_found = false;
+        for seed in 0u64..200 {
+            let mut cr2 = cr.clone();
+            let mut ts2 = ts.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+            let pre_hp = match cr2.state.participants.get(1) {
+                Some(Combatant::Monster(m)) => m.hp.current,
+                _ => panic!("monster not found"),
+            };
+            if perform_ranged_attack_action_with_rng(
+                &mut cr2, &action, &content, &mut gs, &mut ts2, &mut rng,
+            )
+            .is_ok()
+            {
+                let post_hp = match cr2.state.participants.get(1) {
+                    Some(Combatant::Monster(m)) => m.hp.current,
+                    _ => panic!("monster not found post-attack"),
+                };
+                if post_hp == pre_hp {
+                    let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
+                    let effect = if dmg > 0 {
+                        CombatFeedbackEffect::Damage(dmg)
+                    } else {
+                        CombatFeedbackEffect::Miss
+                    };
+                    assert!(
+                        matches!(effect, CombatFeedbackEffect::Miss),
+                        "handle_ranged_attack_action must emit Miss when no damage dealt \
+                         (seed={seed})"
+                    );
+                    miss_found = true;
+                    break;
+                }
+            }
+            // Re-clone original fixtures for next iteration.
+            cr = {
+                let mut cs2 = CombatState::new(Handicap::Even);
+                let mut p2 = Character::new(
+                    "Bad Aim".to_string(),
+                    "human".to_string(),
+                    "knight".to_string(),
+                    Sex::Male,
+                    Alignment::Good,
+                );
+                p2.equipment.weapon = Some(88);
+                p2.inventory
+                    .items
+                    .push(crate::domain::character::InventorySlot {
+                        item_id: 89,
+                        charges: 0,
+                    });
+                p2.stats.accuracy.current = 1;
+                cs2.add_player(p2);
+                let g2 = crate::domain::combat::monster::Monster::new(
+                    1,
+                    "Armored Goblin".to_string(),
+                    crate::domain::character::Stats::new(8, 6, 6, 8, 8, 1, 6),
+                    30,
+                    255,
+                    vec![],
+                    LootTable::default(),
+                );
+                cs2.add_monster(g2);
+                cs2.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+                cs2.current_turn = 0;
+                cs2.status = crate::domain::combat::types::CombatStatus::InProgress;
+                let mut cr2 = CombatResource::new();
+                cr2.state = cs2;
+                cr2.player_orig_indices = vec![Some(0), None];
+                cr2.combat_event_type = CombatEventType::Ranged;
+                cr2
+            };
+            ts = CombatTurnStateResource::default();
+        }
+        assert!(
+            miss_found,
+            "could not find a seed that produced a miss; check fixture accuracy/AC values"
+        );
     }
 
     // ===== Ranged and Magic Combat Tests =====

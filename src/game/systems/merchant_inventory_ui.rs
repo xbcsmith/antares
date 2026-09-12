@@ -46,13 +46,13 @@
 use crate::application::merchant_inventory_state::{MerchantFocus, MerchantInventoryState};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
-use crate::domain::character::Inventory;
+use crate::domain::inventory::MerchantStock;
 use crate::domain::types::ItemId;
 use crate::game::resources::GlobalState;
 use crate::game::systems::inventory_ui_common::{
     render_character_strip, split_panel, NavigationPhase, ACTION_FOCUSED_COLOR,
-    FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H, PANEL_BG_COLOR,
-    PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS, SLOT_NAV_HINT, UNFOCUSED_BORDER_COLOR,
+    FOCUSED_BORDER_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H, PANEL_BG_COLOR, PANEL_HEADER_H,
+    SELECT_HIGHLIGHT_COLOR, SLOT_NAV_HINT, UNFOCUSED_BORDER_COLOR,
 };
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use crate::game::systems::ui_helpers::format_gold;
@@ -94,6 +94,20 @@ fn compute_sell_price(base_cost: u32, sell_cost: u32, buy_rate: f32) -> u32 {
         base_cost / 2
     };
     ((raw as f32) * buy_rate).floor() as u32
+}
+
+/// Returns a short category tag string for the given item type, shown dim in the
+/// inventory text list to the right of each item name.
+fn item_type_tag(item_type: &crate::domain::items::types::ItemType) -> &'static str {
+    use crate::domain::items::types::ItemType;
+    match item_type {
+        ItemType::Weapon(_) => "[Weapon]",
+        ItemType::Armor(_) => "[Armor]",
+        ItemType::Accessory(_) => "[Accessory]",
+        ItemType::Consumable(_) => "[Potion]",
+        ItemType::Ammo(_) => "[Ammo]",
+        ItemType::Quest(_) => "[Quest]",
+    }
 }
 
 // ===== Plugin =====
@@ -399,27 +413,31 @@ fn merchant_inventory_input_system(
 
     match merchant_state.focus {
         MerchantFocus::Left => {
-            // Character panel: grid navigation (same logic as inventory_ui)
-            let max_slots = Inventory::MAX_ITEMS;
+            // Character panel: linear list navigation (Up/Down ±1; Left/Right
+            // also move through the list for discoverability, matching the
+            // Right panel behaviour)
+            let char_idx = merchant_state.active_character_index;
+            let item_count = global_state
+                .0
+                .party
+                .members
+                .get(char_idx)
+                .map(|ch| ch.inventory.items.len())
+                .unwrap_or(0);
+            if item_count == 0 {
+                return;
+            }
             let current = nav_state.selected_slot_index.unwrap_or(0);
-            let next = if keyboard.just_pressed(KeyCode::ArrowRight) {
-                (current + 1) % max_slots
-            } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
+            let next = if keyboard.just_pressed(KeyCode::ArrowDown)
+                || keyboard.just_pressed(KeyCode::ArrowRight)
+            {
+                (current + 1) % item_count
+            } else {
+                // ArrowUp / ArrowLeft
                 if current == 0 {
-                    max_slots - 1
+                    item_count - 1
                 } else {
                     current - 1
-                }
-            } else if keyboard.just_pressed(KeyCode::ArrowDown) {
-                (current + SLOT_COLS) % max_slots
-            } else {
-                // ArrowUp
-                if current < SLOT_COLS {
-                    let last_row_start = (max_slots / SLOT_COLS).saturating_sub(1) * SLOT_COLS;
-                    let col = current % SLOT_COLS;
-                    (last_row_start + col).min(max_slots - 1)
-                } else {
-                    current - SLOT_COLS
                 }
             };
             nav_state.selected_slot_index = Some(next);
@@ -691,10 +709,9 @@ fn render_character_sell_panel(params: CharacterSellPanelParams) -> CharacterPan
         UNFOCUSED_BORDER_COLOR
     };
     let (panel_rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    // All static painting (border, header, body background, grid lines) is
-    // grouped inside this block so the painter borrow is dropped before the
-    // first `ui.new_child()` call below, which requires a mutable borrow.
-    let (body_rect, _slot_rows, cell_w, cell_h, cell_size) = {
+    // ── Painting: border, header, body background (painter borrow dropped before
+    // ui.new_child() below, which requires a mutable borrow of ui) ──────────
+    let body_rect = {
         let painter = ui.painter();
         painter.rect_stroke(
             panel_rect,
@@ -722,111 +739,110 @@ fn render_character_sell_panel(params: CharacterSellPanelParams) -> CharacterPan
             egui::Color32::from_rgb(160, 160, 160),
         );
 
-        // ── Body: inventory grid ──────────────────────────────────────────
+        // ── Body background ───────────────────────────────────────────────
         let body_rect = egui::Rect::from_min_size(
             panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H),
             egui::vec2(size.x, body_h),
         );
         painter.rect_filled(body_rect, 0.0, PANEL_BG_COLOR);
-
-        let slot_rows = Inventory::MAX_ITEMS.div_ceil(SLOT_COLS);
-        let cell_w = (body_rect.width() / SLOT_COLS as f32).floor();
-        let cell_h = (body_rect.height() / slot_rows as f32).floor();
-        let cell_size = cell_w.min(cell_h).max(8.0);
-
-        // Grid lines
-        for col in 0..=SLOT_COLS {
-            let x = body_rect.min.x + col as f32 * cell_w;
-            painter.line_segment(
-                [
-                    egui::pos2(x, body_rect.min.y),
-                    egui::pos2(x, body_rect.max.y),
-                ],
-                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
-            );
-        }
-        for row in 0..=slot_rows {
-            let y = body_rect.min.y + row as f32 * cell_h;
-            painter.line_segment(
-                [
-                    egui::pos2(body_rect.min.x, y),
-                    egui::pos2(body_rect.max.x, y),
-                ],
-                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
-            );
-        }
         // painter borrow ends here — dropped at end of block.
-        (body_rect, slot_rows, cell_w, cell_h, cell_size)
+        body_rect
     };
 
-    // We need a child UI over the body_rect to capture click/hover responses
-    // on individual cells.  All painter calls above have been committed and the
-    // borrow dropped, so we can safely create a child UI here.
-    let mut cell_child = ui.new_child(
+    // ── Body: scrollable inventory text list ──────────────────────────────
+    let mut body_child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(body_rect)
             .layout(egui::Layout::top_down(egui::Align::LEFT)),
     );
-
-    for slot_idx in 0..Inventory::MAX_ITEMS {
-        let col = slot_idx % SLOT_COLS;
-        let row = slot_idx / SLOT_COLS;
-        let cell_min = body_rect.min + egui::vec2(col as f32 * cell_w, row as f32 * cell_h);
-        let cell_rect = egui::Rect::from_min_size(cell_min, egui::vec2(cell_w, cell_h));
-
-        cell_child.push_id(format!("sell_cell_{}", slot_idx), |ui| {
-            let cell_response = ui.allocate_rect(cell_rect, egui::Sense::click_and_drag());
-
-            // Hover highlight
-            let is_hovered = cell_response.hovered();
-            let is_selected = selected_slot == Some(slot_idx);
-
-            if is_selected {
-                ui.painter().rect_filled(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Color32::from_rgba_premultiplied(180, 150, 0, 60),
+    egui::ScrollArea::vertical()
+        .id_salt(format!("merch_char_inv_scroll_{}", party_index))
+        .auto_shrink([true, false])
+        .max_height(body_h)
+        .show(&mut body_child, |ui| {
+            if items.is_empty() {
+                ui.label(
+                    egui::RichText::new("(empty)")
+                        .color(egui::Color32::from_rgba_premultiplied(120, 120, 120, 255))
+                        .small(),
                 );
-                ui.painter().rect_stroke(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR),
-                    egui::StrokeKind::Outside,
-                );
-            } else if is_hovered && slot_idx < items.len() {
-                ui.painter().rect_filled(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Color32::from_rgba_premultiplied(180, 150, 0, 25),
-                );
-                ui.painter().rect_stroke(
-                    cell_rect.shrink(1.0),
-                    0.0,
-                    egui::Stroke::new(1.0_f32, SELECT_HIGHLIGHT_COLOR),
-                    egui::StrokeKind::Outside,
-                );
-            }
+            } else {
+                for (slot_idx, slot) in items.iter().enumerate() {
+                    ui.push_id(format!("sell_row_{}", slot_idx), |ui| {
+                        let is_selected = selected_slot == Some(slot_idx);
 
-            // Item silhouette
-            if slot_idx < items.len() {
-                let item_type = game_content
-                    .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
-                    .map(|it| &it.item_type);
-                crate::game::systems::inventory_ui::paint_item_silhouette_pub(
-                    ui.painter(),
-                    cell_rect,
-                    cell_size,
-                    item_type,
-                    egui::Color32::from_rgba_premultiplied(230, 230, 230, 255),
-                );
-            }
+                        let item_def =
+                            game_content.and_then(|gc| gc.db().items.get_item(slot.item_id));
+                        let item_name = item_def
+                            .map(|it| it.name.clone())
+                            .unwrap_or_else(|| format!("#{}", slot.item_id));
+                        let type_tag = item_def
+                            .map(|it| item_type_tag(&it.item_type))
+                            .unwrap_or("");
 
-            // Click → select this slot
-            if cell_response.clicked() {
-                result.clicked_slot = Some(slot_idx);
+                        const SELL_ROW_H: f32 = 24.0;
+                        let (row_rect, response) = ui.allocate_exact_size(
+                            egui::vec2(body_rect.width(), SELL_ROW_H),
+                            egui::Sense::click(),
+                        );
+
+                        if is_selected {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
+
+                        // Selection highlight — amber fill + yellow border
+                        if is_selected {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                0.0,
+                                egui::Color32::from_rgba_premultiplied(100, 85, 0, 80),
+                            );
+                            ui.painter().rect_stroke(
+                                row_rect.shrink(1.0),
+                                0.0,
+                                egui::Stroke::new(1.5_f32, SELECT_HIGHLIGHT_COLOR),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+
+                        let dim_color = egui::Color32::from_rgba_premultiplied(120, 120, 120, 255);
+
+                        // Slot index (dim, left edge)
+                        ui.painter().text(
+                            row_rect.min + egui::vec2(4.0, SELL_ROW_H / 2.0),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{:2}.", slot_idx + 1),
+                            egui::FontId::proportional(11.0),
+                            dim_color,
+                        );
+
+                        // Item name (white, main area)
+                        ui.painter().text(
+                            row_rect.min + egui::vec2(28.0, SELL_ROW_H / 2.0),
+                            egui::Align2::LEFT_CENTER,
+                            &item_name,
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::WHITE,
+                        );
+
+                        // Type tag (dim, right side)
+                        if !type_tag.is_empty() {
+                            ui.painter().text(
+                                row_rect.right_center() - egui::vec2(4.0, 0.0),
+                                egui::Align2::RIGHT_CENTER,
+                                type_tag,
+                                egui::FontId::proportional(11.0),
+                                dim_color,
+                            );
+                        }
+
+                        if response.clicked() {
+                            result.clicked_slot = Some(slot_idx);
+                        }
+                    });
+                }
             }
         });
-    }
 
     // ── Action strip: Sell button ─────────────────────────────────────────
     if has_action {
@@ -1043,6 +1059,7 @@ fn render_merchant_stock_panel(params: MerchantStockPanelParams) -> MerchantStoc
 
     egui::ScrollArea::vertical()
         .id_salt("merchant_stock_scroll")
+        .auto_shrink([true, false])
         .max_height(body_h)
         .show(&mut child, |ui| {
             for (i, (item_id, qty, price)) in stock_entries.iter().enumerate() {
@@ -1071,6 +1088,10 @@ fn render_merchant_stock_panel(params: MerchantStockPanelParams) -> MerchantStoc
                         egui::vec2(body_rect.width(), STOCK_ROW_H),
                         egui::Sense::click(),
                     );
+
+                    if is_selected {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
 
                     // Row background
                     if is_selected {
@@ -1503,34 +1524,40 @@ fn merchant_inventory_action_system(
             }
         }
 
-        // Determine sell price from NPC economy settings or item sell_cost
+        // Determine sell price using the same formula as the UI and domain sell_item():
+        //   1. Use item.sell_cost if non-zero, otherwise item.base_cost / 2.
+        //   2. Multiply by the NPC's economy buy_rate (default 0.5 when not configured).
+        //   3. Minimum 1 gold.
         let sell_price = {
-            let base_sell_cost = game_content
+            let (base_cost, sell_cost) = game_content
                 .as_deref()
                 .and_then(|gc| gc.db().items.get_item(item_id))
-                .map(|it| it.sell_cost)
-                .unwrap_or(0);
-
-            let economy = global_state.0.npc_runtime.get(&npc_id).and_then(|_rt| {
-                // Economy settings live on NpcDefinition; look up from content
-                game_content
-                    .as_deref()
-                    .and_then(|gc| gc.db().npcs.get_npc(&npc_id))
-                    .and_then(|npc| npc.economy.clone())
-            });
-
-            match economy {
-                Some(eco) => eco.npc_buy_price(base_sell_cost),
-                None => base_sell_cost,
-            }
+                .map(|it| (it.base_cost, it.sell_cost))
+                .unwrap_or((0, 0));
+            let buy_rate = game_content
+                .as_deref()
+                .and_then(|gc| gc.db().npcs.get_npc(&npc_id))
+                .and_then(|npc| npc.economy.as_ref().map(|e| e.buy_rate))
+                .unwrap_or(0.5_f32);
+            compute_sell_price(base_cost, sell_cost, buy_rate).max(1)
         };
 
-        // Remove item from character
+        // Remove item from character, credit gold, and replenish NPC stock.
         if let Some(removed) = global_state.0.party.members[character_index]
             .inventory
             .remove_item(slot_index)
         {
             global_state.0.party.gold = global_state.0.party.gold.saturating_add(sell_price);
+            // Add the sold item to the merchant's stock (creates a new entry if
+            // the merchant did not previously carry it, increments quantity if
+            // they did).  Using get_or_insert_with handles the case where the
+            // NPC has no stock object at all (e.g. a pure service NPC who now
+            // accepts items the player sells).
+            if let Some(rt) = global_state.0.npc_runtime.get_mut(&npc_id) {
+                rt.stock
+                    .get_or_insert_with(MerchantStock::new)
+                    .add_or_increment(removed.item_id);
+            }
             info!(
                 "Sold item_id={} from party[{}] slot {} to NPC {} for {} gold",
                 removed.item_id, character_index, slot_index, npc_id, sell_price
@@ -2218,10 +2245,11 @@ mod tests {
         state.enter_merchant_inventory(npc_id.clone(), "Click Buyer".to_string());
 
         // Simulate what the action system does for a SellItemAction.
-        // (No GameContent, so sell_price falls back to 0; test verifies item removal.)
+        // No GameContent → base_cost=0, sell_cost=0, buy_rate defaults to 0.5.
+        // compute_sell_price(0, 0, 0.5) = 0; .max(1) = 1 gold minimum.
         let character_index = 0_usize;
         let slot_index = 0_usize;
-        let sell_price: u32 = 0; // no GameContent → sell_cost=0
+        let sell_price: u32 = 1; // minimum 1 gold even when content DB is empty
 
         let removed = state.party.members[character_index]
             .inventory
@@ -2235,10 +2263,292 @@ mod tests {
             0,
             "Inventory should be empty after sell"
         );
-        assert_eq!(state.party.gold, 100, "Gold unchanged when sell_price=0");
+        assert_eq!(
+            state.party.gold, 101,
+            "1 gold minimum received with empty content DB"
+        );
     }
 
-    // ── SelectMerchantStockSlotAction / SelectMerchantCharacterSlotAction ─
+    // ── sell price / stock replenishment (action system) ─────────────────
+
+    /// Helper: build a minimal Bevy app wired with `merchant_inventory_action_system`
+    /// and a `GameContent` database that contains one item and one merchant NPC.
+    fn build_sell_price_test_app(
+        initial_gold: u32,
+        item_id: u8,
+        base_cost: u32,
+        sell_cost: u32,
+        buy_rate: f32,
+        stock_qty: Option<u32>,
+    ) -> App {
+        use crate::application::resources::GameContent;
+        use crate::domain::inventory::NpcEconomySettings;
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::domain::world::npc::NpcDefinition;
+        use bevy::prelude::{App, MinimalPlugins, Update};
+
+        const MERCHANT_ID: &str = "sell_price_test_merchant";
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.items
+            .add_item(Item {
+                id: item_id,
+                name: "Test Item".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(5),
+                    is_combat_usable: false,
+                    duration_minutes: None,
+                }),
+                base_cost,
+                sell_cost,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .expect("add item");
+
+        let mut npc = NpcDefinition::merchant(MERCHANT_ID, "Sell Test Merchant", "merchant.png");
+        npc.economy = Some(NpcEconomySettings {
+            buy_rate,
+            sell_rate: 1.0,
+            max_buy_value: None,
+        });
+        db.npcs.add_npc(npc).expect("add npc");
+
+        let mut state = GameState::new();
+        state.party.gold = initial_gold;
+
+        let mut character = crate::domain::character::Character::new(
+            "Seller".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        character
+            .inventory
+            .add_item(item_id, 0)
+            .expect("add to inventory");
+        state.party.add_member(character).expect("add party member");
+
+        let mut npc_rt = NpcRuntimeState::new(MERCHANT_ID.to_string());
+        if let Some(qty) = stock_qty {
+            let mut stock = MerchantStock::new();
+            stock.entries.push(StockEntry::new(item_id, qty as u8));
+            npc_rt.stock = Some(stock);
+        }
+        state.npc_runtime.insert(npc_rt);
+        state.enter_merchant_inventory(MERCHANT_ID.to_string(), "Sell Test Merchant".to_string());
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<BuyItemAction>();
+        app.add_message::<SellItemAction>();
+        app.add_message::<SelectMerchantStockSlotAction>();
+        app.add_message::<SelectMerchantCharacterSlotAction>();
+        app.insert_resource(GlobalState(state));
+        app.init_resource::<MerchantNavState>();
+        app.insert_resource(GameContent::new(db));
+        app.add_systems(Update, merchant_inventory_action_system);
+        app
+    }
+
+    #[test]
+    fn test_sell_item_action_applies_sell_cost_with_economy_buy_rate() {
+        // item: sell_cost=40, base_cost=100, npc buy_rate=0.5
+        // compute_sell_price(100, 40, 0.5) = floor(40 * 0.5) = 20; .max(1) = 20
+        let mut app = build_sell_price_test_app(50, 3, 100, 40, 0.5, None);
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        assert_eq!(
+            state.0.party.gold, 70,
+            "50 + 20 = 70 gold; sell_cost=40 × buy_rate=0.5 = 20"
+        );
+        assert_eq!(
+            state.0.party.members[0].inventory.items.len(),
+            0,
+            "Item should be removed from inventory after sell"
+        );
+    }
+
+    #[test]
+    fn test_sell_item_zero_sell_cost_falls_back_to_half_base_cost() {
+        // item: sell_cost=0, base_cost=100, npc buy_rate=0.5
+        // compute_sell_price(100, 0, 0.5) = floor((100/2) * 0.5) = floor(25) = 25; .max(1) = 25
+        let mut app = build_sell_price_test_app(50, 4, 100, 0, 0.5, None);
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        assert_eq!(
+            state.0.party.gold, 75,
+            "50 + 25 = 75 gold; base_cost=100/2=50 × buy_rate=0.5 = 25"
+        );
+    }
+
+    #[test]
+    fn test_sell_item_replenishes_npc_stock_when_merchant_carries_item() {
+        // NPC has item_id=5 in stock with qty=2; after selling, qty should be 3.
+        let mut app = build_sell_price_test_app(0, 5, 10, 5, 0.5, Some(2));
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        let qty = state
+            .0
+            .npc_runtime
+            .get(&"sell_price_test_merchant".to_string())
+            .and_then(|rt| rt.stock.as_ref())
+            .and_then(|s| s.get_entry(5))
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        assert_eq!(
+            qty, 3,
+            "Stock should increase from 2 to 3 after selling item back to merchant"
+        );
+    }
+
+    /// Selling an item the merchant does not carry must add a new stock entry
+    /// with quantity 1 so the player can buy it back.
+    #[test]
+    fn test_sell_item_adds_new_entry_when_merchant_does_not_carry_item() {
+        // stock_qty = Some(0) gives the merchant an empty (qty=0) entry so they
+        // have a stock object, but no entry for item_id=6.
+        // We pass None to test the truly "no entry" case.
+        let mut app = build_sell_price_test_app(0, 6, 10, 5, 0.5, None);
+
+        // The merchant starts with no stock at all.
+        {
+            let state = app.world().resource::<GlobalState>();
+            assert!(
+                state
+                    .0
+                    .npc_runtime
+                    .get(&"sell_price_test_merchant".to_string())
+                    .and_then(|rt| rt.stock.as_ref())
+                    .is_none(),
+                "Precondition: merchant has no stock object before sell"
+            );
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        let qty = state
+            .0
+            .npc_runtime
+            .get(&"sell_price_test_merchant".to_string())
+            .and_then(|rt| rt.stock.as_ref())
+            .and_then(|s| s.get_entry(6))
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        assert_eq!(
+            qty, 1,
+            "Sold item must appear in merchant stock with quantity 1"
+        );
+    }
+
+    /// Selling a second copy of an item the merchant does not normally carry
+    /// increments the quantity they received from the first sale.
+    #[test]
+    fn test_sell_item_increments_entry_added_by_previous_sale() {
+        // Merchant starts with one pre-existing entry (qty=1) for a different
+        // item (id=99) so there IS a stock object, but no entry for id=8.
+        let mut app = build_sell_price_test_app(0, 8, 20, 10, 0.5, None);
+        // Inject a stock object with an unrelated item.
+        {
+            let mut state = app.world_mut().resource_mut::<GlobalState>();
+            let rt = state
+                .0
+                .npc_runtime
+                .get_mut(&"sell_price_test_merchant".to_string())
+                .expect("npc runtime must exist");
+            let mut stock = MerchantStock::new();
+            stock.entries.push(StockEntry::new(99, 1));
+            rt.stock = Some(stock);
+        }
+
+        // Add a second item_id=8 to the character so we can sell twice.
+        app.world_mut()
+            .resource_mut::<GlobalState>()
+            .0
+            .party
+            .members[0]
+            .inventory
+            .add_item(8, 0)
+            .expect("add second item");
+
+        // First sell.
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        // Second sell (slot 0 again after the first was removed).
+        app.world_mut()
+            .resource_mut::<Messages<SellItemAction>>()
+            .write(SellItemAction {
+                npc_id: "sell_price_test_merchant".to_string(),
+                character_index: 0,
+                slot_index: 0,
+            });
+        app.update();
+
+        let state = app.world().resource::<GlobalState>();
+        let qty = state
+            .0
+            .npc_runtime
+            .get(&"sell_price_test_merchant".to_string())
+            .and_then(|rt| rt.stock.as_ref())
+            .and_then(|s| s.get_entry(8))
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        assert_eq!(
+            qty, 2,
+            "Two sells of item_id=8 must yield quantity 2 in merchant stock"
+        );
+    }
 
     #[test]
     fn test_select_merchant_stock_slot_action_fields() {

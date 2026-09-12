@@ -80,6 +80,11 @@
         faction: Some("Merchants Guild"),
         is_merchant: true,
         is_innkeeper: false,
+        economy: Some((
+            buy_rate: 0.5,
+            sell_rate: 1.0,
+            max_buy_value: None,
+        )),
     ),
     (
         id: "tutorial_priestess_town",
@@ -192,6 +197,11 @@
         faction: Some("Merchants Guild"),
         is_merchant: true,
         is_innkeeper: false,
+        economy: Some((
+            buy_rate: 0.5,
+            sell_rate: 1.0,
+            max_buy_value: None,
+        )),
     ),
     (
         id: "tutorial_priest_town2",
