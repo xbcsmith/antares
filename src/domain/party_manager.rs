@@ -211,31 +211,32 @@ impl PartyManager {
             ));
         }
 
-        // Find the character in the roster by matching the party member
-        // In the current implementation, we need to find which roster index
-        // corresponds to this party member by checking InParty locations
-        let party_chars_in_roster: Vec<usize> = roster
-            .character_locations
+        // Find the roster entry that corresponds to party.members[party_index].
+        // Match by name + InParty location instead of positional nth-InParty.
+        //
+        // The old approach — "the i-th InParty entry in the roster corresponds to
+        // party.members[i]" — holds at initialisation but breaks the moment a
+        // swap reorders party.members without changing the roster order.  After
+        // even one swap the positional mapping is wrong, causing the wrong roster
+        // location to be updated (leaving a character both in the party panel
+        // *and* visible in the "available at this inn" list).
+        let party_member_name = party.members[party_index].name.clone();
+        let roster_index = roster
+            .characters
             .iter()
             .enumerate()
-            .filter_map(|(idx, loc)| {
-                if matches!(loc, CharacterLocation::InParty) {
-                    Some(idx)
-                } else {
-                    None
-                }
+            .find(|(idx, c)| {
+                c.name == party_member_name
+                    && matches!(
+                        roster.character_locations.get(*idx),
+                        Some(CharacterLocation::InParty)
+                    )
             })
-            .collect();
-
-        // The party_index corresponds to the nth character marked InParty
-        if party_index >= party_chars_in_roster.len() {
-            return Err(PartyManagementError::InvalidPartyIndex(
+            .map(|(idx, _)| idx)
+            .ok_or(PartyManagementError::InvalidPartyIndex(
                 party_index,
                 party.size(),
-            ));
-        }
-
-        let roster_index = party_chars_in_roster[party_index];
+            ))?;
 
         // Remove from party
         let character =
@@ -324,28 +325,28 @@ impl PartyManager {
             return Err(PartyManagementError::AlreadyInParty);
         }
 
-        // Find the roster index of the party member being swapped out
-        let party_chars_in_roster: Vec<usize> = roster
-            .character_locations
+        // Find the roster index of the party member being swapped out.
+        // Match by name + InParty location instead of positional nth-InParty.
+        //
+        // See the comment in dismiss_to_inn for the full explanation of why
+        // the old positional approach was wrong.
+        let party_member_name = party.members[party_index].name.clone();
+        let party_member_roster_index = roster
+            .characters
             .iter()
             .enumerate()
-            .filter_map(|(idx, loc)| {
-                if matches!(loc, CharacterLocation::InParty) {
-                    Some(idx)
-                } else {
-                    None
-                }
+            .find(|(idx, c)| {
+                c.name == party_member_name
+                    && matches!(
+                        roster.character_locations.get(*idx),
+                        Some(CharacterLocation::InParty)
+                    )
             })
-            .collect();
-
-        if party_index >= party_chars_in_roster.len() {
-            return Err(PartyManagementError::InvalidPartyIndex(
+            .map(|(idx, _)| idx)
+            .ok_or(PartyManagementError::InvalidPartyIndex(
                 party_index,
                 party.size(),
-            ));
-        }
-
-        let party_member_roster_index = party_chars_in_roster[party_index];
+            ))?;
 
         // Store the location where the removed party member will go
         // (preserve their previous location if it was an inn, otherwise use tutorial innkeeper)
@@ -892,5 +893,139 @@ mod tests {
         assert_eq!(roster.character_locations[0], CharacterLocation::OnMap(5));
         // NPC should be in party
         assert_eq!(roster.character_locations[1], CharacterLocation::InParty);
+    }
+
+    /// After a swap the party order changes. A subsequent dismiss must dismiss
+    /// the character at the given party slot, NOT the character that happened
+    /// to be in that roster position originally.
+    ///
+    /// This is the regression test for the bug where the "available at inn"
+    /// list showed characters that were still in the active party.
+    #[test]
+    fn test_dismiss_after_swap_dismisses_correct_character() {
+        let mut party = Party::new();
+        let mut roster = Roster::new();
+
+        let char_a = test_character_with_race_class("CharA", "human", "knight");
+        let char_b = test_character_with_race_class("CharB", "elf", "cleric");
+        let char_c = test_character_with_race_class("CharC", "dwarf", "robber");
+        let char_d = test_character_with_race_class("CharD", "gnome", "sorcerer");
+
+        // A, B, C start in party; D waits at the inn.
+        roster
+            .add_character(char_a.clone(), CharacterLocation::InParty)
+            .unwrap();
+        roster
+            .add_character(char_b.clone(), CharacterLocation::InParty)
+            .unwrap();
+        roster
+            .add_character(char_c.clone(), CharacterLocation::InParty)
+            .unwrap();
+        roster
+            .add_character(
+                char_d.clone(),
+                CharacterLocation::AtInn("test_inn".to_string()),
+            )
+            .unwrap();
+
+        party.add_member(char_a).unwrap();
+        party.add_member(char_b).unwrap();
+        party.add_member(char_c).unwrap();
+
+        // Swap party_index=0 (CharA) with roster_index=3 (CharD).
+        // Party becomes [CharD, CharB, CharC].
+        PartyManager::swap_party_member(&mut party, &mut roster, 0, 3).unwrap();
+        assert_eq!(party.members[0].name, "CharD");
+        assert_eq!(party.members[1].name, "CharB");
+        assert_eq!(party.members[2].name, "CharC");
+
+        // Now dismiss party_index=0 which is CharD.
+        // The old (broken) code would have dismissed CharB instead.
+        let dismissed =
+            PartyManager::dismiss_to_inn(&mut party, &mut roster, 0, "test_inn".to_string())
+                .unwrap();
+
+        assert_eq!(
+            dismissed.name, "CharD",
+            "dismiss_to_inn must dismiss the character at the given party slot, not a positional roster match"
+        );
+
+        // Party should now have CharB and CharC only.
+        assert_eq!(party.size(), 2);
+        assert_eq!(party.members[0].name, "CharB");
+        assert_eq!(party.members[1].name, "CharC");
+
+        // Roster locations: A at inn, B in party, C in party, D at inn.
+        assert!(
+            matches!(roster.character_locations[0], CharacterLocation::AtInn(_)),
+            "CharA should remain at inn"
+        );
+        assert_eq!(
+            roster.character_locations[1],
+            CharacterLocation::InParty,
+            "CharB must still be InParty"
+        );
+        assert_eq!(
+            roster.character_locations[2],
+            CharacterLocation::InParty,
+            "CharC must still be InParty"
+        );
+        assert!(
+            matches!(roster.character_locations[3], CharacterLocation::AtInn(_)),
+            "CharD should now be at inn"
+        );
+    }
+
+    /// After a swap, a *second* swap on the same slot must also target the
+    /// correct character (not revert to the old positional index).
+    #[test]
+    fn test_second_swap_after_swap_targets_correct_slot() {
+        let mut party = Party::new();
+        let mut roster = Roster::new();
+
+        let char_a = test_character_with_race_class("CharA", "human", "knight");
+        let char_b = test_character_with_race_class("CharB", "elf", "cleric");
+        let char_c = test_character_with_race_class("CharC", "dwarf", "robber");
+
+        roster
+            .add_character(char_a.clone(), CharacterLocation::InParty)
+            .unwrap();
+        roster
+            .add_character(
+                char_b.clone(),
+                CharacterLocation::AtInn("test_inn".to_string()),
+            )
+            .unwrap();
+        roster
+            .add_character(
+                char_c.clone(),
+                CharacterLocation::AtInn("test_inn".to_string()),
+            )
+            .unwrap();
+
+        party.add_member(char_a).unwrap();
+
+        // First swap: party_index=0 (CharA) <-> roster_index=1 (CharB)
+        PartyManager::swap_party_member(&mut party, &mut roster, 0, 1).unwrap();
+        assert_eq!(party.members[0].name, "CharB");
+
+        // Second swap: party_index=0 (now CharB) <-> roster_index=2 (CharC)
+        PartyManager::swap_party_member(&mut party, &mut roster, 0, 2).unwrap();
+        assert_eq!(party.members[0].name, "CharC");
+
+        // Verify locations
+        assert!(
+            matches!(roster.character_locations[0], CharacterLocation::AtInn(_)),
+            "CharA still at inn"
+        );
+        assert!(
+            matches!(roster.character_locations[1], CharacterLocation::AtInn(_)),
+            "CharB now at inn after second swap"
+        );
+        assert_eq!(
+            roster.character_locations[2],
+            CharacterLocation::InParty,
+            "CharC now in party"
+        );
     }
 }

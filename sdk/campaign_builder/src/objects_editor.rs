@@ -330,6 +330,7 @@ impl ObjectsEditorState {
         let mut pending_selection: Option<usize> = None;
         let mut pending_edit: Option<usize> = None;
         let mut pending_delete: Option<usize> = None;
+        let mut pending_duplicate: Option<usize> = None;
 
         // SDK Rule 9: always use TwoColumnLayout for list/detail splits.
         // TwoColumnLayout::show_split already wraps both columns in a
@@ -359,6 +360,10 @@ impl ObjectsEditorState {
                         }
                         if action == ItemAction::Delete {
                             pending_delete = Some(idx);
+                            ui.ctx().request_repaint();
+                        }
+                        if action == ItemAction::Duplicate {
+                            pending_duplicate = Some(idx);
                             ui.ctx().request_repaint();
                         }
                     });
@@ -396,6 +401,20 @@ impl ObjectsEditorState {
                     _ => {}
                 }
                 let _ = campaign_dir; // reserved for a future immediate-delete sync, if ever needed
+                *ctx.unsaved_changes = true;
+                ui.ctx().request_repaint();
+            }
+        }
+        if let Some(idx) = pending_duplicate {
+            if idx < entries.len() {
+                let mut new_entry = entries[idx].clone();
+                new_entry.id = next_object_id(entries);
+                new_entry.name = format!("{} (Copy)", new_entry.name);
+                new_entry.definition.name = format!("{} (Copy)", new_entry.definition.name);
+                new_entry.file_path = derive_copy_file_path(&entries[idx].file_path, entries);
+                let new_idx = entries.len();
+                entries.push(new_entry);
+                self.selected = Some(new_idx);
                 *ctx.unsaved_changes = true;
                 ui.ctx().request_repaint();
             }
@@ -742,6 +761,36 @@ fn show_object_preview(ui: &mut egui::Ui, entry: Option<&ObjectEntry>) {
 /// parsed at all — neither condition is an error from this auto-load guard's
 /// perspective (no logger is available here; the App-level `load_objects`,
 /// Phase 3, is the primary load path and does log these conditions).
+/// Returns the next available numeric ID for a new [`ObjectEntry`].
+///
+/// Scans all entries and returns `max_id + 1`. Returns `1` when the slice is
+/// empty, and saturates at `u32::MAX` to guard against overflow on absurdly
+/// large registries (in practice registries have tens of entries).
+fn next_object_id(entries: &[ObjectEntry]) -> u32 {
+    entries
+        .iter()
+        .map(|e| e.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+/// Derives a unique campaign-relative file path for a duplicated object.
+///
+/// Strips the `.ron` suffix from `file_path`, appends `_copy` (or `_copy2`,
+/// `_copy3`, … incrementing until the candidate is not already used by any
+/// entry in `entries`), then re-appends `.ron`.
+fn derive_copy_file_path(file_path: &str, entries: &[ObjectEntry]) -> String {
+    let stem = file_path.strip_suffix(".ron").unwrap_or(file_path);
+    let mut candidate = format!("{stem}_copy.ron");
+    let mut n = 2u32;
+    while entries.iter().any(|e| e.file_path == candidate) {
+        candidate = format!("{stem}_copy{n}.ron");
+        n += 1;
+    }
+    candidate
+}
+
 fn load_object_entries_from_registry(campaign_dir: &Path) -> Vec<ObjectEntry> {
     let registry_path = campaign_dir.join("data/object_mesh_registry.ron");
     if !registry_path.exists() {
@@ -1332,5 +1381,114 @@ mod tests {
         let parsed: CreatureDefinition = ron::from_str(&written).unwrap();
         assert_eq!(parsed.name, "Renamed Chest");
         assert_eq!(parsed.scale, 2.0);
+    }
+
+    // =========================================================================
+    // Duplicate helpers
+    // =========================================================================
+
+    #[test]
+    fn test_next_object_id_empty_returns_one() {
+        assert_eq!(next_object_id(&[]), 1);
+    }
+
+    #[test]
+    fn test_next_object_id_returns_max_plus_one() {
+        let entries = vec![
+            ObjectEntry {
+                id: 12001,
+                ..object_entry("a", "A")
+            },
+            ObjectEntry {
+                id: 12003,
+                ..object_entry("b", "B")
+            },
+        ];
+        assert_eq!(next_object_id(&entries), 12004);
+    }
+
+    #[test]
+    fn test_derive_copy_file_path_basic() {
+        let path = derive_copy_file_path("assets/meshes/objects/old_chest.ron", &[]);
+        assert_eq!(path, "assets/meshes/objects/old_chest_copy.ron");
+    }
+
+    #[test]
+    fn test_derive_copy_file_path_avoids_collision() {
+        let existing = ObjectEntry {
+            file_path: "assets/meshes/objects/old_chest_copy.ron".to_string(),
+            ..object_entry("old_chest_copy", "Old Chest Copy")
+        };
+        let path = derive_copy_file_path("assets/meshes/objects/old_chest.ron", &[existing]);
+        assert_eq!(path, "assets/meshes/objects/old_chest_copy2.ron");
+    }
+
+    #[test]
+    fn test_derive_copy_file_path_avoids_multiple_collisions() {
+        let existing1 = ObjectEntry {
+            file_path: "assets/meshes/objects/chest_copy.ron".to_string(),
+            ..object_entry("chest_copy", "Chest Copy")
+        };
+        let existing2 = ObjectEntry {
+            file_path: "assets/meshes/objects/chest_copy2.ron".to_string(),
+            ..object_entry("chest_copy2", "Chest Copy 2")
+        };
+        let path =
+            derive_copy_file_path("assets/meshes/objects/chest.ron", &[existing1, existing2]);
+        assert_eq!(path, "assets/meshes/objects/chest_copy3.ron");
+    }
+
+    #[test]
+    fn test_duplicate_entry_clones_definition_with_new_id_and_copy_suffix() {
+        let mut base = object_entry("old_chest", "Old Treasure Chest");
+        base.id = 12001;
+        base.definition.scale = 2.5;
+        let mut entries = vec![base];
+
+        // Replicate the logic executed by show_list for pending_duplicate.
+        let idx = 0;
+        let mut new_entry = entries[idx].clone();
+        new_entry.id = next_object_id(&entries);
+        new_entry.name = format!("{} (Copy)", new_entry.name);
+        new_entry.definition.name = format!("{} (Copy)", new_entry.definition.name);
+        new_entry.file_path = derive_copy_file_path(&entries[idx].file_path, &entries);
+        entries.push(new_entry);
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].id, 12002);
+        assert_eq!(entries[1].name, "old_chest (Copy)");
+        assert_eq!(entries[1].definition.name, "Old Treasure Chest (Copy)");
+        assert_eq!(
+            entries[1].file_path,
+            "assets/meshes/objects/old_chest_copy.ron"
+        );
+        // Scale (and all other definition fields) are preserved in the copy.
+        assert_eq!(entries[1].definition.scale, 2.5);
+        // Original is unchanged.
+        assert_eq!(entries[0].id, 12001);
+        assert_eq!(entries[0].definition.scale, 2.5);
+    }
+
+    #[test]
+    fn test_duplicate_does_not_modify_original_id_or_path() {
+        let mut base = object_entry("oak_tree", "Oak Tree");
+        base.id = 5;
+        let mut entries = vec![base];
+
+        let idx = 0;
+        let orig_id = entries[idx].id;
+        let orig_path = entries[idx].file_path.clone();
+
+        let mut new_entry = entries[idx].clone();
+        new_entry.id = next_object_id(&entries);
+        new_entry.name = format!("{} (Copy)", new_entry.name);
+        new_entry.definition.name = format!("{} (Copy)", new_entry.definition.name);
+        new_entry.file_path = derive_copy_file_path(&entries[idx].file_path, &entries);
+        entries.push(new_entry);
+
+        assert_eq!(entries[0].id, orig_id);
+        assert_eq!(entries[0].file_path, orig_path);
+        assert_ne!(entries[1].id, orig_id);
+        assert_ne!(entries[1].file_path, orig_path);
     }
 }

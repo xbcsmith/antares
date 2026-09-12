@@ -324,6 +324,29 @@ impl CreatureAssetManager {
         Ok(references.into_iter().map(|r| r.name).collect())
     }
 
+    /// Returns `(id, name)` pairs for every creature in the registry without
+    /// reading individual creature asset files.
+    ///
+    /// Use this instead of [`load_all_creatures`] whenever only IDs and names
+    /// are needed (e.g. autocomplete dropdowns, ID-range suggestions).
+    /// It performs exactly one file read regardless of creature count.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creature_assets::CreatureAssetManager;
+    /// use std::path::PathBuf;
+    ///
+    /// let manager = CreatureAssetManager::new(PathBuf::from("data/test_campaign"));
+    /// // Returns an empty vec when no campaign is open
+    /// let stubs = manager.list_creature_stubs().unwrap_or_default();
+    /// assert!(stubs.iter().all(|(id, _)| *id > 0));
+    /// ```
+    pub fn list_creature_stubs(&self) -> Result<Vec<(CreatureId, String)>, CreatureAssetError> {
+        let references = self.load_registry_references()?;
+        Ok(references.into_iter().map(|r| (r.id, r.name)).collect())
+    }
+
     /// Deletes a creature and removes its registry entry, asset file, and exclusive textures.
     ///
     /// This method performs a complete cleanup of all files associated with the
@@ -839,5 +862,45 @@ mod tests {
             campaign_dir.join(shared_filepath).exists(),
             "shared .ron file must not be deleted while DireWolfLeader still references it"
         );
+    }
+
+    #[test]
+    fn test_list_creature_stubs_returns_id_name_pairs() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = CreatureAssetManager::new(temp_dir.path().to_path_buf());
+        manager
+            .save_creature(&create_test_creature(1, "Goblin"))
+            .unwrap();
+        manager
+            .save_creature(&create_test_creature(2, "Orc"))
+            .unwrap();
+
+        let stubs = manager.list_creature_stubs().unwrap();
+        assert_eq!(stubs.len(), 2);
+        assert!(stubs.contains(&(1, "Goblin".to_string())));
+        assert!(stubs.contains(&(2, "Orc".to_string())));
+    }
+
+    #[test]
+    fn test_list_creature_stubs_does_not_read_asset_files() {
+        // Verify stubs work even when the registry has an entry whose .ron file
+        // is absent (i.e. no individual file I/O is attempted).
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_dir = temp_dir.path();
+        let manager = CreatureAssetManager::new(campaign_dir.to_path_buf());
+
+        // Write a registry that references a non-existent asset file.
+        fs::create_dir_all(campaign_dir.join("data")).unwrap();
+        let registry_content =
+            r#"[(id: 99, name: "Ghost", filepath: "assets/creatures/ghost.ron")]"#;
+        fs::write(campaign_dir.join("data/creatures.ron"), registry_content).unwrap();
+
+        // list_creature_stubs must succeed (no file I/O for the .ron asset).
+        let stubs = manager.list_creature_stubs().unwrap();
+        assert_eq!(stubs.len(), 1);
+        assert_eq!(stubs[0], (99, "Ghost".to_string()));
+
+        // load_all_creatures must fail (the .ron asset file is missing).
+        assert!(manager.load_all_creatures().is_err());
     }
 }

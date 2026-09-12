@@ -106,8 +106,13 @@
     ),
     (
         id: 22,
-        name: "Red Kobald",
-        filepath: "assets/creatures/red_kobald.ron",
+        name: "kobald_warrior",
+        filepath: "assets/creatures/kobald_warrior.ron",
+    ),
+    (
+        id: 23,
+        name: "kobold_scout",
+        filepath: "assets/creatures/kobold_scout.ron",
     ),
     (
         id: 1000,
@@ -218,5 +223,10 @@
         id: 1021,
         name: "town_merchant",
         filepath: "assets/creatures/town_merchant.ron",
+    ),
+    (
+        id: 1022,
+        name: "high_priest",
+        filepath: "assets/creatures/high_priest.ron",
     ),
 ]

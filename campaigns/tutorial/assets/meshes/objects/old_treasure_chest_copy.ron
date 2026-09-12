@@ -1,6 +1,6 @@
 (
     id: 1021,
-    name: "Old Treasure Chest",
+    name: "Old Treasure Chest Small",
     meshes: [
         (
             name: Some("output_unwrapped_0"),
@@ -35297,6 +35297,6 @@
             scale: (1.0, 1.0, 1.0),
         ),
     ],
-    scale: 0.65,
+    scale: 0.5,
     color_tint: None,
 )

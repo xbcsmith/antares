@@ -1798,7 +1798,7 @@
     ),
     (
         id: 138,
-        name: "Red Kobold",
+        name: "Red Kobold Warrior",
         stats: (
             might: (
                 base: 7,
@@ -1874,6 +1874,88 @@
             experience: 5,
         ),
         creature_id: Some(22),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 139,
+        name: "Red Kobold Scout",
+        stats: (
+            might: (
+                base: 7,
+                current: 7,
+            ),
+            intellect: (
+                base: 5,
+                current: 5,
+            ),
+            personality: (
+                base: 3,
+                current: 3,
+            ),
+            endurance: (
+                base: 4,
+                current: 4,
+            ),
+            speed: (
+                base: 12,
+                current: 12,
+            ),
+            accuracy: (
+                base: 10,
+                current: 10,
+            ),
+            luck: (
+                base: 5,
+                current: 5,
+            ),
+        ),
+        hp: (
+            base: 10,
+            current: 10,
+        ),
+        ac: (
+            base: 12,
+            current: 12,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 1,
+                    sides: 6,
+                    bonus: 0,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+                is_ranged: false,
+            ),
+        ],
+        flee_threshold: 2,
+        special_attack_threshold: 5,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: false,
+            electricity: false,
+            energy: false,
+            paralysis: false,
+            fear: false,
+            sleep: false,
+        ),
+        can_regenerate: false,
+        can_advance: true,
+        is_undead: false,
+        magic_resistance: 0,
+        loot: (
+            gold_min: 1,
+            gold_max: 5,
+            gems_min: 0,
+            gems_max: 0,
+            items: [],
+            experience: 5,
+        ),
+        creature_id: Some(23),
         conditions: Normal,
         active_conditions: [],
         has_acted: false,

@@ -1325,13 +1325,38 @@ impl eframe::App for CampaignBuilderApp {
                 );
             }
             EditorTab::Creatures => {
-                if let Some(msg) = self.editor_registry.creatures_editor_state.show(
+                let creatures_msg = self.editor_registry.creatures_editor_state.show(
                     ui,
                     &mut self.campaign_data.creatures,
                     &self.campaign_dir,
                     &self.campaign.creatures_file,
                     &mut self.unsaved_changes,
-                ) {
+                );
+
+                // When the Creatures editor makes an in-memory change
+                // (add/edit/delete/duplicate), immediately persist to disk and
+                // invalidate all three editor creature caches so the Visual Asset
+                // autocomplete in the Monster Editor reflects the change without
+                // requiring a separate manual campaign save.
+                if self.editor_registry.creatures_editor_state.registry_dirty {
+                    self.editor_registry.creatures_editor_state.registry_dirty = false;
+                    if let Err(e) = self.save_creatures() {
+                        self.ui_state.status_message =
+                            format!("Failed to save creatures: {}", e);
+                    } else {
+                        self.editor_registry
+                            .characters_editor_state
+                            .invalidate_creature_cache();
+                        self.editor_registry
+                            .npc_editor_state
+                            .invalidate_creature_cache();
+                        self.editor_registry
+                            .monsters_editor_state
+                            .invalidate_creature_cache();
+                    }
+                }
+
+                if let Some(msg) = creatures_msg {
                     if msg == creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL {
                         self.ui_state.show_creature_template_browser = true;
                     } else if msg == creatures_editor::RELOAD_CREATURES_SENTINEL {
@@ -1339,13 +1364,17 @@ impl eframe::App for CampaignBuilderApp {
                         // cannot perform the two-step registry → per-file load itself,
                         // so it returns a sentinel and we call load_creatures() here.
                         self.load_creatures();
-                        // Invalidate the creature autocomplete caches in both editors
-                        // so the updated registry is visible without a campaign reload.
+                        // Invalidate the creature autocomplete caches in all three
+                        // editors so the updated registry is visible without a
+                        // campaign reload.
                         self.editor_registry
                             .characters_editor_state
                             .invalidate_creature_cache();
                         self.editor_registry
                             .npc_editor_state
+                            .invalidate_creature_cache();
+                        self.editor_registry
+                            .monsters_editor_state
                             .invalidate_creature_cache();
                     } else {
                         self.ui_state.status_message = msg;
@@ -1703,13 +1732,24 @@ impl eframe::App for CampaignBuilderApp {
                 // load_stock_templates() call in do_open_campaign() has already populated
                 // stock_templates_editor_state.templates, so pulling from there guarantees
                 // the NPC editor's ComboBox and validation both see the live list.
-                self.campaign_data.stock_templates = self.editor_registry.stock_templates_editor_state.templates.clone();
-
-                // Thread available stock templates and skill definitions into the NPC
-                // editor before rendering so validation/autocomplete sees loaded data
-                // even when the author opens the NPC tab before visiting related tabs.
-                self.editor_registry.npc_editor_state.available_stock_templates = self.campaign_data.stock_templates.clone();
-                self.sync_npc_editor_skill_candidates();
+                // Only re-sync stock templates and skills when the source data
+                // changes.  Avoids O(n) clones on every frame when nothing has
+                // changed (60fps × hundreds of templates/skills is significant
+                // allocation work).
+                let tmpl_len = self.editor_registry.stock_templates_editor_state.templates.len();
+                if self.editor_registry.npc_editor_state.available_stock_templates.len() != tmpl_len {
+                    self.campaign_data.stock_templates = self
+                        .editor_registry
+                        .stock_templates_editor_state
+                        .templates
+                        .clone();
+                    self.editor_registry.npc_editor_state.available_stock_templates =
+                        self.campaign_data.stock_templates.clone();
+                }
+                let skills_len = self.campaign_data.skills.len();
+                if self.editor_registry.npc_editor_state.available_skills.len() != skills_len {
+                    self.sync_npc_editor_skill_candidates();
+                }
 
                 let npc_creature_manager = self
                     .campaign_dir

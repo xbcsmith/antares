@@ -1,4 +1,688 @@
-## Fix: Potions and Scrolls Now Apply Their Effects When Used
+## Combat Bug: Long Bow Causes Endless Attacks and Always Shows "Miss"
+
+### Files Changed
+
+- `src/game/systems/combat.rs`
+
+### Root Cause
+
+Two separate bugs combined to produce the symptom.
+
+**Bug 1 — Endless attacks (`perform_attack_action_with_rng`)**
+
+When a player character pressed the `Attack` button with a bow equipped,
+`perform_attack_action_with_rng` detected the ranged weapon and returned `Ok(())`
+_without_ advancing the turn. Back in `handle_attack_action`, the system had set
+`turn_state = Animating` before the call and only restored it to the previous
+`PlayerTurn` value when it was still `Animating` after the call. Because the turn
+was never consumed, `turn_state` snapped back to `PlayerTurn` on every frame,
+allowing the player to click `Attack` an unlimited number of times.
+
+**Bug 2 — Always shows "Miss" (both melee path and ranged path)**
+
+- _Melee path_: Because no attack ever occurred (bug 1), the target's HP was
+  unchanged, `dmg = 0`, and `CombatFeedbackEffect::Miss` was always emitted.
+- _Ranged path_ (`handle_ranged_attack_action`): The `Ok(())` branch
+  hard-coded `CombatFeedbackEffect::Miss` regardless of whether damage was
+  actually dealt. Even when `perform_ranged_attack_action_with_rng` hit and
+  reduced the target's HP, the floating feedback text always read "Miss".
+
+### Fix
+
+**`perform_attack_action_with_rng` — advance the turn on ranged-weapon detection**
+
+Replaced the silent `return Ok(())` with the same turn-advancement block used by
+the normal attack path:
+
+```rust
+MeleeAttackResult::Ranged(_) => {
+    warn!("Player {:?} attempted melee attack with ranged weapon; \
+           use TurnAction::RangedAttack instead. Turn advanced.", ...);
+    let cond_defs = /* collect condition definitions */;
+    let _round_effects = combat_res.state.advance_turn(&cond_defs, rng);
+    if let Some(next) = combat_res.state.turn_order.get(combat_res.state.current_turn) {
+        turn_state.0 = match next {
+            CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+            _ => CombatTurnState::EnemyTurn,
+        };
+    }
+    return Ok(());
+}
+```
+
+**`handle_ranged_attack_action` — emit correct hit/miss feedback**
+
+Added pre/post HP capture around the `perform_ranged_attack_action_with_rng`
+call (matching the pattern already used in `handle_attack_action`) so that the
+emitted `CombatFeedbackEffect` is `Damage(n)` when damage was dealt and `Miss`
+only when HP is genuinely unchanged:
+
+```rust
+let pre_hp = /* target HP before call */;
+let post_hp = /* target HP after Ok(()) */;
+let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
+let effect = if dmg > 0 { CombatFeedbackEffect::Damage(dmg) } else { CombatFeedbackEffect::Miss };
+emit_combat_feedback(Some(msg.attacker), msg.target, effect, &mut feedback_writer);
+```
+
+### Tests Updated / Added
+
+| Test                                                     | Change                                                                                                                                                     |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_player_melee_attack_with_ranged_weapon_skips_turn` | Renamed → `test_player_melee_attack_with_ranged_weapon_advances_turn`; now asserts `current_turn` moved to the monster's slot and `turn_state = EnemyTurn` |
+| `test_melee_attack_with_bow_advances_turn`               | **New** — verifies `turn_state` is `EnemyTurn` and `current_turn != 0` after pressing Attack with a bow                                                    |
+| `test_ranged_attack_feedback_shows_damage_on_hit`        | **New** — verifies the pre/post HP logic produces `Damage(n)` when a ranged shot lands                                                                     |
+| `test_ranged_attack_feedback_shows_miss_on_miss`         | **New** — verifies the pre/post HP logic produces `Miss` when the ranged shot misses                                                                       |
+
+All 5613 tests pass after the change.
+
+---
+
+## HUD Portrait: Grey Frame Missing for Starting Characters
+
+### File Changed
+
+- `src/game/systems/hud.rs`
+
+### Root Cause
+
+The "grey frame" around portrait images came from a timing difference rather than
+an intentional visual design:
+
+- **Recruited characters** — their `CharacterCard` node is initially `Display::None`
+  (hidden). When a character joins the party mid-game, the card becomes
+  `Display::Flex`, but the portrait entity still carries the initial
+  `BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR)` set at spawn in `setup_hud`.
+  `update_portraits` only overrides this color once it sees the character in the
+  party on the next frame, so the blue-grey placeholder is visible for at least
+  one rendered frame after the card becomes visible — the user perceives this as
+  the "grey frame".
+
+- **Starting characters** (e.g. Kira) — they are in `party.members` from the very
+  first `Update` tick. On frame 1, `update_portraits` immediately overwrites
+  `PORTRAIT_PLACEHOLDER_COLOR` with either the loaded portrait image (transparent
+  background) or the deterministic `get_portrait_color(...)` color. The user
+  never sees the placeholder grey.
+
+Because the frame was a side-effect of initialization timing rather than an
+explicit border, it was inconsistent. The `..default()` used when spawning the
+portrait `Node` left `border: UiRect::ZERO` and omitted any `BorderColor`
+component.
+
+### Fix
+
+Added two new public constants:
+
+- `PORTRAIT_BORDER_WIDTH: Val = Val::Px(2.0)` — 2-pixel border on all sides
+- `PORTRAIT_BORDER_COLOR: Color = srgba(0.45, 0.45, 0.45, 1.0)` — opaque
+  medium-grey, visible against both the dark card background and bright portrait
+  images
+
+In `setup_hud`, the portrait `Node` now includes:
+
+```rust
+border: UiRect::all(PORTRAIT_BORDER_WIDTH),
+```
+
+and the spawned bundle includes:
+
+```rust
+BorderColor::all(PORTRAIT_BORDER_COLOR),
+```
+
+The grey border is rendered by Bevy inside the portrait node bounds and is
+visible at all times — whether the portrait image has loaded, is loading, or is
+a colored placeholder. This eliminates the timing-dependent inconsistency and
+makes all party member portraits (starting and recruited) look identical.
+
+### Tests Added
+
+**`layout_tests` module:**
+
+- `test_portrait_border_width_is_positive` — `PORTRAIT_BORDER_WIDTH` is `Val::Px(w)` with `w > 0`
+- `test_portrait_border_color_is_opaque` — border alpha > 0.5
+- `test_portrait_border_color_is_grey` — RGB channels within 0.05 of each other
+
+**`tests` module:**
+
+- `test_portrait_nodes_have_border_color_component` — integration test that spawns
+  the full HUD via `HudPlugin`, queries all `CharacterPortrait` entities, and
+  asserts every one has a `BorderColor` component with visible alpha
+
+---
+
+## Objects Editor: Duplicate Now Works (Right-Click → Duplicate)
+
+### File Changed
+
+- `sdk/campaign_builder/src/objects_editor.rs`
+
+### Root Cause
+
+`show_standard_list_item` correctly returns `ItemAction::Duplicate` when the
+right-click context menu "📋 Duplicate" item is clicked. However, `show_list`
+in `ObjectsEditorState` declared deferred-mutation variables for selection, edit,
+and delete — but **never declared or handled `pending_duplicate`**. The
+`ItemAction::Duplicate` branch in the per-row action match was simply absent, so
+every duplicate request was silently dropped.
+
+### Fix
+
+Added two private module-level helpers:
+
+- `next_object_id(entries)` — returns `max(entry.id) + 1`, matching the
+  pattern used in `furniture_editor.rs`.
+- `derive_copy_file_path(file_path, entries)` — strips `.ron`, appends
+  `_copy`, then `_copy2`, `_copy3`, … until the path is not already used by
+  any entry in `entries`.
+
+In `show_list`, added `let mut pending_duplicate: Option<usize> = None;`
+alongside the other deferred-mutation locals, wired the
+`ItemAction::Duplicate` branch to set it, and added the post-`show_split`
+block that:
+
+1. Clones the source entry.
+2. Assigns a new unique ID via `next_object_id`.
+3. Appends ` (Copy)` to both `entry.name` and `entry.definition.name`.
+4. Derives a unique file path via `derive_copy_file_path`.
+5. Pushes the duplicate onto `entries` and selects it.
+6. Sets `*ctx.unsaved_changes = true` and requests a repaint.
+
+The duplicate is held in memory; it is persisted to disk on the next
+"Save Campaign" via the existing `save_objects` wholesale-rewrite path,
+consistent with how delete behaves.
+
+### Usage Example
+
+Right-click **Old Treasure Chest** → Duplicate. A new entry
+"Old Treasure Chest (Copy)" appears selected in the list with its own ID and
+file path (`old_treasure_chest_copy.ron`). Click Edit → set Scale to 0.5 →
+Save → rename to "Small Treasure Chest". Repeat for medium and large variants.
+
+### Tests Added
+
+- `test_next_object_id_empty_returns_one`
+- `test_next_object_id_returns_max_plus_one`
+- `test_derive_copy_file_path_basic`
+- `test_derive_copy_file_path_avoids_collision`
+- `test_derive_copy_file_path_avoids_multiple_collisions`
+- `test_duplicate_entry_clones_definition_with_new_id_and_copy_suffix`
+- `test_duplicate_does_not_modify_original_id_or_path`
+
+---
+
+## Inn Party Manager — available list showed characters already in party
+
+### File Changed
+
+- `src/domain/party_manager.rs`
+
+### Root Cause
+
+Both `dismiss_to_inn` and `swap_party_member` found the roster index of a party
+member using a positional heuristic:
+
+> _"collect all roster entries with `CharacterLocation::InParty`, then treat the
+> i-th such entry as `party.members[i]`"_
+
+This invariant holds at initialisation (both lists are built in the same order)
+but **breaks the first time a swap occurs**. A swap replaces `party.members[i]`
+with a new character without changing the roster order. On the very next dismiss
+or swap, the positional lookup targeted the wrong roster entry — updating the
+wrong character’s location to `AtInn`. That character ended up with
+`CharacterLocation::AtInn` in the roster while still appearing in
+`party.members`, so the Inn UI’s "AVAILABLE AT THIS INN" filter showed them as
+recruitable even though they were already in the active party.
+
+### Fix
+
+Replaced the positional nth-InParty lookup in both functions with a
+name-and-location match:
+
+```rust
+let party_member_name = party.members[party_index].name.clone();
+let roster_index = roster.characters
+    .iter().enumerate()
+    .find(|(idx, c)| {
+        c.name == party_member_name
+            && matches!(roster.character_locations.get(*idx),
+                        Some(CharacterLocation::InParty))
+    })
+    .map(|(idx, _)| idx)
+    .ok_or(...)?;
+```
+
+This is robust against any number of swaps because it always finds the roster
+entry that actually holds the named character, regardless of insertion order.
+
+### Tests added (2 regression tests)
+
+| Test                                                  | What                                                                           |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `test_dismiss_after_swap_dismisses_correct_character` | Swap A↔D, then dismiss slot 0 — must dismiss D, not B                          |
+| `test_second_swap_after_swap_targets_correct_slot`    | Two consecutive swaps on the same slot — both must target the current occupant |
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo test --lib domain::party_manager → 18 passed, 0 failed
+```
+
+---
+
+## SDK: Character/Class starting items — stacked display
+
+### Files Changed
+
+- `sdk/campaign_builder/src/ui_helpers/autocomplete.rs`
+- `sdk/campaign_builder/src/characters_editor.rs`
+- `sdk/campaign_builder/src/classes_editor.rs`
+
+### Problem
+
+A character (or class) with 15 Food Rations stored as `[53, 53, ..., 53]` in
+`starting_items: Vec<ItemId>` was rendered as 15 separate bullet rows. The
+`autocomplete_item_list_selector` widget also prevented adding the same item
+twice (`!selected.contains` guard), so users couldn't even author a stack
+larger than 1 through the editor.
+
+### Fix
+
+**`autocomplete_item_list_selector`** (`ui_helpers/autocomplete.rs`):
+Rewritten to no longer delegate to `autocomplete_list_selector_generic`. Now:
+
+- Groups the flat `Vec<ItemId>` by ID (first-seen order), displays each group
+  as `"Item Name \u{d7}N"` (or plain `"Item Name"` when count = 1)
+- The `\u{2716}` (✖) button removes **one instance** from the flat vec, not all
+- Duplicates are **allowed** — the `!selected.contains` guard is removed
+- `ui.push_id(idx, ...)` wraps each stacked row (egui ID compliance)
+
+**`show_character_preview`** (`characters_editor.rs`):
+Replaced the `for item_id in &character.starting_items` flat loop with the
+same grouping logic, producing `• Food Ration ×15` instead of 15 bullet rows.
+
+**`classes_editor.rs` preview**:
+Same grouping applied to the Starting Items indent block in the class preview panel.
+
+The `autocomplete_proficiency_list_selector` and other callers of
+`autocomplete_list_selector_generic` are **not affected** — proficiencies
+correctly remain de-duplicated.
+
+### Tests added (3)
+
+| Test                                                      | What                                  |
+| --------------------------------------------------------- | ------------------------------------- |
+| `test_starting_items_stacking_groups_duplicates`          | 15×ID53 + 1×ID10 → 2 stacked entries  |
+| `test_starting_items_stacking_preserves_first_seen_order` | interleaved IDs keep first-seen order |
+| `test_starting_items_stacking_single_items_unchanged`     | unique IDs all have count = 1         |
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo test --lib starting_items_stacking (SDK crate) → 3 passed, 0 failed
+```
+
+---
+
+### Summary
+
+Replaced the custom creature browser modal with an implementation that exactly
+mirrors the Character Editor's Select Creature picker:
+
+| Aspect           | Before                                           | After                                                           |
+| ---------------- | ------------------------------------------------ | --------------------------------------------------------------- |
+| Button           | `Browse…` text on a separate line                | `🦎` emoji inline in the autocomplete row                       |
+| Picker title     | `"Browse Creatures"`                             | `"Select Creature"`                                             |
+| Window size      | `min_size([320, 300])`                           | `default_size([420, 420])`                                      |
+| Search bar       | none                                             | `🔍` text field + `✕` clear button                              |
+| Match count      | custom text                                      | `"{N} of {M} creatures"`                                        |
+| Row rendering    | plain loop                                       | virtualised `show_rows` + `ui.push_id`                          |
+| Label format     | `"#{id}  {name}"`                                | `"{id} — {name}"`                                               |
+| Close button     | none                                             | ✅                                                              |
+| After selection  | `remove_autocomplete_buffer` only                | `apply_selected_creature_id` + `store_autocomplete_buffer`      |
+| State fields     | `show_creature_browser: bool`                    | `creature_picker_open: bool` + `creature_picker_search: String` |
+| Picker rendering | separate `show_creature_browser_window()` method | inline in `show()` after form, same pattern as Character Editor |
+
+`apply_selected_creature_id` was updated to also close the picker
+(`self.creature_picker_open = false`) so selection and close are atomic.
+
+The `_creature_manager` parameter of `show_form` was renamed to
+`creature_manager` so the browse button can gate itself with
+`creature_manager.is_some()`, preventing the picker from opening when no
+campaign is loaded.
+
+### Tests changed (3 new, 2 replaced)
+
+| Test                                            | What                                                                                          |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `test_creature_picker_open_starts_false`        | replaces `test_show_creature_browser_starts_false`                                            |
+| `test_creature_picker_search_starts_empty`      | new                                                                                           |
+| `test_apply_selected_creature_id_closes_picker` | replaces `test_show_creature_browser_toggle`; verifies picker closes and both buffers are set |
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo test --lib creature_picker (SDK crate) → 4 passed (incl. char + npc)
+cargo test --lib apply_selected_creature_id (SDK crate) → 3 passed
+```
+
+---
+
+### Summary
+
+Added `pub registry_dirty: bool` to `CreaturesEditorState`. The flag is
+initialised to `false` in `Default` and set to `true` in every code path
+that mutates the in-memory creature list:
+
+| Path                                   | Location             |
+| -------------------------------------- | -------------------- |
+| Add (Save button, Add mode)            | `show_edit_mode`     |
+| Edit / Update (Save button, Edit mode) | `show_edit_mode`     |
+| Delete from edit toolbar               | `show_edit_mode`     |
+| Duplicate from edit toolbar            | `show_edit_mode`     |
+| Delete from registry preview panel     | `show_registry_mode` |
+| Duplicate from registry preview panel  | `show_registry_mode` |
+
+`lib.rs` can now check this flag after each frame and, when it is `true`,
+call `save_creatures()` and invalidate autocomplete caches in the Character,
+NPC, and Monster editors — ensuring the Visual Asset picker reflects changes
+immediately without requiring a separate manual campaign save.
+
+Two new unit tests were added:
+
+- `test_registry_dirty_starts_false` — verifies the flag is `false` on `default()`
+- `test_registry_dirty_set_after_mutation` — verifies the flag can be toggled
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo test --all-features registry_dirty` (SDK crate) — 2 passed, 0 failed
+
+---
+
+## SDK: Mesh Metadata Editing Panel — Creature Editor (visibility fix)
+
+### Files Changed
+
+- `sdk/campaign_builder/src/creatures_editor/mod.rs`
+
+### Summary
+
+Fixed the mesh metadata bottom panel being completely invisible in the running
+app. The panel was registered in `show_edit_mode` **after** `CentralPanel::default()`,
+which consumes all remaining layout space in egui — any panel registered after it
+is silently dropped. Moving the `Panel::bottom("creature_properties_bottom")` call
+to **before** `CentralPanel::default()` restores the correct egui panel-registration
+order (Top → Left → Right → Bottom → **Central**) and makes the panel appear.
+
+No logic changes were made to `show_creature_level_properties` or
+`show_mesh_metadata_panel`; only the call-site ordering in `show_edit_mode` was fixed.
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5604 passed, 8 skipped
+```
+
+---
+
+## SDK: Mesh Metadata Editing Panel — Creature Editor (original implementation)
+
+### Files Changed
+
+- `sdk/campaign_builder/src/creatures_editor/mod.rs`
+
+### Summary
+
+Added an inline mesh metadata editing panel to the Creature Editor's bottom panel
+so that users can rename individual meshes, edit their colours, set texture paths,
+and inspect vertex/triangle statistics without manually editing RON files.
+
+### What Was Built
+
+**New state field** `selected_mesh_metadata_index: Option<usize>` tracks which mesh
+row is selected in the metadata table. Initialised to `None` so the material
+sub-panel is hidden on first open.
+
+**`show_mesh_metadata_panel`** — new private method on `CreaturesEditorState`.
+Displays a `ScrollArea`-wrapped `Grid` with five columns:
+
+| #                            | Name                | Color              | Texture Path                 | Verts / Tris    |
+| ---------------------------- | ------------------- | ------------------ | ---------------------------- | --------------- |
+| row number (click to select) | editable text field | RGBA colour picker | editable path with hint text | read-only stats |
+
+Below the grid, a `collapsing` header shows the PBR material sub-panel for the
+selected mesh, including base colour, metallic slider, roughness slider, and an
+alpha-mode `ComboBox` (Opaque / Blend / Mask).
+
+**Borrow-checker safety**: `self.selected_mesh_metadata_index` is copied to a local
+`sel_idx` before `iter_mut()` borrows `self.edit_buffer.meshes`. Dirty-flag changes
+(`validation_dirty`, `preview_dirty`) are accumulated in local bools and written
+back after the closures return.
+
+**egui ID compliance** (sdk/AGENTS.md):
+
+- Every grid row is wrapped in `ui.push_id(idx, |ui| { ... ui.end_row(); })`
+- `ScrollArea` uses `.id_salt("mesh_metadata_scroll")`
+- `Grid` uses unique id `"mesh_metadata_grid"`
+- `ComboBox` uses `from_id_salt("mesh_alpha_mode_combo")`
+
+**Bottom panel**: changed `.resizable(false)` to `.resizable(true)` in
+`show_edit_mode` so users can resize the panel to see more mesh rows.
+
+**Wired into `show_creature_level_properties`** — a collapsing "Meshes" section
+before the validation separator delegates to `show_mesh_metadata_panel`.
+
+### Tests Added (5)
+
+- `test_selected_mesh_metadata_index_default_is_none` — field defaults to `None`
+- `test_mesh_name_edit_sets_unsaved_flag` — name edit marks campaign dirty
+- `test_mesh_name_cleared_becomes_none` — empty name stored as `None` not `Some("")`
+- `test_mesh_color_edit_sets_preview_dirty` — colour change sets `preview_dirty`
+- `test_mesh_texture_path_edit_sets_unsaved_flag` — texture path edit marks dirty
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5604 passed, 8 skipped
+cargo test -p campaign_builder (new tests) → 5 new tests passed
+```
+
+---
+
+## Fix: Potions and Scrolls Have No Effect (Bug 1 + Bug 2)
+
+### Files Changed
+
+- `campaigns/tutorial/data/items.ron`
+- `data/test_campaign/data/items.ron`
+- `src/game/systems/combat.rs`
+
+### Root Causes
+
+Two independent bugs caused consumable items (potions, scrolls) to have no
+persistent effect when used.
+
+**Bug 1 — Wrong condition flags and missing Resurrect effect in `items.ron`.**
+
+Three items in `campaigns/tutorial/data/items.ron` had incorrect data:
+
+1. **Item 52 "Cure Poison Potion"**: `effect: CureCondition(4)` targeted
+   `SILENCED` (bit 4) instead of `POISONED` (bit 16). Fixed to `CureCondition(16)`.
+
+2. **Item 109 "Cure Disease Potion"**: `effect: CureCondition(255)` cleared every
+   condition flag simultaneously. Fixed to `CureCondition(8)` (DISEASED = bit 8 only).
+
+3. **Item 110 "Resurection Scroll"** (also renamed to "Resurrection Scroll"):
+   `effect: CureCondition(255)` tried to clear conditions, but a dead character
+   has `HP = 0`; no HP was restored, leaving the DEAD flag even after all condition
+   bits were cleared. Fixed to `effect: Resurrect(1)` which invokes the dedicated
+   resurrect path that restores HP and clears DEAD atomically.
+
+The same flag error was also present in the test fixture
+`data/test_campaign/data/items.ron` (item 52 only; items 109/110 are not in the
+fixture). Fixed to `CureCondition(16)` there as well.
+
+**Bug 2 — Combat inventory not synced back to party on combat exit.**
+
+`sync_combat_to_party_on_exit` in `src/game/systems/combat.rs` copied HP, SP,
+conditions, stats, and AC from the post-combat `Combatant::Player` back into
+`global_state.0.party.members`. Inventory was not copied. Consequence: a potion
+consumed in combat had its HP/condition effect applied correctly (HP is synced),
+but the charge decrement was discarded when combat ended — the item "came back"
+free of charge after every fight.
+
+### Fix
+
+Added one line after the existing AC sync block inside `sync_combat_to_party_on_exit`:
+
+```rust
+// Sync inventory (item charges consumed during combat)
+party_member.inventory = pc.inventory.clone();
+```
+
+This replaces the party member's inventory with the combat snapshot (which has
+consumed slots removed), completing the authoritative copy of all mutable
+character state.
+
+### Test Added
+
+`test_sync_combat_to_party_syncs_inventory_charges` in `mod tests` inside
+`src/game/systems/combat.rs`. The test gives a party hero one healing-potion slot,
+builds a post-combat `CombatResource` where the same hero has an empty inventory
+(potion consumed), triggers `sync_combat_to_party_on_exit` via a minimal Bevy app,
+and asserts that the party hero's inventory has 0 items after the sync.
+
+### Condition Constants (for reference)
+
+```text
+ASLEEP = 1, BLINDED = 2, SILENCED = 4, DISEASED = 8,
+POISONED = 16, PARALYZED = 32, UNCONSCIOUS = 64, DEAD = 128
+```
+
+### Validation
+
+All four quality gates passed with zero errors and zero warnings:
+
+- `cargo fmt --all` — no output
+- `cargo check --all-targets --all-features` — Finished, 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — Finished, 0 warnings
+- `cargo nextest run --all-features` (targeted: combat+sync+consumable+item+cure+potion+resurrect) — 918 tests, 0 failures
+
+---
+
+## Fix: SDK Campaign Builder NPC Tab O(N×D) Per-Frame Validation Hotspot
+
+### Files Changed
+
+- `sdk/campaign_builder/src/npc_editor/mod.rs`
+- `sdk/campaign_builder/src/lib.rs`
+
+### Root Causes
+
+**Problem 1 — O(N×D) per-frame validation in `show_list_view`**
+
+The list-view pre-computation in `NpcEditorState::show_list_view` called two
+separate per-NPC validation functions on every UI frame:
+
+1. `merchant_dialogue_status_for_definition` — which internally calls
+   `merchant_dialogue_validation_for_definition` first (one full dialogue-list
+   scan) then does a _second_ dialogue-list scan for `sdk_managed` in the
+   `Valid` case.
+2. `merchant_dialogue_validation_for_definition` — called _again_ explicitly
+   to populate the `merchant_validation_state` variable.
+
+Result: 2–3 dialogue-list iterations per NPC per frame. With 50 NPCs and 50
+dialogues each containing multiple nodes this is O(N × D × K) allocation work
+at 60 fps.
+
+**Problem 2 — Unconditional per-frame vector clones in `lib.rs` NPCs tab**
+
+The `EditorTab::NPCs` match arm in `CampaignBuilderApp::show_editor_tabs` ran
+three unconditional clones on every frame when the NPC tab was active:
+`stock_templates.clone()`, `available_stock_templates.clone()`, and
+`sync_npc_editor_skill_candidates()` (which clones the skills vec). With
+hundreds of stock templates and skills this is significant allocation work at
+60 fps even when nothing changed.
+
+### Fix
+
+**`npc_editor/mod.rs`** — Three sub-changes:
+
+1. Added private helper `merchant_validation_with_sdk_flag` that calls
+   `merchant_dialogue_validation_for_definition` **once** and derives
+   `sdk_managed` inline from the returned state, avoiding the redundant second
+   dialogue-list scan that `merchant_dialogue_status_for_definition` performed
+   internally.
+2. Changed `show_list_view` pre-computation to use the new helper:
+   `merchant_info` is now `HashMap<usize, (MerchantDialogueValidationState, bool)>`
+   instead of the former `(&'static str, bool, MerchantDialogueValidationState)`
+   triple.
+3. Inlined the two `merchant_status`-dependent tooltip strings in the `Valid`
+   and `NotMerchant` match arms so `merchant_status` is no longer needed.
+4. Added test
+   `test_merchant_validation_with_sdk_flag_returns_same_state_as_existing_validation`
+   that verifies the new helper agrees with the original function for both the
+   non-merchant and merchant-no-dialogue cases.
+
+**`lib.rs`** — Guarded the three per-frame clones in the `EditorTab::NPCs`
+arm with length checks. Templates and skills are only re-synced when the
+source collection length changes, eliminating the unconditional O(n) clone
+workload on frames where nothing changed.
+
+### Quality Gates
+
+```
+cargo fmt         → no output
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 5604 passed, 8 skipped, 0 failed
+```
+
+---
+
+1. Added `list_creature_stubs()` call in place of `load_all_creatures()` in the
+   creature cache block.
+2. Pre-computed `campaign_dir_now` once before the creature cache block and reused
+   it in the dialogue change-detection block.
+3. Added `last_dialogues_len: usize` and `last_quests_len: usize` fields
+   (`#[serde(skip)]`) to `NpcEditorState` for change detection.
+4. Wrapped the `available_dialogues`/`available_quests` clones in a guard that
+   only re-clones when slice lengths change or the campaign directory changes,
+   eliminating the unconditional per-frame deep clone.
+
+**`obj_importer_ui.rs`** — Replaced `load_all_creatures()` with
+`list_creature_stubs()` in `suggest_next_creature_id_from_dir()`, and updated the
+filter/map chain to destructure `(id, _)` tuples instead of full
+`CreatureDefinition` structs.
+
+### Quality Gates
+
+```
+cargo fmt         → no output
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 5603 passed, 8 skipped, 0 failed
+```
+
+---
 
 ### Files Changed
 

@@ -3615,7 +3615,7 @@
             x: 16,
             y: 8,
             visual: (
-                height: None,
+                height: Some(3.5),
                 width_x: None,
                 width_z: None,
                 color_tint: None,
@@ -3635,7 +3635,7 @@
             x: 17,
             y: 8,
             visual: (
-                height: None,
+                height: Some(3.5),
                 width_x: None,
                 width_z: None,
                 color_tint: None,
@@ -3655,7 +3655,7 @@
             x: 18,
             y: 8,
             visual: (
-                height: None,
+                height: Some(3.5),
                 width_x: None,
                 width_z: None,
                 color_tint: None,
@@ -8244,7 +8244,7 @@
             furniture_id: Some(16),
             furniture_type: Table,
             rotation_y: Some(0.0),
-            scale: 1.0,
+            scale: 0.8,
             material: Wood,
             flags: (
                 lit: false,
@@ -8262,7 +8262,7 @@
             furniture_id: Some(15),
             furniture_type: Table,
             rotation_y: Some(0.0),
-            scale: 1.0,
+            scale: 0.7,
             material: Wood,
             flags: (
                 lit: false,
@@ -8372,7 +8372,7 @@
             ],
             gold: 1000,
             gems: 100,
-            mesh_id: Some("12007"),
+            mesh_id: Some("12009"),
         ),
         (
             x: 3,
@@ -8889,6 +8889,13 @@
             position: (
                 x: 7,
                 y: 0,
+            ),
+        ),
+        (
+            landscape_id: 7,
+            position: (
+                x: 7,
+                y: 18,
             ),
         ),
     ],
