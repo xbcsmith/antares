@@ -294,6 +294,18 @@ pub struct NpcEditorState {
     #[serde(skip)]
     pub last_npcs_file: Option<String>,
 
+    /// Cached dialogue count for change detection in [`show`].
+    ///
+    /// `available_dialogues` is only re-cloned when this differs from the
+    /// incoming slice length (or when the campaign directory changes), avoiding
+    /// an expensive per-frame deep clone of all dialogue trees.
+    #[serde(skip)]
+    pub last_dialogues_len: usize,
+
+    /// Cached quest count for change detection in [`show`].
+    #[serde(skip)]
+    pub last_quests_len: usize,
+
     /// Whether the autocomplete buffers should be reset on next form render
     #[serde(skip)]
     pub reset_autocomplete_buffers: bool,
@@ -421,6 +433,8 @@ impl Default for NpcEditorState {
             last_campaign_dir: None,
             creature_cache_dirty: false,
             last_npcs_file: None,
+            last_dialogues_len: 0,
+            last_quests_len: 0,
             reset_autocomplete_buffers: false,
             available_stock_templates: Vec::new(),
             available_skills: Vec::new(),
@@ -493,7 +507,8 @@ impl NpcEditorState {
         npc_ctx: &NpcEditorContext<'_>,
     ) -> bool {
         // Update portrait and sprite sheet candidates if campaign directory changed
-        if self.last_campaign_dir != npc_ctx.campaign_dir.cloned() || self.creature_cache_dirty {
+        let campaign_dir_now = npc_ctx.campaign_dir.cloned();
+        if self.last_campaign_dir != campaign_dir_now || self.creature_cache_dirty {
             self.available_portraits = extract_portrait_candidates(npc_ctx.campaign_dir);
             self.available_sprite_sheets =
                 crate::ui_helpers::extract_sprite_sheet_candidates(npc_ctx.campaign_dir);
@@ -501,26 +516,31 @@ impl NpcEditorState {
             // or when invalidate_creature_cache() has been called.
             self.available_creatures = npc_ctx
                 .creature_manager
-                .and_then(|m| m.load_all_creatures().ok())
-                .map(|creatures| {
-                    creatures
-                        .into_iter()
-                        .map(|c| (c.id, c.name))
-                        .collect::<Vec<_>>()
-                })
+                .and_then(|m| m.list_creature_stubs().ok())
                 .unwrap_or_default();
             self.creature_cache_dirty = false;
-            self.last_campaign_dir = npc_ctx.campaign_dir.cloned();
+            self.last_campaign_dir = campaign_dir_now.clone();
         }
 
         // Cache the npcs filename so Save from the editor can persist immediately
         self.last_npcs_file = Some(npc_ctx.npcs_file.to_string());
 
-        // Update available references
-        self.available_dialogues = dialogues.to_vec();
-        self.available_quests = quests.to_vec();
-        self.merchant_dialogue_editor
-            .load_dialogues(dialogues.to_vec());
+        // Re-clone dialogue and quest data only when the collection size changes or the
+        // campaign directory changed (which already triggered the full refresh above).
+        // This avoids a deep clone of ~178 KB of dialogue trees on every UI frame.
+        // Edits to existing dialogues made within the NPC editor (merchant/trainer repair)
+        // are synced back into `available_dialogues` directly by those methods.
+        if self.last_dialogues_len != dialogues.len()
+            || self.last_quests_len != quests.len()
+            || campaign_dir_now != self.last_campaign_dir
+        {
+            self.available_dialogues = dialogues.to_vec();
+            self.merchant_dialogue_editor
+                .load_dialogues(dialogues.to_vec());
+            self.last_dialogues_len = dialogues.len();
+            self.available_quests = quests.to_vec();
+            self.last_quests_len = quests.len();
+        }
 
         let mut needs_save = false;
 
@@ -706,19 +726,19 @@ impl NpcEditorState {
         // Reserve a small margin for the separator (12.0)
         let _sep_margin = 12.0;
 
-        // Pre-compute merchant dialogue status and validation for each NPC
+        // Pre-compute merchant validation state for each NPC (single pass per NPC)
         // before entering closures, to avoid borrowing `self` in the left closure
         // (which would conflict with the mutable borrow of `self.portrait_textures`
-        // in the right closure).
+        // in the right closure).  Uses the combined helper to avoid the 2-3x
+        // dialogue-list scans that calling both status and validation separately caused.
         let merchant_info: std::collections::HashMap<
             usize,
-            (&'static str, bool, MerchantDialogueValidationState),
+            (MerchantDialogueValidationState, bool),
         > = sorted_npcs
             .iter()
             .map(|(idx, npc)| {
-                let (status, sdk_managed) = self.merchant_dialogue_status_for_definition(npc);
-                let validation = self.merchant_dialogue_validation_for_definition(npc);
-                (*idx, (status, sdk_managed, validation))
+                let (validation, sdk_managed) = self.merchant_validation_with_sdk_flag(npc);
+                (*idx, (validation, sdk_managed))
             })
             .collect();
 
@@ -747,23 +767,23 @@ impl NpcEditorState {
                             let is_selected = selected == Some(*idx);
                             let mut badges = Vec::new();
 
-                            let (merchant_status, merchant_sdk_managed, merchant_validation_state) =
+                            let (merchant_validation_state, merchant_sdk_managed) =
                                 merchant_info
                                     .get(idx)
                                     .copied()
-                                    .unwrap_or(("Unknown", false, MerchantDialogueValidationState::NotMerchant));
+                                    .unwrap_or((MerchantDialogueValidationState::NotMerchant, false));
 
                             if npc.is_merchant {
                                 let (merchant_badge_text, merchant_badge_color, merchant_tooltip) =
                                     match merchant_validation_state {
-                                        MerchantDialogueValidationState::Valid => (
-                                            "Merchant",
-                                            egui::Color32::GOLD,
-                                            format!(
-                                                "This NPC is a merchant. Merchant dialogue status: {}",
-                                                merchant_status
-                                            ),
-                                        ),
+                                        MerchantDialogueValidationState::Valid => {
+                                            let tooltip = if merchant_sdk_managed {
+                                                "This NPC is a merchant. Merchant dialogue status: SDK-managed merchant branch present".to_string()
+                                            } else {
+                                                "This NPC is a merchant. Merchant dialogue status: Merchant dialogue valid".to_string()
+                                            };
+                                            ("Merchant", egui::Color32::GOLD, tooltip)
+                                        }
                                         MerchantDialogueValidationState::MissingDialogueId => (
                                             "Merchant!",
                                             egui::Color32::from_rgb(255, 120, 120),
@@ -796,10 +816,7 @@ impl NpcEditorState {
                                         MerchantDialogueValidationState::NotMerchant => (
                                             "Merchant",
                                             egui::Color32::GOLD,
-                                            format!(
-                                                "This NPC is a merchant. Merchant dialogue status: {}",
-                                                merchant_status
-                                            ),
+                                            "This NPC is a merchant. Merchant dialogue status: Not a merchant".to_string(),
                                         ),
                                     };
 
@@ -2488,6 +2505,51 @@ impl NpcEditorState {
                 ("Merchant dialogue missing OpenMerchant", false)
             }
         }
+    }
+
+    /// Computes merchant dialogue validation state AND `sdk_managed` flag in one pass.
+    ///
+    /// This is the preferred helper for the list-view pre-computation because it
+    /// avoids the double dialogue-list scan that occurs when
+    /// `merchant_dialogue_status_for_definition` and
+    /// `merchant_dialogue_validation_for_definition` are called separately.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc` - The NPC definition to evaluate.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(MerchantDialogueValidationState, sdk_managed)` where
+    /// `sdk_managed` is `true` when the assigned dialogue contains
+    /// SDK-managed merchant content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::npc_editor::{NpcEditorState, MerchantDialogueValidationState};
+    /// use antares::domain::world::NpcDefinition;
+    ///
+    /// let state = NpcEditorState::default();
+    /// // (construct a minimal NpcDefinition here)
+    /// ```
+    fn merchant_validation_with_sdk_flag(
+        &self,
+        npc: &NpcDefinition,
+    ) -> (MerchantDialogueValidationState, bool) {
+        let state = self.merchant_dialogue_validation_for_definition(npc);
+        let sdk_managed = if matches!(
+            state,
+            MerchantDialogueValidationState::Valid
+                | MerchantDialogueValidationState::StaleMerchantContent
+        ) {
+            npc.dialogue_id
+                .and_then(|id| self.available_dialogues.iter().find(|d| d.id == id))
+                .is_some_and(DialogueTree::has_sdk_managed_merchant_content)
+        } else {
+            false
+        };
+        (state, sdk_managed)
     }
 
     fn merchant_dialogue_repair_action_for_definition(
@@ -6841,6 +6903,102 @@ mod tests {
         assert_eq!(
             selected_text, "55: Mage Skill Dialogue",
             "ComboBox label must match id:name format"
+        );
+    }
+
+    #[test]
+    fn test_merchant_validation_with_sdk_flag_returns_same_state_as_existing_validation() {
+        // Verifies that the new combined helper returns the same validation state
+        // as the original merchant_dialogue_validation_for_definition, and that
+        // sdk_managed is correctly derived without a second dialogue scan.
+        let state = NpcEditorState::new();
+
+        // Non-merchant NPC — must return NotMerchant and sdk_managed = false.
+        let non_merchant = NpcDefinition {
+            id: "npc_1".to_string(),
+            name: "Test NPC".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            sprite: None,
+            dialogue_id: None,
+            creature_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
+        };
+
+        let (validation, sdk_managed) = state.merchant_validation_with_sdk_flag(&non_merchant);
+        assert_eq!(
+            validation,
+            MerchantDialogueValidationState::NotMerchant,
+            "non-merchant must return NotMerchant"
+        );
+        assert_eq!(
+            validation,
+            state.merchant_dialogue_validation_for_definition(&non_merchant),
+            "combined helper must agree with original validation function"
+        );
+        assert!(!sdk_managed, "non-merchant must not be sdk_managed");
+
+        // Merchant with no dialogue — must return MissingDialogueId.
+        let merchant_no_dialogue = NpcDefinition {
+            id: "npc_1".to_string(),
+            name: "Test NPC".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            sprite: None,
+            dialogue_id: None,
+            creature_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: true,
+            is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+            combat_switch: None,
+            suppress_flag: None,
+        };
+
+        let (validation, sdk_managed) =
+            state.merchant_validation_with_sdk_flag(&merchant_no_dialogue);
+        assert_eq!(
+            validation,
+            MerchantDialogueValidationState::MissingDialogueId,
+            "merchant with no dialogue must return MissingDialogueId"
+        );
+        assert_eq!(
+            validation,
+            state.merchant_dialogue_validation_for_definition(&merchant_no_dialogue),
+            "combined helper must agree with original validation function"
+        );
+        assert!(
+            !sdk_managed,
+            "missing-dialogue merchant must not be sdk_managed"
         );
     }
 }

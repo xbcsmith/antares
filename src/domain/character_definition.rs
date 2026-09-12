@@ -954,7 +954,7 @@ impl CharacterDefinition {
         let resistances = apply_race_resistances(race_def);
 
         // Create inventory with starting items, then grant food rations for starting_food.
-        let mut inventory = populate_starting_inventory(&self.id, &self.starting_items)?;
+        let mut inventory = populate_starting_inventory(&self.id, &self.starting_items, items)?;
         grant_starting_food(&self.id, &mut inventory, self.starting_food, items)?;
 
         // Build the character with empty equipment and default AC.
@@ -1291,9 +1291,13 @@ fn grant_starting_food(
                 item_id: food_id,
             });
         }
+        let food_charges = item_db
+            .get_item(food_id)
+            .map(|item| item.max_charges.min(u8::MAX as u16) as u8)
+            .unwrap_or(1);
         inventory.items.push(InventorySlot {
             item_id: food_id,
-            charges: 0,
+            charges: food_charges,
         });
     }
 
@@ -1303,6 +1307,7 @@ fn grant_starting_food(
 fn populate_starting_inventory(
     character_id: &str,
     starting_items: &[ItemId],
+    items: &ItemDatabase,
 ) -> Result<Inventory, CharacterDefinitionError> {
     let mut inventory = Inventory::new();
 
@@ -1314,12 +1319,15 @@ fn populate_starting_inventory(
             });
         }
 
-        // Add item with 0 charges (charges are set based on item type later)
-        let slot = InventorySlot {
-            item_id,
-            charges: 0,
-        };
-        inventory.items.push(slot);
+        // Initialise charges from the item's max_charges so consumables (potions,
+        // scrolls) are immediately usable.  Non-magical items (weapons, armour)
+        // have max_charges == 0, which is correct — they don't use the charge system.
+        let charges = items
+            .get_item(item_id)
+            .map(|item| item.max_charges.min(u8::MAX as u16) as u8)
+            .unwrap_or(0);
+
+        inventory.items.push(InventorySlot { item_id, charges });
     }
 
     Ok(inventory)
@@ -3594,28 +3602,68 @@ mod tests {
         assert_eq!(resistances.fire.base, 0);
     }
 
+    fn make_item_db_with_ids(ids: &[ItemId]) -> ItemDatabase {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        let mut db = ItemDatabase::new();
+        for &id in ids {
+            db.add_item(Item {
+                id,
+                name: format!("Item {}", id),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(10),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 10,
+                sell_cost: 5,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 1,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        }
+        db
+    }
+
     #[test]
     fn test_populate_starting_inventory_empty() {
-        let inventory = populate_starting_inventory("test", &[]).unwrap();
+        let db = ItemDatabase::new();
+        let inventory = populate_starting_inventory("test", &[], &db).unwrap();
         assert!(inventory.items.is_empty());
         assert!(inventory.has_space());
     }
 
     #[test]
     fn test_populate_starting_inventory_with_items() {
-        let items = vec![1, 2, 3];
-        let inventory = populate_starting_inventory("test", &items).unwrap();
+        let ids: Vec<ItemId> = vec![1, 2, 3];
+        let db = make_item_db_with_ids(&ids);
+        let inventory = populate_starting_inventory("test", &ids, &db).unwrap();
         assert_eq!(inventory.items.len(), 3);
         assert_eq!(inventory.items[0].item_id, 1);
         assert_eq!(inventory.items[1].item_id, 2);
         assert_eq!(inventory.items[2].item_id, 3);
+        // Each item has max_charges: 1, so charges must be initialised to 1.
+        assert_eq!(
+            inventory.items[0].charges, 1,
+            "starting item must have charges from max_charges"
+        );
+        assert_eq!(inventory.items[1].charges, 1);
+        assert_eq!(inventory.items[2].charges, 1);
     }
 
     #[test]
     fn test_populate_starting_inventory_full() {
         // Try to add more items than inventory can hold
         let items: Vec<ItemId> = (0..=Inventory::MAX_ITEMS as u8).collect();
-        let result = populate_starting_inventory("test", &items);
+        let db = ItemDatabase::new(); // items not in DB → charges 0 (fine for overflow test)
+        let result = populate_starting_inventory("test", &items, &db);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),

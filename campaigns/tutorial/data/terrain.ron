@@ -112,7 +112,7 @@
     (
         id: 13101,
         name: "Sand",
-        texture_path: "/Users/bsmith/go/src/github.com/xbcsmith/antares/campaigns/tutorial/assets/textures/terrain/sand.png",
+        texture_path: "assets/textures/terrain/sand.png",
         roughness: 0.5,
         mesh_style: Flat,
         vegetation: r#None,
@@ -123,7 +123,7 @@
     (
         id: 13102,
         name: "Ice",
-        texture_path: "/Users/bsmith/go/src/github.com/xbcsmith/antares/campaigns/tutorial/assets/textures/terrain/ice.png",
+        texture_path: "assets/textures/terrain/ice.png",
         roughness: 0.5,
         mesh_style: Flat,
         vegetation: r#None,
@@ -134,7 +134,7 @@
     (
         id: 13103,
         name: "Snow",
-        texture_path: "/Users/bsmith/go/src/github.com/xbcsmith/antares/campaigns/tutorial/assets/textures/terrain/snow.png",
+        texture_path: "assets/textures/terrain/snow.png",
         roughness: 0.5,
         mesh_style: Flat,
         vegetation: r#None,

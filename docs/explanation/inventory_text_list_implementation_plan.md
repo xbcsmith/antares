@@ -166,15 +166,15 @@ Run all four quality gates.
 
 #### 1.8 Deliverables
 
-- [ ] `InventoryViewMode` enum added to `inventory_state.rs`
-- [ ] `view_mode` field added to `InventoryState`
-- [ ] `enter_single_view` and `enter_multi_view` methods added with doc comments and doctests
-- [ ] `tab_next` / `tab_prev` expand to Multi when called from Single
-- [ ] Number keys 1-6 bound in `inventory_input_system`; trigger `enter_single_view`
-- [ ] `inventory_ui_system` passes correct panel slice based on `view_mode`
-- [ ] Hint text updated for both view modes
-- [ ] All new state-transition tests pass
-- [ ] All four quality gates pass with zero errors and zero warnings
+- [x] `InventoryViewMode` enum added to `inventory_state.rs`
+- [x] `view_mode` field added to `InventoryState`
+- [x] `enter_single_view` and `enter_multi_view` methods added with doc comments and doctests
+- [x] `tab_next` / `tab_prev` expand to Multi when called from Single
+- [x] Number keys 1-6 bound in `inventory_input_system`; trigger `enter_single_view`
+- [x] `inventory_ui_system` passes correct panel slice based on `view_mode`
+- [x] Hint text updated for both view modes
+- [x] All new state-transition tests pass
+- [x] All four quality gates pass with zero errors and zero warnings
 
 #### 1.9 Success Criteria
 

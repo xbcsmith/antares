@@ -180,7 +180,9 @@ fn handle_events(
     )>,
     // Transform query used to inspect candidate speaker entity's world Y position.
     // We use this to prefer fallback visuals when the speaker is a low-lying marker.
-    asset_server: Res<AssetServer>,
+    // Wrapped in Option so handle_events can run in test apps that do not initialise
+    // AssetServer (e.g. minimal-plugins unit test apps).
+    asset_server: Option<Res<AssetServer>>,
     mut pending_recruitment: Option<
         ResMut<crate::game::systems::dialogue::PendingRecruitmentContext>,
     >,
@@ -735,12 +737,15 @@ fn handle_events(
                 }
 
                 // Only spawn furniture if we have the necessary resources (full
-                // game context). Binding all three resources in one pattern keeps
+                // game context). Binding all four resources in one pattern keeps
                 // the guard and the usage from drifting apart; without every
                 // resource we simply skip rendering this event.
-                let (Some(commands), Some(materials_res), Some(meshes_res)) =
-                    (commands.as_mut(), materials.as_mut(), meshes.as_mut())
-                else {
+                let (Some(commands), Some(materials_res), Some(meshes_res), Some(asset_server)) = (
+                    commands.as_mut(),
+                    materials.as_mut(),
+                    meshes.as_mut(),
+                    asset_server.as_deref(),
+                ) else {
                     continue;
                 };
                 let map_id = global_state.0.world.current_map;
@@ -790,7 +795,7 @@ fn handle_events(
                             commands,
                             meshes_res,
                             materials_res,
-                            &asset_server,
+                            asset_server,
                             world_pos,
                             *rotation_y,
                             resolved_scale,

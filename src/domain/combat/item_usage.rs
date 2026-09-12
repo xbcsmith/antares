@@ -178,6 +178,10 @@ pub fn validate_item_use_slot(
             if in_combat && !consumable.is_combat_usable {
                 return Err(ItemUseError::NotUsableInCombat);
             }
+            // No charges left — slot has been fully consumed.
+            if slot.charges == 0 {
+                return Err(ItemUseError::NoCharges);
+            }
         }
         _ => {
             // Non-consumable: only valid if it has a spell effect and charges.
@@ -1388,5 +1392,30 @@ mod tests {
         } else {
             panic!("player should exist");
         }
+    }
+
+    /// `validate_item_use_slot` must return `NoCharges` for a consumable slot
+    /// whose `charges` field is 0.
+    #[test]
+    fn test_validate_consumable_no_charges_returns_error() {
+        let mut content = ContentDatabase::new();
+        let potion = create_healing_potion(250, 20, true);
+        content.items.add_item(potion).unwrap();
+
+        let mut ch = Character::new(
+            "Test".to_string(),
+            "human".to_string(),
+            "none".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Add with 0 charges (simulates the old broken initialisation path)
+        ch.inventory.add_item(250, 0).unwrap();
+
+        let result = validate_item_use_slot(&ch, 0, &content, false);
+        assert!(
+            matches!(result, Err(ItemUseError::NoCharges)),
+            "consumable with 0 charges must return NoCharges; got: {result:?}"
+        );
     }
 }
