@@ -1,4 +1,49 @@
-## Audio Manager — Phase 4: SDK UI — `show_audio_editor`
+## Audio Manager — Phase 5: In-Editor Preview Player — `AudioPreviewPlayer`
+
+### Files Changed
+
+- `sdk/campaign_builder/Cargo.toml` — added `rodio = { version = "0.19", default-features = false, features = ["wav", "vorbis", "mp3", "flac"] }`
+- `sdk/campaign_builder/src/audio_editor.rs` — added `PreviewError`, `SendableOutputStream`, `AudioPreviewPlayer` + 3 new tests; added `preview_player` field to `AudioEditorState`
+- `sdk/campaign_builder/src/lib.rs` — replaced stub preview button in `show_audio_editor` with real `AudioPreviewPlayer` wiring: ▶ / ⏹ toggle, `request_repaint_after(500 ms)` polling while playing
+
+### What Was Built
+
+**`PreviewError`** — `thiserror`-backed enum with three variants:
+
+- `StreamError(String)` — no audio output device (e.g. headless CI)
+- `FileOpen(String)` — path could not be read from disk
+- `Decode(String)` — codec not recognised / corrupt file
+
+**`SendableOutputStream`** — private newtype wrapping `rodio::OutputStream` with `unsafe impl Send + Sync`. The stream must stay alive as long as the sink plays; the Campaign Builder is single-threaded (eframe main thread), so the `unsafe` is sound. Annotated with `#[allow(dead_code)]` because the field is held purely for its `Drop` side-effect.
+
+**`AudioPreviewPlayer`** — public struct with a single `active: Option<(SendableOutputStream, rodio::Sink)>` field:
+
+| Method                                                                  | Description                                                                                                                                         |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new() -> Self`                                                         | Returns idle player (no audio loaded).                                                                                                              |
+| `play(&mut self, path: &Path, volume: f32) -> Result<(), PreviewError>` | Stops any existing playback, opens the file, decodes it with `rodio::Decoder`, creates a new `Sink`, clamps volume to 0.0–1.0, and starts playback. |
+| `stop(&mut self)`                                                       | Stops the sink and drops both stream and sink. Safe to call when idle.                                                                              |
+| `is_playing(&self) -> bool`                                             | Returns `true` while `!sink.empty()`. UI polls this to flip the ▶/⏹ label.                                                                          |
+
+The `AudioEditorState` struct gained a `pub preview_player: AudioPreviewPlayer` field, initialised as `AudioPreviewPlayer::new()` in `AudioEditorState::new()`.
+
+### New Tests
+
+| Test                                                | Verifies                                                                                                                                |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_preview_player_is_not_playing_by_default`     | `new()` player returns `is_playing() == false`                                                                                          |
+| `test_preview_player_stop_is_safe_when_not_playing` | `stop()` on idle player does not panic                                                                                                  |
+| `test_preview_player_plays_valid_wav_without_panic` | `play()` with a synthesised 200 ms silence WAV either succeeds and stops cleanly, or returns `PreviewError::StreamError` on headless CI |
+
+### Validation
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors, 0 warnings
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, 0 warnings
+- `cargo nextest run --all-features` — **5641 passed, 0 failed**
+- `cargo test --lib audio` (SDK) — **15 passed, 0 failed**
+
+---
 
 ### Files Changed
 

@@ -11,6 +11,7 @@
 
 use antares::domain::AudioMap;
 use std::fs;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -40,6 +41,140 @@ pub struct MusicMappingRow {
     /// Audio filename mapped to this ID, relative to `assets/audio/`.
     /// Empty string = filename-by-convention (no override).
     pub mapped_file: String,
+}
+
+/// Errors that can occur during audio preview playback.
+#[derive(Debug, Error)]
+pub enum PreviewError {
+    /// Failed to open or initialise the audio output stream.
+    #[error("Audio stream error: {0}")]
+    StreamError(String),
+
+    /// The audio file could not be opened from disk.
+    #[error("Failed to open audio file: {0}")]
+    FileOpen(String),
+
+    /// The audio codec is not recognised or the file is corrupt.
+    #[error("Failed to decode audio: {0}")]
+    Decode(String),
+}
+
+/// Newtype wrapper that makes `rodio::OutputStream` `Send + Sync`.
+///
+/// # Safety
+///
+/// `rodio::OutputStream` is `!Send` on some platforms (notably macOS) because
+/// the underlying `cpal::Stream` must be driven from the thread that created it.
+/// The Campaign Builder runs its entire UI on the main thread (eframe native
+/// backend), so `AudioPreviewPlayer` is *never* moved across threads.
+/// Implementing `Send + Sync` here is therefore safe in this codebase.
+#[allow(dead_code)] // Field 0 is kept alive intentionally; never read directly.
+struct SendableOutputStream(rodio::OutputStream);
+// SAFETY: See doc comment above.
+unsafe impl Send for SendableOutputStream {}
+// SAFETY: See doc comment above.
+unsafe impl Sync for SendableOutputStream {}
+
+/// In-editor audio preview player for the Campaign Builder Audio tab.
+///
+/// Wraps a `rodio::Sink` and its companion `OutputStream` so campaign
+/// authors can audition imported audio files without launching the game.
+///
+/// Call [`play`](AudioPreviewPlayer::play) to start playback and
+/// [`stop`](AudioPreviewPlayer::stop) to halt it. The
+/// [`is_playing`](AudioPreviewPlayer::is_playing) predicate drives the
+/// ▶ / ⏹ button toggle in the UI.
+pub struct AudioPreviewPlayer {
+    /// Active playback state: (output stream, sink). Both must live together.
+    active: Option<(SendableOutputStream, rodio::Sink)>,
+}
+
+impl std::fmt::Debug for AudioPreviewPlayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioPreviewPlayer")
+            .field("is_playing", &self.is_playing())
+            .finish()
+    }
+}
+
+impl AudioPreviewPlayer {
+    /// Creates a new idle `AudioPreviewPlayer` (no audio loaded or playing).
+    pub fn new() -> Self {
+        Self { active: None }
+    }
+
+    /// Starts playback of the audio file at `path` at the given `volume`
+    /// (0.0 = silent, 1.0 = full; clamped to that range).
+    ///
+    /// Any currently playing audio is stopped before the new file begins.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PreviewError::StreamError`] when no audio output device is
+    /// available (e.g. headless CI), [`PreviewError::FileOpen`] when the
+    /// path cannot be read, or [`PreviewError::Decode`] when the audio
+    /// codec is not recognised.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::audio_editor::AudioPreviewPlayer;
+    /// use std::path::Path;
+    ///
+    /// let mut player = AudioPreviewPlayer::new();
+    /// // Returns Err if no audio device is available (e.g. CI).
+    /// let _ = player.play(Path::new("assets/audio/hit.ogg"), 0.8);
+    /// player.stop();
+    /// ```
+    pub fn play(&mut self, path: &Path, volume: f32) -> Result<(), PreviewError> {
+        // Stop any existing playback before starting a new one.
+        self.stop();
+
+        let (stream, stream_handle) = rodio::OutputStream::try_default()
+            .map_err(|e| PreviewError::StreamError(e.to_string()))?;
+
+        let file = BufReader::new(
+            fs::File::open(path).map_err(|e| PreviewError::FileOpen(e.to_string()))?,
+        );
+
+        let source = rodio::Decoder::new(file).map_err(|e| PreviewError::Decode(e.to_string()))?;
+
+        let sink = rodio::Sink::try_new(&stream_handle)
+            .map_err(|e| PreviewError::StreamError(e.to_string()))?;
+        sink.set_volume(volume.clamp(0.0, 1.0));
+        sink.append(source);
+
+        // Both `stream` and `sink` must stay alive for audio to play.
+        self.active = Some((SendableOutputStream(stream), sink));
+        Ok(())
+    }
+
+    /// Stops any current playback and releases audio resources.
+    ///
+    /// Safe to call when nothing is playing.
+    pub fn stop(&mut self) {
+        if let Some((_, ref sink)) = self.active {
+            sink.stop();
+        }
+        self.active = None;
+    }
+
+    /// Returns `true` while the sink has audio sources queued or playing.
+    ///
+    /// When the file finishes naturally, this returns `false`. The UI polls
+    /// this via `request_repaint_after` to flip the button label back to ▶.
+    pub fn is_playing(&self) -> bool {
+        self.active
+            .as_ref()
+            .map(|(_, sink)| !sink.empty())
+            .unwrap_or(false)
+    }
+}
+
+impl Default for AudioPreviewPlayer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Errors that can occur when importing an audio file into a campaign.
@@ -91,6 +226,9 @@ pub struct AudioEditorState {
     /// `data/audio.ron` with a default-empty map when the file was never read
     /// during this session (SDK Rule 17).
     pub loaded_from_file: bool,
+
+    /// In-editor audio preview player; plays files from `assets/audio/`.
+    pub preview_player: AudioPreviewPlayer,
 }
 
 impl AudioEditorState {
@@ -139,6 +277,7 @@ impl AudioEditorState {
             status_message: String::new(),
             unsaved_changes: false,
             loaded_from_file: false,
+            preview_player: AudioPreviewPlayer::new(),
         }
     }
 
@@ -461,5 +600,73 @@ mod tests {
         assert!(state.imported_files.contains(&"music.mp3".to_string()));
         assert!(!state.imported_files.contains(&"not_audio.txt".to_string()));
         assert_eq!(state.imported_files.len(), 2);
+    }
+
+    // ── AudioPreviewPlayer tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_preview_player_is_not_playing_by_default() {
+        let player = AudioPreviewPlayer::new();
+        assert!(!player.is_playing(), "new player must not report playing");
+    }
+
+    #[test]
+    fn test_preview_player_stop_is_safe_when_not_playing() {
+        let mut player = AudioPreviewPlayer::new();
+        // Calling stop on an idle player must not panic.
+        player.stop();
+        assert!(!player.is_playing());
+    }
+
+    /// Writes a minimal valid WAV file containing `duration_ms` ms of silence.
+    fn write_silence_wav(path: &std::path::Path, duration_ms: u32) {
+        let sample_rate: u32 = 44_100;
+        let channels: u16 = 1;
+        let bits_per_sample: u16 = 16;
+        let num_samples = sample_rate as u64 * duration_ms as u64 / 1_000;
+        let data_size = (num_samples * channels as u64 * (bits_per_sample as u64 / 8)) as u32;
+        let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
+        let block_align: u16 = channels * bits_per_sample / 8;
+
+        let mut buf: Vec<u8> = Vec::with_capacity(44 + data_size as usize);
+        // RIFF chunk
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&(36u32 + data_size).to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        // fmt sub-chunk
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes()); // sub-chunk size
+        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        buf.extend_from_slice(&channels.to_le_bytes());
+        buf.extend_from_slice(&sample_rate.to_le_bytes());
+        buf.extend_from_slice(&byte_rate.to_le_bytes());
+        buf.extend_from_slice(&block_align.to_le_bytes());
+        buf.extend_from_slice(&bits_per_sample.to_le_bytes());
+        // data sub-chunk
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_size.to_le_bytes());
+        buf.extend(std::iter::repeat_n(0u8, data_size as usize));
+
+        std::fs::write(path, &buf).expect("write silence WAV");
+    }
+
+    #[test]
+    fn test_preview_player_plays_valid_wav_without_panic() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wav_path = tmp.path().join("silence.wav");
+        write_silence_wav(&wav_path, 200); // 200 ms of silence
+
+        let mut player = AudioPreviewPlayer::new();
+        match player.play(&wav_path, 1.0) {
+            Ok(()) => {
+                // Successfully started; stop immediately and verify clean teardown.
+                player.stop();
+                assert!(!player.is_playing());
+            }
+            Err(PreviewError::StreamError(_)) => {
+                // No audio output device (headless CI) — acceptable.
+            }
+            Err(e) => panic!("Unexpected preview error: {e}"),
+        }
     }
 }

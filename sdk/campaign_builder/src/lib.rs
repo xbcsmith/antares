@@ -2838,17 +2838,77 @@ impl CampaignBuilderApp {
 
                 ui.separator();
 
-                let can_preview = self
+                // ── Preview button: toggles between ▶ Play and ⏹ Stop ─────────
+                // Snapshot everything needed as copies/clones so no live borrow
+                // on audio_editor_state remains when we mutate it below.
+                let is_playing = self
+                    .editor_registry
+                    .audio_editor_state
+                    .preview_player
+                    .is_playing();
+                let selected_file_name: Option<String> = self
                     .editor_registry
                     .audio_editor_state
                     .selected_file
-                    .is_some();
-                if ui
-                    .add_enabled(can_preview, egui::Button::new("▶ Preview"))
-                    .clicked()
-                {
-                    self.editor_registry.audio_editor_state.status_message =
-                        "Audio preview not yet available (Phase 5)".to_string();
+                    .and_then(|idx| {
+                        self.editor_registry
+                            .audio_editor_state
+                            .imported_files
+                            .get(idx)
+                            .cloned()
+                    });
+                let selected_path: Option<std::path::PathBuf> =
+                    selected_file_name.as_ref().and_then(|name| {
+                        self.campaign_dir
+                            .as_ref()
+                            .map(|dir| dir.join("assets/audio").join(name))
+                    });
+                let preview_volume = self.editor_registry.audio_editor_state.preview_volume;
+
+                if is_playing {
+                    if ui.button("⏹ Stop").clicked() {
+                        self.editor_registry
+                            .audio_editor_state
+                            .preview_player
+                            .stop();
+                        self.editor_registry.audio_editor_state.status_message =
+                            "Playback stopped".to_string();
+                        ui.ctx().request_repaint();
+                    }
+                    // Poll every 500 ms so the button flips back to ▶ when the
+                    // file finishes naturally (rodio plays on a background thread).
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(500));
+                } else {
+                    let can_preview = selected_path.is_some();
+                    if ui
+                        .add_enabled(can_preview, egui::Button::new("▶ Preview"))
+                        .clicked()
+                    {
+                        if let Some(path) = selected_path {
+                            match self
+                                .editor_registry
+                                .audio_editor_state
+                                .preview_player
+                                .play(&path, preview_volume)
+                            {
+                                Ok(()) => {
+                                    let name = path
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or("file")
+                                        .to_string();
+                                    self.editor_registry.audio_editor_state.status_message =
+                                        format!("Playing: {name}");
+                                    ui.ctx().request_repaint();
+                                }
+                                Err(e) => {
+                                    self.editor_registry.audio_editor_state.status_message =
+                                        format!("Preview failed: {e}");
+                                }
+                            }
+                        }
+                    }
                 }
 
                 ui.label("Preview volume:");
