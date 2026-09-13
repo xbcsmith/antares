@@ -476,6 +476,38 @@ fn handle_audio_messages(
     }
 }
 
+/// Bevy plugin that initialises the audio subsystem for a loaded campaign.
+///
+/// Insert via `app.add_plugins(AudioPlugin { ... })` after loading a campaign.
+/// The plugin inserts [`AudioSettings`], [`AudioPaths`], and
+/// [`AudioManifestResource`] as Bevy resources and registers the
+/// [`handle_audio_messages`] system on the [`Update`] schedule.
+///
+/// # Fields
+///
+/// * `config` — [`AudioConfig`] controlling volume levels (from `config.ron`)
+/// * `audio_dir` — campaign-relative directory for audio assets (e.g. `"assets/audio"`)
+/// * `audio_manifest` — optional [`AudioManifest`] loaded from `audio.ron`;
+///   `None` means filename-by-convention applies for all IDs
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::audio::AudioPlugin;
+/// use antares::sdk::game_config::AudioConfig;
+/// use bevy::prelude::*;
+///
+/// # fn example() {
+/// let audio_config = AudioConfig::default();
+///
+/// let mut app = App::new();
+/// app.add_plugins(AudioPlugin {
+///     config: audio_config,
+///     audio_dir: "assets/audio".to_string(),
+///     audio_manifest: None,
+/// });
+/// # }
+/// ```
 pub struct AudioPlugin {
     /// Audio configuration to use for initializing AudioSettings
     pub config: AudioConfig,

@@ -507,6 +507,10 @@ impl Default for CampaignAssets {
 fn load_audio_manifest(campaign_path: &Path) -> Result<Option<AudioManifest>, CampaignLoadError> {
     let audio_path = campaign_path.join("audio.ron");
     if !audio_path.exists() {
+        tracing::debug!(
+            "No audio.ron found at {:?}; using filename-by-convention",
+            audio_path
+        );
         return Ok(None);
     }
     let contents = std::fs::read_to_string(&audio_path).map_err(|e| {
