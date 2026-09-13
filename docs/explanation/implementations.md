@@ -1,3 +1,54 @@
+## Audio RON & SFX Mapping — Phase 2: Campaign Loader Loads `audio.ron`
+
+### Files Changed
+
+- `src/sdk/campaign_loader.rs` — added `audio_manifest` field to `Campaign`, `load_audio_manifest` helper, 3 unit tests
+
+### What Was Built
+
+**`Campaign` struct** — new `#[serde(skip)]` field:
+
+```rust
+pub audio_manifest: Option<AudioManifest>,
+```
+
+`None` when `audio.ron` is absent (full backwards compatibility); `Some(manifest)` when
+the file is present and valid.
+
+**`fn load_audio_manifest(path: &Path) -> Result<Option<AudioManifest>, CampaignLoadError>`**—
+private helper called by both branches of `Campaign::load()`:
+
+- File absent → returns `Ok(None)` immediately
+- File present, parse succeeds → returns `Ok(Some(manifest))`
+- File present, I/O error or RON parse error → returns `Err(MetadataError(...))`
+
+`Campaign::load()` calls `load_audio_manifest(path)` **after** `game_config` is populated
+in both the `CampaignMetadata` branch and the fallback `Campaign` branch, so the field is
+always set before the campaign is returned to the caller.
+
+`TryFrom<CampaignMetadata>` and `test_fixtures::make_test_campaign()` both initialise
+`audio_manifest: None`; loading is handled post-construction by `Campaign::load()`.
+
+### Tests Added (all passing)
+
+| Test                                                         | Assertion                                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `test_campaign_load_without_audio_ron_sets_manifest_to_none` | `data/test_campaign` (no audio.ron) → `audio_manifest.is_none()`         |
+| `test_campaign_load_with_valid_audio_ron_populates_manifest` | temp campaign + audio.ron → `Some(manifest)`; mappings resolve correctly |
+| `test_campaign_load_with_malformed_audio_ron_returns_error`  | malformed audio.ron → `Err(MetadataError)`                               |
+
+All tests use `data/test_campaign` or `tempfile::tempdir()` — never `campaigns/tutorial`
+(Implementation Rule 5).
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -E 'test(campaign_load_with) | test(campaign_load_without_audio)'` — 3/3 passed
+
+---
+
 ## Audio RON & SFX Mapping — Phase 1: `AudioManifest` Definition
 
 ### Files Changed
