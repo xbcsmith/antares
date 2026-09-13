@@ -180,6 +180,9 @@ pub struct EditorRegistry {
 
     /// Characters editor state.
     pub characters_editor_state: characters_editor::CharactersEditorState,
+
+    /// Audio editor state.
+    pub audio_editor_state: audio_editor::AudioEditorState,
 }
 
 impl Default for EditorRegistry {
@@ -207,6 +210,7 @@ impl Default for EditorRegistry {
             levels_editor_state: levels_editor::LevelsEditorState::new(),
             races_editor_state: races_editor::RacesEditorState::default(),
             characters_editor_state: characters_editor::CharactersEditorState::default(),
+            audio_editor_state: audio_editor::AudioEditorState::new(),
         }
     }
 }

@@ -33,6 +33,7 @@ pub mod advanced_validation;
 pub mod animation_editor;
 pub mod app_dialogs;
 pub mod asset_manager;
+pub mod audio_editor;
 pub mod auto_save;
 pub mod campaign_editor;
 pub mod campaign_io;
@@ -267,6 +268,7 @@ pub fn run() -> Result<(), eframe::Error> {
                                 app.load_maps();
                                 app.load_conditions();
                                 app.load_furniture();
+                                app.load_audio();
                                 app.load_landscape();
 
                                 if let Err(e) = app.load_quests() {
@@ -512,6 +514,13 @@ pub struct CampaignMetadata {
     /// lack this field continue to deserialize correctly.
     #[serde(default = "default_starting_time")]
     pub starting_time: GameTime,
+
+    /// Relative path to the audio mapping data file.
+    ///
+    /// Defaults to `"data/audio.ron"` so existing `campaign.ron` files
+    /// that omit this field continue to deserialize correctly.
+    #[serde(default = "default_audio_file")]
+    pub audio_file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -579,6 +588,10 @@ fn default_levels_file() -> String {
     "data/levels.ron".to_string()
 }
 
+pub fn default_audio_file() -> String {
+    "data/audio.ron".to_string()
+}
+
 fn default_level_up_mode() -> LevelUpMode {
     LevelUpMode::Auto
 }
@@ -643,6 +656,7 @@ impl Default for CampaignMetadata {
             terrain_file: "data/terrain.ron".to_string(),
             levels_file: "data/levels.ron".to_string(),
             starting_time: default_starting_time(),
+            audio_file: default_audio_file(),
         }
     }
 }
