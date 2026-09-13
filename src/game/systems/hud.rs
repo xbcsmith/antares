@@ -5738,6 +5738,7 @@ mod campaign_font_tests {
                 fonts,
                 ..Default::default()
             },
+            audio_manifest: None,
         }
     }
 

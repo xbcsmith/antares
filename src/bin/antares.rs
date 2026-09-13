@@ -556,6 +556,7 @@ mod tests {
                 graphics,
                 ..GameConfig::default()
             },
+            audio_manifest: None,
         }
     }
 
