@@ -1,3 +1,48 @@
+## Audio Manager — Phase 4: SDK UI — `show_audio_editor`
+
+### Files Changed
+
+- `sdk/campaign_builder/src/lib.rs` — 6 edits: `EditorTab::Audio` variant, `name()` arm, sidebar entry, central-panel match arm, `show_audio_editor` method, 4 new tests
+
+### What Was Built
+
+**`EditorTab::Audio`** — new variant inserted between `Config` and `Items` in the enum, `name()` match, and the sidebar tabs array.
+
+**`show_audio_editor(&mut self, ui: &mut egui::Ui)`** — three-column layout following Rule 6 (`allocate_ui` with explicit column rects):
+
+| Column | Width           | Content                                                                                                                                                                       |
+| ------ | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Left   | 180 px          | Imported file list (`ScrollArea` + `push_id` per row), Import, Scan, Preview stub, preview-volume slider                                                                      |
+| Center | fill (≥ 200 px) | SFX event-ID → audio-file `ComboBox` table (`from_id_salt`, `push_id`), `+ Custom SFX Row` button                                                                             |
+| Right  | 260 px          | Music track → audio-file `ComboBox` table, `+ Custom Track` button, Master/Music/SFX/Ambient volume sliders + Enable Audio checkbox (mirroring `AudioConfig` from Config tab) |
+
+Layout compliance:
+
+- `ui.available_size()` called **before** `ui.horizontal`; `col_h = available.y`
+- Every column uses `ui.allocate_ui(egui::vec2(w, col_h), ...)`
+- Every `ScrollArea` uses `.auto_shrink([true, false])` and a unique `id_salt`
+- Navigation hints in the title bar row (right-aligned); no separate bottom bar
+- `chosen: Option<String>` + `push_id` pattern avoids borrow-checker conflicts on `audio_editor_state`
+- `volume_changed` flag avoids holding the `audio` borrow while writing to `self.unsaved_changes`
+
+### New Tests
+
+| Test                                                     | Verifies                                                   |
+| -------------------------------------------------------- | ---------------------------------------------------------- |
+| `test_audio_tab_exists_in_editor_tab_enum`               | `EditorTab::Audio` compiles and `name()` returns `"Audio"` |
+| `test_audio_tab_appears_in_sidebar_tabs_array`           | `"Audio"` present in the full name-list                    |
+| `test_show_audio_editor_does_not_panic_with_empty_state` | Renders without panic via `ctx.run_ui`                     |
+| `test_import_audio_file_invalid_extension_returns_error` | `.xyz` extension → `AudioImportError::UnsupportedFormat`   |
+
+### Validation
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — clean (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` — 6 pre-existing errors in unrelated files; 0 errors introduced by Phase 4
+- `cargo nextest run --all-features -E 'test(audio)'` — 12 passed, 0 failed
+
+---
+
 ## Audio Manager — Phase 3: SDK Data Model — `AudioEditorState`
 
 ### Files Changed
