@@ -43,6 +43,7 @@ use crate::domain::items::consumable_usage::{
 };
 use crate::domain::items::equipment_validation::EquipError;
 use crate::domain::items::types::{normalize_duration, ConsumableData, ConsumableEffect, ItemType};
+use crate::domain::items::ItemDatabase;
 use crate::domain::magic::exploration_casting::{cast_exploration_spell, ExplorationTarget};
 use crate::domain::magic::learning::{learn_spell, SpellLearnError};
 use crate::domain::transactions::{drop_item, equip_item, unequip_item, TransactionError};
@@ -87,10 +88,16 @@ struct GroupedRow {
 
 /// Build a grouped display list from raw inventory slots.
 ///
-/// Consecutive or non-consecutive slots holding the same `item_id` with
-/// `charges == 0` are merged into a single [`GroupedRow`] whose
-/// `first_slot_idx` is the earliest matching slot.  Items with `charges > 0`
-/// always produce their own individual row.
+/// A slot is stackable when it is either charge-free (`charges == 0`) **or** a
+/// [`ItemType::Consumable`] — potions and food use `charges` to track "uses
+/// remaining" (typically 1) but should display as a single stacked row such as
+/// `Healing Potion (x3)` rather than three separate entries.
+///
+/// Charged non-consumables (wands, staves) always get individual rows so the
+/// per-item remaining charge count stays visible.
+///
+/// `item_db` is optional; when `None` only charge-free items (`charges == 0`)
+/// are stacked (safe fallback for tests / minimal harnesses).
 ///
 /// # Examples
 ///
@@ -104,10 +111,22 @@ struct GroupedRow {
 /// ];
 /// // item_id=1 slots merge into one row (count=2); item_id=2 stays individual.
 /// ```
-fn build_grouped_inventory(items: &[InventorySlot]) -> Vec<GroupedRow> {
+fn build_grouped_inventory(
+    items: &[InventorySlot],
+    item_db: Option<&ItemDatabase>,
+) -> Vec<GroupedRow> {
     let mut groups: Vec<GroupedRow> = Vec::new();
     for (slot_idx, slot) in items.iter().enumerate() {
-        if slot.charges == 0 {
+        // Consumables (potions, food) are always stackable: their `charges`
+        // field tracks "uses remaining" but quantity is what the player sees.
+        // Charged non-consumables (wands, staves) keep individual rows.
+        let is_consumable = item_db
+            .and_then(|db| db.get_item(slot.item_id))
+            .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
+            .unwrap_or(false);
+        let stackable = slot.charges == 0 || is_consumable;
+
+        if stackable {
             if let Some(g) = groups
                 .iter_mut()
                 .find(|g| g.item_id == slot.item_id && g.charges == 0)
@@ -116,10 +135,13 @@ fn build_grouped_inventory(items: &[InventorySlot]) -> Vec<GroupedRow> {
                 continue;
             }
         }
+        // First occurrence of a stackable item, or a non-stackable charged item.
+        // Consumables use charges = 0 in the row so the charge annotation
+        // is suppressed; the count suffix (x3) is shown instead.
         groups.push(GroupedRow {
             first_slot_idx: slot_idx,
             item_id: slot.item_id,
-            charges: slot.charges,
+            charges: if is_consumable { 0 } else { slot.charges },
             count: 1,
         });
     }
@@ -866,7 +888,7 @@ fn handle_grid_navigation(
             .get(focused_party_index)
             .map(|ch| ch.inventory.items.as_slice())
             .unwrap_or(&[]);
-        build_grouped_inventory(items)
+        build_grouped_inventory(items, game_content.map(|gc| &gc.db().items))
     };
     let group_count = groups.len();
 
@@ -1682,7 +1704,7 @@ fn render_character_panel(
                         .small(),
                 );
             } else {
-                let groups = build_grouped_inventory(items);
+                let groups = build_grouped_inventory(items, game_content.map(|gc| &gc.db().items));
                 for (row_idx, group) in groups.iter().enumerate() {
                     ui.push_id(format!("inv_row_{}", group.first_slot_idx), |ui| {
                         let is_selected = selected_slot == Some(group.first_slot_idx);
@@ -3188,14 +3210,15 @@ mod tests {
                 charges: 0,
             },
         ];
-        let groups = build_grouped_inventory(&items);
+        let groups = build_grouped_inventory(&items, None);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].first_slot_idx, 0);
         assert_eq!(groups[0].count, 3);
         assert_eq!(groups[0].item_id, 1);
     }
 
-    /// Charged items (charges > 0) are never merged.
+    /// Charged items (charges > 0) without a known item DB are never merged
+    /// (safe fallback — no DB means we can't tell if they're consumable).
     #[test]
     fn test_build_grouped_inventory_does_not_merge_charged() {
         let items = vec![
@@ -3208,7 +3231,7 @@ mod tests {
                 charges: 1,
             },
         ];
-        let groups = build_grouped_inventory(&items);
+        let groups = build_grouped_inventory(&items, None);
         assert_eq!(groups.len(), 2, "charged items must not be merged");
         assert_eq!(groups[0].first_slot_idx, 0);
         assert_eq!(groups[1].first_slot_idx, 1);
@@ -3235,7 +3258,7 @@ mod tests {
                 charges: 5,
             }, // wand
         ];
-        let groups = build_grouped_inventory(&items);
+        let groups = build_grouped_inventory(&items, None);
         // potion (count=2, first=0), bread (count=1, first=1), wand (count=1, first=3)
         assert_eq!(groups.len(), 3);
         assert_eq!(groups[0].item_id, 1);
@@ -3251,8 +3274,166 @@ mod tests {
     /// Empty inventory produces no groups.
     #[test]
     fn test_build_grouped_inventory_empty() {
-        let groups = build_grouped_inventory(&[]);
+        let groups = build_grouped_inventory(&[], None);
         assert!(groups.is_empty());
+    }
+
+    /// Consumable items with `charges > 0` (as stored when purchased —
+    /// `max_charges = 1`) are stacked into one row when an item DB is
+    /// provided.  This is the core regression guard for the
+    /// "Healing Potions / Food Rations not stacking" bug.
+    #[test]
+    fn test_build_grouped_inventory_merges_consumables_with_charges() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        // Replicate the real data: max_charges = 1, so buy_item gives charges = 1.
+        let potion = Item {
+            id: 50,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+                duration_minutes: None,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        let food = Item {
+            id: 111,
+            name: "Food Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(1),
+                is_combat_usable: false,
+                duration_minutes: None,
+            }),
+            base_cost: 2,
+            sell_cost: 1,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        let mut db = ContentDatabase::new();
+        db.items.add_item(potion).unwrap();
+        db.items.add_item(food).unwrap();
+
+        // Three potions and two food rations, each with charges = 1
+        let items = vec![
+            InventorySlot {
+                item_id: 50,
+                charges: 1,
+            },
+            InventorySlot {
+                item_id: 50,
+                charges: 1,
+            },
+            InventorySlot {
+                item_id: 50,
+                charges: 1,
+            },
+            InventorySlot {
+                item_id: 111,
+                charges: 1,
+            },
+            InventorySlot {
+                item_id: 111,
+                charges: 1,
+            },
+        ];
+
+        let groups = build_grouped_inventory(&items, Some(&db.items));
+
+        assert_eq!(
+            groups.len(),
+            2,
+            "3 potions + 2 food rations must collapse to 2 rows, not 5"
+        );
+        assert_eq!(groups[0].item_id, 50);
+        assert_eq!(groups[0].count, 3, "three potions must stack (x3)");
+        assert_eq!(
+            groups[0].charges, 0,
+            "consumable group must not display a charge annotation"
+        );
+        assert_eq!(groups[1].item_id, 111);
+        assert_eq!(groups[1].count, 2, "two food rations must stack (x2)");
+        assert_eq!(
+            groups[1].charges, 0,
+            "food group must not display a charge annotation"
+        );
+    }
+
+    /// Non-consumable charged items (wands) keep individual rows even when
+    /// an item DB is provided, so the per-item charge count is preserved.
+    #[test]
+    fn test_build_grouped_inventory_charged_non_consumable_not_merged() {
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        // A wand is represented as a non-consumable item with max_charges > 0.
+        // Use a Weapon item type as a stand-in for any non-consumable charged item.
+        let wand = Item {
+            id: 77,
+            name: "Wand of Fire".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 4, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 500,
+            sell_cost: 250,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: Some(1),
+            max_charges: 10,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        let mut db = ContentDatabase::new();
+        db.items.add_item(wand).unwrap();
+
+        // Two wands, each with different remaining charges
+        let items = vec![
+            InventorySlot {
+                item_id: 77,
+                charges: 10,
+            },
+            InventorySlot {
+                item_id: 77,
+                charges: 7,
+            },
+        ];
+        let groups = build_grouped_inventory(&items, Some(&db.items));
+
+        assert_eq!(
+            groups.len(),
+            2,
+            "non-consumable charged items must stay on individual rows"
+        );
+        assert_eq!(groups[0].charges, 10);
+        assert_eq!(groups[1].charges, 7);
     }
 
     // ------------------------------------------------------------------

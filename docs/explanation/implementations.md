@@ -1,3 +1,108 @@
+## Audio RON & SFX Mapping — Phase 1: `AudioManifest` Definition
+
+### Files Changed
+
+- `src/sdk/game_config.rs` — added `AudioManifest` struct + impl, 8 unit tests
+- `src/sdk/mod.rs` — added `AudioManifest` to public re-exports
+
+### What Was Built
+
+`AudioManifest` is a new SDK type in `src/sdk/game_config.rs` placed immediately
+after `AudioConfig` so all audio-related SDK config lives in one file.
+
+**Struct fields** (`BTreeMap<String, String>`, both `#[serde(default)]`):
+
+- `sfx_mappings` — engine SFX event ID → audio filename relative to `audio_dir`
+- `music_tracks` — music track ID → audio filename relative to `audio_dir`
+
+**Derives**: `Debug, Clone, Default, Serialize, Deserialize, PartialEq`
+
+**Methods**:
+
+- `resolve_sfx(engine_id) -> Option<&str>` — returns mapped filename or `None`
+- `resolve_music(track_id) -> Option<&str>` — same for music tracks
+- `well_known_sfx_ids() -> &'static [&'static str]` — the 5 hardcoded SFX IDs
+  (`combat_hit`, `combat_miss`, `combat_heal`, `spell_fizzle`, `victory_fanfare`)
+- `well_known_music_ids() -> &'static [&'static str]` — the 2 hardcoded music
+  IDs (`combat_theme`, `exploration_theme`)
+
+**RON format**: anonymous tuple `(sfx_mappings: {...}, music_tracks: {...})` for
+config.ron-style loading; also accepts named struct syntax `AudioManifest(...)`.
+
+### Tests Added (all passing)
+
+| Test                                                                  | Assertion                                        |
+| --------------------------------------------------------------------- | ------------------------------------------------ |
+| `test_audio_manifest_resolve_sfx_returns_mapped_value_when_present`   | Mapped key returns `Some`                        |
+| `test_audio_manifest_resolve_sfx_returns_none_when_absent`            | Unmapped key returns `None`                      |
+| `test_audio_manifest_resolve_music_returns_mapped_value_when_present` | Mapped key returns `Some`                        |
+| `test_audio_manifest_resolve_music_returns_none_when_absent`          | Unmapped key returns `None`                      |
+| `test_audio_manifest_well_known_sfx_ids_contains_five_entries`        | Exactly 5 SFX IDs, all present                   |
+| `test_audio_manifest_well_known_music_ids_contains_two_entries`       | Exactly 2 music IDs, all present                 |
+| `test_audio_manifest_default_is_empty_maps`                           | Both maps empty on `Default::default()`          |
+| `test_audio_manifest_ron_roundtrip`                                   | Parses from RON; serializes and round-trips back |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -E 'test(audio_manifest)'` — 8/8 passed
+
+---
+
+## Inventory: Healing Potions and Food Rations Not Stacking
+
+### File Changed
+
+- `src/game/systems/inventory_ui.rs`
+
+### Root Cause
+
+`build_grouped_inventory` only stacked items when their `charges` field was `0`.
+However, the item definitions for Healing Potions (`id 50`) and Food Rations
+(`id 111`) both have `max_charges: 1` in the RON data file. Every code path
+that adds consumables to inventory — `buy_item`, `grant_starting_food`, and
+`populate_starting_inventory` — sets `charges = item.max_charges`, so each
+potion or ration slot ends up with `charges = 1`. Because `charges != 0`,
+`build_grouped_inventory` treated every slot as a non-stackable charged item
+and emitted one row per slot.
+
+### Fix
+
+`build_grouped_inventory` now accepts a second parameter
+`Option<&ItemDatabase>`. When the item DB is provided, it classifies each slot
+as **stackable** if:
+
+- its `charges == 0` (existing behaviour, charge-free items), **or**
+- its item type is `ItemType::Consumable` (new behaviour — potions and food).
+
+Charged non-consumables (wands, staves) still get individual rows so their
+remaining per-item charge count is visible.
+
+The `GroupedRow` for a stacked consumable stores `charges = 0` so no charge
+annotation (`✨N`) is emitted; the count suffix (`x3`) is used instead.
+
+Both call sites — `render_character_panel` and `handle_grid_navigation` — now
+pass `game_content.map(|gc| &gc.db().items)` so real game content is respected.
+Test-only call sites pass `None` (safe fallback: only `charges == 0` items
+stack).
+
+### Tests Added / Updated
+
+| Test                                                             | Change                                                                                  |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `test_build_grouped_inventory_merges_like_items`                 | Updated to pass `None` as item DB                                                       |
+| `test_build_grouped_inventory_does_not_merge_charged`            | Updated to pass `None`; doc clarified                                                   |
+| `test_build_grouped_inventory_mixed`                             | Updated to pass `None`                                                                  |
+| `test_build_grouped_inventory_empty`                             | Updated to pass `None`                                                                  |
+| `test_build_grouped_inventory_merges_consumables_with_charges`   | **New** — 3× Healing Potion (charges=1) + 2× Food Ration (charges=1) collapse to 2 rows |
+| `test_build_grouped_inventory_charged_non_consumable_not_merged` | **New** — two wands with different charges stay on separate rows                        |
+
+All 5615 tests pass after the change.
+
+---
+
 ## Combat Bug: Long Bow Causes Endless Attacks and Always Shows "Miss"
 
 ### Files Changed
