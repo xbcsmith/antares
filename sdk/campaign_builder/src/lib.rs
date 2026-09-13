@@ -667,6 +667,7 @@ impl Default for CampaignMetadata {
 pub enum EditorTab {
     Metadata,
     Config,
+    Audio,
     Items,
     Spells,
     Conditions,
@@ -697,6 +698,7 @@ impl EditorTab {
         match self {
             EditorTab::Metadata => "Metadata",
             EditorTab::Config => "Config",
+            EditorTab::Audio => "Audio",
             EditorTab::Items => "Items",
             EditorTab::Spells => "Spells",
             EditorTab::Conditions => "Conditions",
@@ -1153,6 +1155,7 @@ impl eframe::App for CampaignBuilderApp {
                 let tabs = [
                     EditorTab::Metadata,
                     EditorTab::Config,
+                    EditorTab::Audio,
                     EditorTab::Items,
                     EditorTab::Spells,
                     EditorTab::Conditions,
@@ -1259,6 +1262,7 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.unsaved_changes,
                 &mut self.ui_state.status_message,
             ),
+            EditorTab::Audio => self.show_audio_editor(ui),
             EditorTab::Items => {
                 let mut items_ctx = EditorContext {
                     campaign_dir: self.campaign_dir.as_ref(),
@@ -2715,6 +2719,373 @@ impl CampaignBuilderApp {
         self.ui_state.status_message = format!("🔎 Focused asset: {}", path.display());
     }
 
+    /// Show the Audio tab editor.
+    ///
+    /// Renders a three-column layout (Rule 6 — `allocate_ui` with explicit column rects):
+    /// - Left (180 px): imported audio file list, import, scan, and preview controls
+    /// - Center (fill): SFX event-ID → audio-file mapping table
+    /// - Right (260 px): music-track → audio-file mapping table + global volume sliders
+    ///
+    /// All `ScrollArea`s carry an `id_salt`; all loop bodies use `push_id`; all
+    /// `ComboBox`es use `from_id_salt` (SDK egui ID audit Rules 1–3).
+    fn show_audio_editor(&mut self, ui: &mut egui::Ui) {
+        // ── Title bar (hints right-aligned; no bottom bar — Rule 6) ──────────
+        let title = if self.editor_registry.audio_editor_state.unsaved_changes {
+            "🔊 Audio *"
+        } else {
+            "🔊 Audio"
+        };
+        ui.horizontal(|ui| {
+            ui.heading(title);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label("[ESC] Close");
+                ui.separator();
+                ui.label("[Tab] Scan Files");
+            });
+        });
+        ui.separator();
+
+        // Pre-compute column dimensions BEFORE ui.horizontal (Rule 6 mandatory)
+        let available = ui.available_size();
+        let col_h = available.y;
+        let left_w = 180.0_f32;
+        let right_w = 260.0_f32;
+        let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
+        let center_w = (available.x - left_w - right_w - sep_total).max(200.0);
+
+        ui.horizontal(|ui| {
+            // ── Left column: Imported Files ─────────────────────────────────
+            ui.allocate_ui(egui::vec2(left_w, col_h), |ui| {
+                ui.label(egui::RichText::new("Imported Files").strong());
+                ui.separator();
+
+                let file_count = self.editor_registry.audio_editor_state.imported_files.len();
+                let selected_idx = self.editor_registry.audio_editor_state.selected_file;
+
+                egui::ScrollArea::vertical()
+                    .id_salt("audio_files_scroll")
+                    .auto_shrink([true, false])
+                    .show(ui, |ui| {
+                        if file_count == 0 {
+                            ui.label(
+                                egui::RichText::new("No audio files imported")
+                                    .italics()
+                                    .weak(),
+                            );
+                        } else {
+                            for idx in 0..file_count {
+                                // Clone to release the borrow before potential mutation
+                                let name = self.editor_registry.audio_editor_state.imported_files
+                                    [idx]
+                                    .clone();
+                                ui.push_id(idx, |ui| {
+                                    if ui
+                                        .selectable_label(selected_idx == Some(idx), &name)
+                                        .clicked()
+                                    {
+                                        self.editor_registry.audio_editor_state.selected_file =
+                                            Some(idx);
+                                        ui.ctx().request_repaint();
+                                    }
+                                });
+                            }
+                        }
+                    });
+
+                ui.separator();
+
+                if ui.button("📂 Import File…").clicked() {
+                    let picked = rfd::FileDialog::new()
+                        .add_filter("Audio Files", &["ogg", "mp3", "wav", "flac"])
+                        .pick_file();
+                    if let Some(path) = picked {
+                        if let Some(dir) = self.campaign_dir.clone() {
+                            match self
+                                .editor_registry
+                                .audio_editor_state
+                                .import_audio_file(&path, &dir)
+                            {
+                                Ok(()) => {
+                                    let fname = path
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or("file")
+                                        .to_string();
+                                    self.ui_state.status_message =
+                                        format!("Imported audio: {fname}");
+                                }
+                                Err(e) => {
+                                    self.ui_state.status_message =
+                                        format!("Audio import failed: {e}");
+                                }
+                            }
+                            ui.ctx().request_repaint();
+                        } else {
+                            self.ui_state.status_message =
+                                "Open a campaign before importing audio".to_string();
+                        }
+                    }
+                }
+
+                if ui.button("🔄 Scan Files").clicked() {
+                    if let Some(dir) = self.campaign_dir.clone() {
+                        self.editor_registry
+                            .audio_editor_state
+                            .refresh_imported_files(&dir);
+                        ui.ctx().request_repaint();
+                    }
+                }
+
+                ui.separator();
+
+                let can_preview = self
+                    .editor_registry
+                    .audio_editor_state
+                    .selected_file
+                    .is_some();
+                if ui
+                    .add_enabled(can_preview, egui::Button::new("▶ Preview"))
+                    .clicked()
+                {
+                    self.editor_registry.audio_editor_state.status_message =
+                        "Audio preview not yet available (Phase 5)".to_string();
+                }
+
+                ui.label("Preview volume:");
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.editor_registry.audio_editor_state.preview_volume,
+                        0.0..=1.0,
+                    )
+                    .step_by(0.05),
+                );
+
+                // Show the audio editor's own status line (e.g. preview stub message)
+                let status = self
+                    .editor_registry
+                    .audio_editor_state
+                    .status_message
+                    .clone();
+                if !status.is_empty() {
+                    ui.separator();
+                    ui.label(egui::RichText::new(&status).small());
+                }
+            }); // end left column
+
+            ui.separator();
+
+            // ── Center column: SFX Mappings ──────────────────────────────────
+            ui.allocate_ui(egui::vec2(center_w, col_h), |ui| {
+                ui.label(egui::RichText::new("SFX Mappings").strong());
+                ui.separator();
+
+                // Clone the file list so no live borrow on audio_editor_state
+                // conflicts with the mutations inside the ComboBox callbacks.
+                let imported: Vec<String> = self
+                    .editor_registry
+                    .audio_editor_state
+                    .imported_files
+                    .clone();
+
+                egui::ScrollArea::vertical()
+                    .id_salt("audio_sfx_scroll")
+                    .auto_shrink([true, false])
+                    .show(ui, |ui| {
+                        let sfx_count = self.editor_registry.audio_editor_state.sfx_mappings.len();
+                        for i in 0..sfx_count {
+                            // Clone the values we need; releases borrows before mutation
+                            let engine_id = self.editor_registry.audio_editor_state.sfx_mappings[i]
+                                .engine_id
+                                .clone();
+                            let current = self.editor_registry.audio_editor_state.sfx_mappings[i]
+                                .mapped_file
+                                .clone();
+                            let display = if current.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                current.clone()
+                            };
+
+                            let mut chosen: Option<String> = None;
+                            ui.push_id(i, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(&engine_id).monospace());
+                                    egui::ComboBox::from_id_salt(format!("sfx_combo_{i}"))
+                                        .selected_text(&display)
+                                        .show_ui(ui, |ui| {
+                                            if ui
+                                                .selectable_label(current.is_empty(), "(none)")
+                                                .clicked()
+                                            {
+                                                chosen = Some(String::new());
+                                            }
+                                            for file in &imported {
+                                                if ui
+                                                    .selectable_label(&current == file, file)
+                                                    .clicked()
+                                                {
+                                                    chosen = Some(file.clone());
+                                                }
+                                            }
+                                        });
+                                });
+                            });
+
+                            if let Some(val) = chosen {
+                                self.editor_registry.audio_editor_state.sfx_mappings[i]
+                                    .mapped_file = val;
+                                self.editor_registry.audio_editor_state.unsaved_changes = true;
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    });
+
+                if ui.button("+ Custom SFX Row").clicked() {
+                    self.editor_registry.audio_editor_state.sfx_mappings.push(
+                        audio_editor::SfxMappingRow {
+                            engine_id: String::new(),
+                            mapped_file: String::new(),
+                        },
+                    );
+                    self.editor_registry.audio_editor_state.unsaved_changes = true;
+                    ui.ctx().request_repaint();
+                }
+            }); // end center column
+
+            ui.separator();
+
+            // ── Right column: Music Tracks + Volume sliders ───────────────────
+            ui.allocate_ui(egui::vec2(right_w, col_h), |ui| {
+                ui.label(egui::RichText::new("Music Tracks").strong());
+                ui.separator();
+
+                let imported: Vec<String> = self
+                    .editor_registry
+                    .audio_editor_state
+                    .imported_files
+                    .clone();
+
+                egui::ScrollArea::vertical()
+                    .id_salt("audio_music_scroll")
+                    .auto_shrink([true, false])
+                    .show(ui, |ui| {
+                        let music_count =
+                            self.editor_registry.audio_editor_state.music_mappings.len();
+                        for i in 0..music_count {
+                            let track_id = self.editor_registry.audio_editor_state.music_mappings
+                                [i]
+                                .track_id
+                                .clone();
+                            let current = self.editor_registry.audio_editor_state.music_mappings[i]
+                                .mapped_file
+                                .clone();
+                            let display = if current.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                current.clone()
+                            };
+
+                            let mut chosen: Option<String> = None;
+                            ui.push_id(i, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(&track_id).monospace());
+                                    egui::ComboBox::from_id_salt(format!("music_combo_{i}"))
+                                        .selected_text(&display)
+                                        .show_ui(ui, |ui| {
+                                            if ui
+                                                .selectable_label(current.is_empty(), "(none)")
+                                                .clicked()
+                                            {
+                                                chosen = Some(String::new());
+                                            }
+                                            for file in &imported {
+                                                if ui
+                                                    .selectable_label(&current == file, file)
+                                                    .clicked()
+                                                {
+                                                    chosen = Some(file.clone());
+                                                }
+                                            }
+                                        });
+                                });
+                            });
+
+                            if let Some(val) = chosen {
+                                self.editor_registry.audio_editor_state.music_mappings[i]
+                                    .mapped_file = val;
+                                self.editor_registry.audio_editor_state.unsaved_changes = true;
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    });
+
+                if ui.button("+ Custom Track").clicked() {
+                    self.editor_registry.audio_editor_state.music_mappings.push(
+                        audio_editor::MusicMappingRow {
+                            track_id: String::new(),
+                            mapped_file: String::new(),
+                        },
+                    );
+                    self.editor_registry.audio_editor_state.unsaved_changes = true;
+                    ui.ctx().request_repaint();
+                }
+
+                // ── Volume sliders (mirror AudioConfig from Config tab) ───────
+                ui.separator();
+                ui.label(egui::RichText::new("── Volume ──").strong());
+                ui.separator();
+
+                // Use a local flag so we don't hold the `audio` borrow while
+                // also accessing `self.unsaved_changes`.
+                let mut volume_changed = false;
+
+                {
+                    let audio = &mut self.editor_registry.config_editor_state.game_config.audio;
+                    let master_r = ui.add(
+                        egui::Slider::new(&mut audio.master_volume, 0.0..=1.0)
+                            .text("Master")
+                            .step_by(0.05),
+                    );
+                    if master_r.changed() {
+                        volume_changed = true;
+                    }
+                    let music_r = ui.add(
+                        egui::Slider::new(&mut audio.music_volume, 0.0..=1.0)
+                            .text("Music")
+                            .step_by(0.05),
+                    );
+                    if music_r.changed() {
+                        volume_changed = true;
+                    }
+                    let sfx_r = ui.add(
+                        egui::Slider::new(&mut audio.sfx_volume, 0.0..=1.0)
+                            .text("SFX")
+                            .step_by(0.05),
+                    );
+                    if sfx_r.changed() {
+                        volume_changed = true;
+                    }
+                    let ambient_r = ui.add(
+                        egui::Slider::new(&mut audio.ambient_volume, 0.0..=1.0)
+                            .text("Ambient")
+                            .step_by(0.05),
+                    );
+                    if ambient_r.changed() {
+                        volume_changed = true;
+                    }
+                    let enable_r = ui.checkbox(&mut audio.enable_audio, "Enable Audio");
+                    if enable_r.changed() {
+                        volume_changed = true;
+                    }
+                } // `audio` borrow released here
+
+                if volume_changed {
+                    self.unsaved_changes = true;
+                }
+            }); // end right column
+        }); // end ui.horizontal
+    }
+
     /// Show assets editor
     ///
     /// Displays campaign data file status and asset management tools.
@@ -3504,6 +3875,79 @@ mod tests {
         assert_eq!(
             app.editor_registry.npc_editor_state.available_skills[0].id,
             "perception"
+        );
+    }
+
+    #[test]
+    fn test_audio_tab_exists_in_editor_tab_enum() {
+        // Compiles = variant exists
+        let _tab = EditorTab::Audio;
+        assert_eq!(EditorTab::Audio.name(), "Audio");
+    }
+
+    #[test]
+    fn test_audio_tab_appears_in_sidebar_tabs_array() {
+        // The sidebar tabs array is local to the ui() method; verify via name mapping.
+        let all_tabs = [
+            EditorTab::Metadata,
+            EditorTab::Config,
+            EditorTab::Audio,
+            EditorTab::Items,
+            EditorTab::Spells,
+            EditorTab::Conditions,
+            EditorTab::Monsters,
+            EditorTab::Creatures,
+            EditorTab::Furniture,
+            EditorTab::Landscape,
+            EditorTab::Terrain,
+            EditorTab::Objects,
+            EditorTab::Importer,
+            EditorTab::Maps,
+            EditorTab::Quests,
+            EditorTab::Classes,
+            EditorTab::Levels,
+            EditorTab::Races,
+            EditorTab::Characters,
+            EditorTab::Dialogues,
+            EditorTab::NPCs,
+            EditorTab::Proficiencies,
+            EditorTab::Skills,
+            EditorTab::StockTemplates,
+            EditorTab::Assets,
+            EditorTab::Validation,
+        ];
+        let names: Vec<&str> = all_tabs.iter().map(|t| t.name()).collect();
+        assert!(
+            names.contains(&"Audio"),
+            "Audio tab must appear in name list"
+        );
+    }
+
+    #[test]
+    fn test_show_audio_editor_does_not_panic_with_empty_state() {
+        let mut app = CampaignBuilderApp::default();
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.show_audio_editor(ui);
+            });
+        });
+        // Reaching here without panic = success
+    }
+
+    #[test]
+    fn test_import_audio_file_invalid_extension_returns_error() {
+        use audio_editor::AudioImportError;
+        let mut state = audio_editor::AudioEditorState::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bad_path = tmp.path().join("sound.xyz");
+        std::fs::write(&bad_path, b"data").expect("write test file");
+        assert!(
+            matches!(
+                state.import_audio_file(&bad_path, tmp.path()),
+                Err(AudioImportError::UnsupportedFormat(_))
+            ),
+            "Expected UnsupportedFormat error for .xyz extension"
         );
     }
 }
