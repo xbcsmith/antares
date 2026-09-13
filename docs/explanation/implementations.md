@@ -1,3 +1,71 @@
+## Audio RON & SFX Mapping — Phase 3: Bevy Integration — `AudioManifestResource` and Updated `resolve_audio_path`
+
+### Files Changed
+
+- `src/game/systems/audio.rs` — `AudioManifestResource`, updated `resolve_audio_path`, updated `handle_audio_messages`, updated `AudioPlugin`; 5 new tests + 5 updated existing tests
+- `src/bin/antares.rs` — extract `audio_manifest` and pass to `AudioPlugin`
+
+### What Was Built
+
+**`AudioManifestResource`** — new `#[derive(Resource, Default, Clone)]` Bevy resource:
+
+```rust
+pub struct AudioManifestResource(pub Option<AudioManifest>);
+```
+
+Inserted by `AudioPlugin::build()` so any Bevy system can query it.
+
+**`resolve_audio_path` — new signature**:
+
+```rust
+pub fn resolve_audio_path(audio_dir: &str, id: &str, manifest: Option<&AudioManifest>) -> String
+```
+
+Resolution order:
+
+1. If `manifest` has a `resolve_sfx(id)` mapping → use mapped value as effective filename
+2. Otherwise use `id` as-is (existing behaviour)
+3. Append `.ogg` if no recognised extension present
+
+**`handle_audio_messages`** — now queries `Res<AudioManifestResource>`:
+
+- Music: pre-resolves via `manifest.resolve_music(&ev.track_id)` before calling `resolve_audio_path(..., None)`
+- SFX: passes `manifest.0.as_ref()` directly to `resolve_audio_path` for internal `resolve_sfx` lookup
+- Eliminates duplicate `resolve_audio_path` calls; `asset_path` is cloned for reuse in `info!` log
+
+**`AudioPlugin`** — new field `pub audio_manifest: Option<AudioManifest>`. `build()` inserts `AudioManifestResource(self.audio_manifest.clone())`.
+
+**`src/bin/antares.rs`** — extracts `campaign.audio_manifest.clone()` and passes it as `audio_manifest` to `AudioPlugin`.
+
+### Tests
+
+**5 existing tests updated** (added `None` as third arg to all `resolve_audio_path` calls):
+
+- `test_resolve_audio_path_no_ext`
+- `test_resolve_audio_path_with_ogg_ext`
+- `test_resolve_audio_path_with_mp3_ext`
+- `test_resolve_audio_path_trailing_slash_stripped` (3 call sites)
+- `test_audio_plugin_inserts_resource` (added `audio_manifest: None`)
+
+**5 new tests added**:
+
+| Test                                                                     | Assertion                                                                  |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `test_resolve_audio_path_with_manifest_uses_mapped_value`                | Mapped SFX id → mapped filename with extension preserved                   |
+| `test_resolve_audio_path_without_manifest_falls_back_to_id`              | `None` manifest → `{id}.ogg` convention                                    |
+| `test_resolve_audio_path_with_manifest_falls_back_when_id_not_in_map`    | Non-`None` manifest, unmapped id → convention                              |
+| `test_resolve_audio_path_manifest_mapped_value_with_extension_preserved` | Mapped `.mp3` value → no `.ogg` appended                                   |
+| `test_audio_plugin_with_manifest_inserts_resource`                       | Bevy app test — `AudioManifestResource` contains manifest passed to plugin |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -E 'test(audio)'` — 35/35 passed (all audio tests, phases 1–3)
+
+---
+
 ## Audio RON & SFX Mapping — Phase 2: Campaign Loader Loads `audio.ron`
 
 ### Files Changed
