@@ -1,3 +1,73 @@
+## Audio Manager — Phase 3: SDK Data Model — `AudioEditorState`
+
+### Files Changed
+
+- `sdk/campaign_builder/src/audio_editor.rs` — **new** module with all Phase 3 types
+- `sdk/campaign_builder/src/lib.rs` — registered module + `audio_file` field on `CampaignMetadata` + auto-load call
+- `sdk/campaign_builder/src/editor_state.rs` — `audio_editor_state` added to `EditorRegistry`
+- `sdk/campaign_builder/src/campaign_io.rs` — `load_audio()`, `save_audio()`, wired into `do_open_campaign` and `do_save_campaign`
+- `sdk/campaign_builder/tests/ron_serialization_tests.rs` — `audio_file` field added to struct literal
+
+### What Was Built
+
+**`sdk/campaign_builder/src/audio_editor.rs`** — new module:
+
+| Type               | Description                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SfxMappingRow`    | Engine SFX event ID + campaign-specific filename                                                                                                              |
+| `MusicMappingRow`  | Engine music track ID + campaign-specific filename                                                                                                            |
+| `AudioImportError` | `thiserror` enum: `UnsupportedFormat`, `CopyFailed`, `NoCampaignDir`                                                                                          |
+| `AudioEditorState` | Central state: `sfx_mappings`, `music_mappings`, `imported_files`, `selected_file`, `preview_volume`, `status_message`, `unsaved_changes`, `loaded_from_file` |
+
+Methods on `AudioEditorState`:
+
+- `new()` — pre-populates 5 SFX rows (from `AudioManifest::well_known_sfx_ids()`) + 2 music rows
+- `load_from_map(&AudioMap)` — fills `mapped_file` from an `AudioMap`
+- `to_audio_map() -> AudioMap` — serialises non-empty rows back
+- `refresh_imported_files(&Path)` — scans `assets/audio/` for `.ogg/.mp3/.wav/.flac` files
+- `import_audio_file(&Path, &Path) -> Result<(), AudioImportError>` — copies file, updates list
+
+**`sdk/campaign_builder/src/lib.rs`**:
+
+- `pub mod audio_editor;` registered
+- `pub audio_file: String` added to `CampaignMetadata` with `#[serde(default)]` defaulting to `"data/audio.ron"`
+- `app.load_audio()` called in the `--campaign` auto-load path
+
+**`sdk/campaign_builder/src/editor_state.rs`**:
+
+- `pub audio_editor_state: audio_editor::AudioEditorState` added to `EditorRegistry`
+- Initialised in `Default` with `AudioEditorState::new()`
+
+**`sdk/campaign_builder/src/campaign_io.rs`**:
+
+- `pub fn load_audio()` — reads and parses `data/audio.ron`; missing file = silent OK; sets `loaded_from_file = true` on success
+- `pub fn save_audio() -> Result<(), CampaignIoError>` — serialises `to_audio_map()` via `write_ron_to_path`
+- `do_open_campaign` — now calls `self.load_audio()` after `load_furniture()`
+- `do_save_campaign` — guarded save following SDK Rule 17: `loaded_from_file || unsaved_changes`
+
+### New Tests
+
+6 unit tests in `audio_editor::tests`:
+
+| Test                                                           | Verifies                                            |
+| -------------------------------------------------------------- | --------------------------------------------------- |
+| `test_audio_editor_state_new_contains_all_engine_sfx_ids`      | All 7 engine IDs pre-populated across sfx+music     |
+| `test_load_from_map_fills_mapped_file_fields`                  | `load_from_map` fills mapped rows, clears unmatched |
+| `test_to_audio_map_skips_rows_with_empty_mapped_file`          | Only non-empty rows appear in the serialised map    |
+| `test_import_audio_file_copies_file_and_adds_to_imported_list` | File copied, filename added, `unsaved_changes` set  |
+| `test_import_audio_file_rejects_unsupported_extension`         | `.txt` rejected with `UnsupportedFormat`            |
+| `test_refresh_imported_files_scans_directory`                  | `.ogg`/`.mp3` found, `.txt` excluded                |
+
+### Validation
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — clean
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean
+- `cargo nextest run --all-features` — 5641 passed (campaign_builder lib tests excluded by nextest due to eframe)
+- `cargo test --lib` (in `sdk/campaign_builder`) — 2024 passed, 0 failed (includes all 6 new tests)
+
+---
+
 ## Audio Manager — Phase 2: Game Integration — Load and Apply `AudioMap`
 
 ### Files Changed
