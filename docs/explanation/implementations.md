@@ -1,3 +1,72 @@
+## Audio RON & SFX Mapping — Phase 4: Test Fixtures and Integration Tests
+
+### Files Changed
+
+- `data/test_campaign/audio.ron` — **new** minimal manifest fixture
+- `src/sdk/campaign_loader.rs` — fixed Phase 2 test + 2 new Phase 4 integration tests
+- `campaigns/config.template.ron` — added `audio.ron` documentation comment block
+- `data/config.template.ron` — added matching `audio.ron` documentation comment block
+
+### What Was Built
+
+**`data/test_campaign/audio.ron`** — stable fixture at the campaign root (alongside `campaign.ron` / `config.ron`):
+
+```ron
+AudioManifest(
+    sfx_mappings: {
+        "combat_hit": "test_hit.ogg",
+    },
+    music_tracks: {
+        "combat_theme": "test_battle.ogg",
+    },
+)
+```
+
+Intentionally short filenames so tests can assert exact string equality.
+
+**`src/sdk/campaign_loader.rs`** changes:
+
+1. `test_campaign_load_without_audio_ron_sets_manifest_to_none` — **updated** from loading `data/test_campaign` (which now has `audio.ron`) to using a `tempfile::tempdir()` with only `campaign.ron`, keeping the test stable regardless of future fixture changes.
+
+2. `test_campaign_load_test_campaign_populates_audio_manifest` — **new Phase 4 integration test**; loads `data/test_campaign` via `CampaignLoader`; asserts `audio_manifest.is_some()`, verifies `resolve_sfx("combat_hit") == Some("test_hit.ogg")`, `resolve_music("combat_theme") == Some("test_battle.ogg")`, and unmapped id returns `None`.
+
+3. `test_audio_manifest_missing_file_gives_none` — **new Phase 4 integration test**; uses isolated temp dir with no `audio.ron`; asserts `audio_manifest.is_none()`.
+
+**Config template updates** — both `campaigns/config.template.ron` and `data/config.template.ron` received an "Optional Companion Files" comment block before `GameConfig(` documenting `audio.ron` format and linking to the implementation plan. RON `//` comments do not affect parsing; `test_config_template_is_valid_ron` continues to pass.
+
+### Zero references to `campaigns/tutorial` in any new test (Implementation Rule 5 ✓)
+
+### Tests Added / Updated
+
+| Test                                                         | Location               | Status                  |
+| ------------------------------------------------------------ | ---------------------- | ----------------------- |
+| `test_campaign_load_without_audio_ron_sets_manifest_to_none` | `sdk::campaign_loader` | Updated → uses temp dir |
+| `test_campaign_load_test_campaign_populates_audio_manifest`  | `sdk::campaign_loader` | New                     |
+| `test_audio_manifest_missing_file_gives_none`                | `sdk::campaign_loader` | New                     |
+
+### Quality Gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -E 'test(audio_manifest) | test(audio) | test(campaign_load_test_campaign)'` — **37/37 passed** (all audio/manifest tests across all 4 phases)
+- `cargo nextest run -E 'test(config_template)'` — 1/1 passed
+- `cargo nextest run -E 'test(validate_tutorial)'` — 1/1 passed
+
+### Affected Files Summary (all 4 phases)
+
+| File                            | Phase | Change                                                                                                                               |
+| ------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/sdk/game_config.rs`        | 1     | `AudioManifest` struct + 4 methods + 8 tests                                                                                         |
+| `src/sdk/campaign_loader.rs`    | 2+4   | `Campaign::audio_manifest` field; `load_audio_manifest` helper; 5 tests                                                              |
+| `src/game/systems/audio.rs`     | 3     | `AudioManifestResource`; updated `AudioPlugin`; 3-arg `resolve_audio_path`; updated `handle_audio_messages`; 5 new + 5 updated tests |
+| `src/bin/antares.rs`            | 3     | Pass `campaign.audio_manifest` to `AudioPlugin`                                                                                      |
+| `data/test_campaign/audio.ron`  | 4     | New fixture file                                                                                                                     |
+| `campaigns/config.template.ron` | 4     | `audio.ron` documentation comment                                                                                                    |
+| `data/config.template.ron`      | 4     | `audio.ron` documentation comment                                                                                                    |
+
+---
+
 ## Audio RON & SFX Mapping — Phase 3: Bevy Integration — `AudioManifestResource` and Updated `resolve_audio_path`
 
 ### Files Changed

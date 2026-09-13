@@ -7,6 +7,39 @@
 // All values shown are defaults. You can omit any section to use defaults.
 // This file uses RON (Rusty Object Notation) format.
 
+// ============================================================================
+// Optional Companion Files
+// ============================================================================
+//
+// In addition to config.ron (this file), a campaign may include the following
+// optional file at the campaign root:
+//
+//   audio.ron  ──  SFX and music remapping manifest
+//   ─────────────────────────────────────────────────────────────────────────
+//   Maps built-in engine SFX and music event IDs to campaign-specific audio
+//   files. When absent, the engine resolves IDs directly as filenames using
+//   the filename-by-convention approach (id → {audio_dir}/{id}.ogg).
+//
+//   Full format reference and list of well-known engine IDs:
+//   docs/explanation/audio_ron_sfx_mapping_implementation_plan.md
+//
+//   Minimal example (save as audio.ron at your campaign root):
+//
+//   AudioManifest(
+//       sfx_mappings: {
+//           "combat_hit":      "sounds/heavy_impact.wav",
+//           "combat_miss":     "sounds/whoosh.ogg",
+//           "combat_heal":     "sounds/heal_chime.ogg",
+//           "spell_fizzle":    "sounds/fizzle.ogg",
+//           "victory_fanfare": "sounds/victory.mp3",
+//       },
+//       music_tracks: {
+//           "combat_theme":      "music/battle_theme.ogg",
+//           "exploration_theme": "music/overworld.ogg",
+//       },
+//   )
+//
+
 GameConfig(
     // ========================================================================
     // Graphics and Rendering Configuration

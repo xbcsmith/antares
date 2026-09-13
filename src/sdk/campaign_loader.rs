@@ -1412,11 +1412,13 @@ mod tests {
 
     #[test]
     fn test_campaign_load_without_audio_ron_sets_manifest_to_none() {
-        // `data/test_campaign` has no audio.ron — audio_manifest must be None.
-        let campaign = CampaignLoader::new("data")
-            .load_campaign("test_campaign")
-            .expect("failed to load data/test_campaign");
-
+        // A campaign directory without audio.ron must yield audio_manifest = None.
+        // Uses a temp dir so the result is not affected by future fixture changes.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_minimal_campaign_ron(dir.path());
+        // Deliberately do NOT create audio.ron in this directory.
+        let campaign =
+            Campaign::load(dir.path()).expect("campaign without audio.ron must load successfully");
         assert!(
             campaign.audio_manifest.is_none(),
             "audio_manifest must be None when audio.ron is absent from the campaign directory"
@@ -1479,6 +1481,52 @@ mod tests {
             matches!(result, Err(CampaignLoadError::MetadataError(_))),
             "malformed audio.ron must produce CampaignLoadError::MetadataError, got {:?}",
             result
+        );
+    }
+
+    // ── Phase 4: audio.ron fixture integration tests ──────────────────────────
+
+    #[test]
+    fn test_campaign_load_test_campaign_populates_audio_manifest() {
+        // data/test_campaign/audio.ron exists; the manifest must be loaded and populated.
+        let campaign = CampaignLoader::new("data")
+            .load_campaign("test_campaign")
+            .expect("failed to load data/test_campaign");
+
+        let manifest = campaign
+            .audio_manifest
+            .as_ref()
+            .expect("data/test_campaign has audio.ron so audio_manifest must be Some");
+
+        assert_eq!(
+            manifest.resolve_sfx("combat_hit"),
+            Some("test_hit.ogg"),
+            "resolve_sfx must return the value mapped in data/test_campaign/audio.ron"
+        );
+        assert_eq!(
+            manifest.resolve_music("combat_theme"),
+            Some("test_battle.ogg"),
+            "resolve_music must return the value mapped in data/test_campaign/audio.ron"
+        );
+        // IDs absent from the manifest fall back to filename-by-convention (return None here).
+        assert_eq!(
+            manifest.resolve_sfx("combat_miss"),
+            None,
+            "resolve_sfx must return None for IDs absent from the manifest"
+        );
+    }
+
+    #[test]
+    fn test_audio_manifest_missing_file_gives_none() {
+        // When audio.ron is absent from a campaign directory, audio_manifest must be None.
+        // Uses an isolated temp dir so the test never depends on fixture file presence.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_minimal_campaign_ron(dir.path());
+        // No audio.ron written — confirm the absent-file path.
+        let campaign = Campaign::load(dir.path()).expect("campaign without audio.ron must load");
+        assert!(
+            campaign.audio_manifest.is_none(),
+            "audio_manifest must be None when audio.ron is absent"
         );
     }
 }
