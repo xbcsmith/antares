@@ -1,0 +1,13 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// AudioMap fixture for data/test_campaign/data/audio.ron
+// Maps engine event IDs to test-campaign-specific audio filenames (AudioMap format).
+(
+    sfx: {
+        "combat_hit": "test_hit.ogg",
+    },
+    music: {
+        "combat_theme": "test_battle.ogg",
+    },
+)

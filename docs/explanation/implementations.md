@@ -1,3 +1,53 @@
+## Audio Manager — Phase 2: Game Integration — Load and Apply `AudioMap`
+
+### Files Changed
+
+- `src/game/systems/audio.rs` — added `AudioMapResource`, `audio_map` field to `AudioPlugin`, updated `handle_audio_messages` to consult `AudioMapResource` first
+- `src/bin/antares.rs` — loads `data/audio.ron` as `AudioMap` at startup and passes it to `AudioPlugin`
+- `data/test_campaign/data/audio.ron` — **new** `AudioMap`-format fixture
+
+### What Was Built
+
+**`AudioMapResource(pub Option<AudioMap>)`** — new Bevy resource wrapping the domain-layer `AudioMap` (Phase 1). Inserted by `AudioPlugin` at startup. `None` when `data/audio.ron` is absent.
+
+**`AudioPlugin::audio_map: Option<AudioMap>`** — new field. `AudioPlugin::build()` now inserts `AudioMapResource(self.audio_map.clone())`.
+
+**`handle_audio_messages` update** — both the Music and SFX paths now resolve IDs with a three-tier priority:
+
+1. `AudioMapResource` (domain layer — loaded from `data/audio.ron`)
+2. `AudioManifestResource` (SDK layer — loaded from `audio.ron` at campaign root)
+3. Bare engine event ID (filename-by-convention)
+
+Campaigns without `data/audio.ron` behave exactly as before.
+
+**`src/bin/antares.rs` startup** — after loading the campaign, loads `{campaign.root_path}/{campaign.data.audio}` (default `data/audio.ron`) as an `AudioMap` via `ron::from_str`. Missing file → silent `None`; parse error → `eprintln!` warning and `None`. Passed as `audio_map` to `AudioPlugin`.
+
+**`data/test_campaign/data/audio.ron`** — fixture in `AudioMap` format:
+
+```ron
+(
+    sfx: { "combat_hit": "test_hit.ogg" },
+    music: { "combat_theme": "test_battle.ogg" },
+)
+```
+
+### New Tests (in `src/game/systems/audio.rs`)
+
+| Test                                                       | Verifies                                                                         |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `test_audio_map_resource_resolves_sfx_through_mapping`     | `AudioMapResource` with a mapping resolves SFX ID correctly                      |
+| `test_audio_map_resource_falls_back_to_id_when_no_mapping` | `AudioMapResource(None)` has no inner map                                        |
+| `test_audio_plugin_with_audio_map_inserts_resource`        | `AudioPlugin` with `audio_map: Some(...)` inserts a populated `AudioMapResource` |
+
+### Validation
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — clean
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean
+- `cargo nextest run --all-features` — 5641 tests passed, 0 failed
+
+---
+
 ## Audio Manager — Phase 1: Domain `AudioMap` Struct and `audio.ron` Format
 
 ### Files Changed
