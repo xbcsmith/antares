@@ -72,8 +72,8 @@ pub use dialogue_editor::{
 };
 pub use error_formatter::{ErrorContext, ErrorFormatter, ProgressReporter};
 pub use game_config::{
-    AudioConfig, CameraConfig, CameraMode, ControlsConfig, GameConfig, GameConfigError,
-    GraphicsConfig, ShadowQuality,
+    AudioConfig, AudioManifest, CameraConfig, CameraMode, ControlsConfig, GameConfig,
+    GameConfigError, GraphicsConfig, ShadowQuality,
 };
 pub use map_editor::{
     browse_items, browse_maps, browse_monsters, browse_spells, is_valid_item_id, is_valid_map_id,
