@@ -103,6 +103,36 @@ fn main() {
     let audio_dir = campaign.assets.audio.clone();
     let audio_manifest = campaign.audio_manifest.clone();
 
+    // Load the domain-layer AudioMap from data/audio.ron inside the campaign.
+    // A missing file is not an error — campaigns without data/audio.ron fall back
+    // to AudioManifestResource (SDK layer) then to filename-by-convention.
+    let audio_map_path = campaign.root_path.join(&campaign.data.audio);
+    let audio_map: Option<antares::domain::AudioMap> = if audio_map_path.exists() {
+        match std::fs::read_to_string(&audio_map_path) {
+            Err(e) => {
+                eprintln!(
+                    "Warning: could not read {}: {}",
+                    audio_map_path.display(),
+                    e
+                );
+                None
+            }
+            Ok(contents) => match ron::from_str::<antares::domain::AudioMap>(&contents) {
+                Ok(map) => Some(map),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: could not parse {}: {}",
+                        audio_map_path.display(),
+                        e
+                    );
+                    None
+                }
+            },
+        }
+    } else {
+        None
+    };
+
     // Configure window plugin from graphics config
     let window_plugin = WindowPlugin {
         primary_window: Some(Window {
@@ -196,6 +226,7 @@ fn main() {
         config: audio_config,
         audio_dir,
         audio_manifest,
+        audio_map,
     })
     .add_plugins(antares::game::systems::ui::UiPlugin);
 
