@@ -321,6 +321,13 @@ pub struct CampaignData {
     /// Skill definitions data file
     #[serde(default = "default_skills_path")]
     pub skills: String,
+
+    /// Audio mapping data file.
+    ///
+    /// Defaults to `"data/audio.ron"` — campaigns without this file use
+    /// filename-by-convention audio resolution.
+    #[serde(default = "default_audio_file_path")]
+    pub audio: String,
 }
 
 fn default_items_path() -> String {
@@ -373,6 +380,10 @@ fn default_landscape_path() -> String {
 
 fn default_skills_path() -> String {
     "data/skills.ron".to_string()
+}
+
+fn default_audio_file_path() -> String {
+    "data/audio.ron".to_string()
 }
 
 /// Asset paths within campaign
@@ -476,6 +487,7 @@ impl Default for CampaignData {
             furniture: default_furniture_path(),
             landscape: default_landscape_path(),
             skills: default_skills_path(),
+            audio: default_audio_file_path(),
         }
     }
 }
@@ -677,6 +689,12 @@ pub struct CampaignMetadata {
     /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
     #[serde(default = "default_starting_time")]
     pub starting_time: GameTime,
+    /// Audio mapping data file.
+    ///
+    /// Defaults to `"data/audio.ron"` so existing `campaign.ron` files
+    /// that lack this field continue to deserialize correctly.
+    #[serde(default = "default_audio_file_path")]
+    pub audio_file: String,
 }
 
 impl TryFrom<CampaignMetadata> for Campaign {
@@ -746,6 +764,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 furniture: metadata.furniture_file,
                 landscape: metadata.landscape_file,
                 skills: metadata.skills_file,
+                audio: metadata.audio_file,
             },
             assets: CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
@@ -1178,6 +1197,7 @@ mod tests {
             furniture: default_furniture_path(),
             landscape: default_landscape_path(),
             skills: default_skills_path(),
+            audio: default_audio_file_path(),
         };
 
         assert_eq!(data.items, "data/items.ron");
@@ -1186,6 +1206,7 @@ mod tests {
         assert_eq!(data.characters, "data/characters.ron");
         assert_eq!(data.landscape, "data/landscape.ron");
         assert_eq!(data.skills, "data/skills.ron");
+        assert_eq!(data.audio, "data/audio.ron");
     }
 
     #[test]
@@ -1296,6 +1317,7 @@ mod tests {
             landscape_file: "data/landscape.ron".to_string(),
             skills_file: "data/skills.ron".to_string(),
             starting_time: GameTime::new(1, 8, 0),
+            audio_file: "data/audio.ron".to_string(),
         };
 
         let result: Result<Campaign, String> = metadata.try_into();
@@ -1517,6 +1539,46 @@ mod tests {
             manifest.resolve_sfx("combat_miss"),
             None,
             "resolve_sfx must return None for IDs absent from the manifest"
+        );
+    }
+
+    #[test]
+    fn test_campaign_metadata_audio_file_defaults_to_data_audio_ron() {
+        // A CampaignMetadata RON without audio_file must deserialize with the
+        // default value "data/audio.ron".
+        let ron = r#"CampaignMetadata(
+    id: "test",
+    name: "Test",
+    version: "1.0.0",
+    author: "Tester",
+    description: "desc",
+    engine_version: "0.1.0",
+    starting_map: "1",
+    starting_position: (0, 0),
+    starting_direction: "North",
+    starting_gold: 100,
+    starting_food: 10,
+    max_party_size: 6,
+    max_roster_size: 20,
+    difficulty: Normal,
+    permadeath: false,
+    allow_multiclassing: false,
+    starting_level: 1,
+    max_level: 20,
+    items_file: "data/items.ron",
+    spells_file: "data/spells.ron",
+    monsters_file: "data/monsters.ron",
+    classes_file: "data/classes.ron",
+    races_file: "data/races.ron",
+    maps_dir: "data/maps",
+    quests_file: "data/quests.ron",
+    dialogue_file: "data/dialogues.ron",
+)"#;
+        let metadata: CampaignMetadata =
+            ron::from_str(ron).expect("CampaignMetadata without audio_file must deserialize");
+        assert_eq!(
+            metadata.audio_file, "data/audio.ron",
+            "audio_file must default to \"data/audio.ron\" when absent from RON"
         );
     }
 

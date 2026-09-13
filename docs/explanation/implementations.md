@@ -1,3 +1,44 @@
+## Audio Manager — Phase 1: Domain `AudioMap` Struct and `audio.ron` Format
+
+### Files Changed
+
+- `src/domain/audio.rs` — **new** `AudioMap` domain struct
+- `src/domain/mod.rs` — exported `AudioMap`
+- `src/sdk/campaign_loader.rs` — added `audio_file` to `CampaignMetadata`; `audio` to `CampaignData`; propagated through `TryFrom` and `Default`
+
+### What Was Built
+
+**`src/domain/audio.rs`** — canonical domain type for `data/audio.ron`:
+
+- `AudioMap` struct with `pub sfx: BTreeMap<String, String>` (engine SFX event ID → filename) and `pub music: BTreeMap<String, String>` (music track ID → filename). Derives `Debug, Clone, Default, Serialize, Deserialize, PartialEq`; both fields carry `#[serde(default)]`.
+- `resolve_sfx(&self, engine_id: &str) -> Option<&str>` — looks up a SFX event ID; returns `None` for the filename-by-convention fallback.
+- `resolve_music(&self, track_id: &str) -> Option<&str>` — same for music tracks.
+- `default_sfx_ids() -> &'static [&'static str]` — all **seven** well-known engine event IDs (`combat_hit`, `combat_miss`, `combat_heal`, `spell_fizzle`, `victory_fanfare`, `combat_theme`, `exploration_theme`) used by the SDK to seed a new mapping table.
+- RON round-trip doctest plus four unit tests covering all specified cases.
+
+**`src/domain/mod.rs`** — `pub mod audio;` (alphabetically before `campaign`) and `pub use audio::AudioMap;` re-export.
+
+**`src/sdk/campaign_loader.rs`** additions (all backward-compatible via `#[serde(default)]`):
+
+| Item                                    | Location      | Default                     |
+| --------------------------------------- | ------------- | --------------------------- |
+| `CampaignData::audio: String`           | end of struct | `"data/audio.ron"`          |
+| `Default for CampaignData`              | `audio` arm   | `default_audio_file_path()` |
+| `CampaignMetadata::audio_file: String`  | end of struct | `"data/audio.ron"`          |
+| `TryFrom<CampaignMetadata>` propagation | `data` block  | `metadata.audio_file`       |
+
+New test `test_campaign_metadata_audio_file_defaults_to_data_audio_ron` verifies that an existing `campaign.ron` RON without the field deserialises to `"data/audio.ron"`. Existing `test_campaign_data_defaults` extended with `audio` assertion.
+
+### Validation
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — clean
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean
+- `cargo nextest run --all-features` — 5638 tests passed, 0 failed
+- `cargo test --doc --all-features -- domain::audio` — 4 doctests passed
+
+---
+
 ## Audio RON & SFX Mapping — Phase 4: Test Fixtures and Integration Tests
 
 ### Files Changed

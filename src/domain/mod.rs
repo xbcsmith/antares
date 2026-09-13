@@ -19,6 +19,7 @@
 //! - `campaign_loader`: Campaign loading system (game data loading)
 //! - `skills`: Skill system (level-scaled numeric character capabilities)
 
+pub mod audio;
 pub mod campaign;
 pub mod campaign_loader;
 pub mod character;
@@ -47,6 +48,9 @@ pub mod types;
 pub mod validation;
 pub mod visual;
 pub mod world;
+
+// Re-export audio types
+pub use audio::AudioMap;
 
 // Re-export commonly used types from submodules
 pub use character_definition::{
