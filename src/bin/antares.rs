@@ -110,8 +110,8 @@ fn main() {
     let audio_map: Option<antares::domain::AudioMap> = if audio_map_path.exists() {
         match std::fs::read_to_string(&audio_map_path) {
             Err(e) => {
-                eprintln!(
-                    "Warning: could not read {}: {}",
+                tracing::warn!(
+                    "could not read audio map at {}: {}",
                     audio_map_path.display(),
                     e
                 );
@@ -120,8 +120,8 @@ fn main() {
             Ok(contents) => match ron::from_str::<antares::domain::AudioMap>(&contents) {
                 Ok(map) => Some(map),
                 Err(e) => {
-                    eprintln!(
-                        "Warning: could not parse {}: {}",
+                    tracing::warn!(
+                        "could not parse audio map at {}: {}",
                         audio_map_path.display(),
                         e
                     );
@@ -130,6 +130,10 @@ fn main() {
             },
         }
     } else {
+        tracing::debug!(
+            "No audio map found at {}; falling back to filename-by-convention",
+            audio_map_path.display()
+        );
         None
     };
 

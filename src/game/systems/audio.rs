@@ -947,12 +947,27 @@ mod tests {
 
     #[test]
     fn test_audio_map_resource_falls_back_to_id_when_no_mapping() {
-        // AudioMapResource(None) holds no map; callers must fall back to the bare event ID.
+        // AudioMapResource(None) holds no map; resolve_sfx/resolve_music must return None
+        // for every engine ID, signalling to callers that they must use the bare event ID.
         let resource = AudioMapResource(None);
         assert!(
             resource.0.is_none(),
             "AudioMapResource(None) must have no inner map"
         );
+        // Verify that querying through the Option<AudioMap> layer returns None for all
+        // well-known engine IDs — confirming callers will fall back to the bare ID.
+        for engine_id in AudioMap::default_sfx_ids() {
+            assert_eq!(
+                resource.0.as_ref().and_then(|m| m.resolve_sfx(engine_id)),
+                None,
+                "resolve_sfx({engine_id:?}) through None map must return None"
+            );
+            assert_eq!(
+                resource.0.as_ref().and_then(|m| m.resolve_music(engine_id)),
+                None,
+                "resolve_music({engine_id:?}) through None map must return None"
+            );
+        }
     }
 
     #[test]
