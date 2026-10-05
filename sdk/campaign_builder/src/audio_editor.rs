@@ -227,6 +227,11 @@ pub struct AudioEditorState {
     /// during this session (SDK Rule 17).
     pub loaded_from_file: bool,
 
+    /// When `true`, `show_audio_editor` will attempt to load `data/audio.ron`
+    /// automatically on the first frame the Audio tab is rendered.  Cleared by
+    /// `load_audio` on completion and by `reset_for_new_campaign` (SDK Rule 13).
+    pub needs_initial_load: bool,
+
     /// In-editor audio preview player; plays files from `assets/audio/`.
     pub preview_player: AudioPreviewPlayer,
 }
@@ -277,8 +282,40 @@ impl AudioEditorState {
             status_message: String::new(),
             unsaved_changes: false,
             loaded_from_file: false,
+            needs_initial_load: true,
             preview_player: AudioPreviewPlayer::new(),
         }
+    }
+
+    /// Resets all editor state for a new or freshly-opened campaign.
+    ///
+    /// Clears all mapping rows, imported files, selection state, status messages,
+    /// and bookkeeping flags, then re-populates the mapping rows from the
+    /// well-known engine event IDs (same as [`Self::new`]).  Sets
+    /// `needs_initial_load = true` so `show_audio_editor` will auto-load
+    /// `data/audio.ron` on the first frame the Audio tab is rendered.
+    ///
+    /// Must be called from both `do_new_campaign` and `do_open_campaign` to
+    /// prevent stale data from a previous campaign leaking into the new one
+    /// (SDK Rule 13).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::audio_editor::AudioEditorState;
+    ///
+    /// let mut state = AudioEditorState::new();
+    /// state.unsaved_changes = true;
+    /// state.status_message = "old message".to_string();
+    ///
+    /// state.reset_for_new_campaign();
+    ///
+    /// assert!(!state.unsaved_changes);
+    /// assert!(state.status_message.is_empty());
+    /// assert!(state.needs_initial_load);
+    /// ```
+    pub fn reset_for_new_campaign(&mut self) {
+        *self = Self::new();
     }
 
     /// Populates mapping rows from an [`AudioMap`] loaded from `data/audio.ron`.

@@ -1818,12 +1818,33 @@ impl GameState {
         // Mark as encountered to prevent re-recruitment
         self.encountered_characters.insert(character_id.to_string());
 
+        // Premade characters are already in the roster (at the starting inn).
+        // Reuse that entry instead of adding a duplicate, otherwise the same
+        // character appears both in the party and in the inn's recruit list.
+        let existing_index = self
+            .roster
+            .characters
+            .iter()
+            .position(|c| c.name == character.name);
+
         // Determine where to place the character
         if self.party.size() < crate::domain::character::Party::MAX_MEMBERS {
             // Party has room - add directly to party
-            self.party.add_member(character.clone())?;
-            self.roster
-                .add_character(character, CharacterLocation::InParty)?;
+            match existing_index {
+                Some(idx) => {
+                    if self.roster.character_locations[idx] != CharacterLocation::InParty {
+                        let existing = self.roster.characters[idx].clone();
+                        self.party.add_member(existing)?;
+                        self.roster
+                            .update_location(idx, CharacterLocation::InParty)?;
+                    }
+                }
+                None => {
+                    self.party.add_member(character.clone())?;
+                    self.roster
+                        .add_character(character, CharacterLocation::InParty)?;
+                }
+            }
 
             Ok(RecruitResult::AddedToParty)
         } else {
@@ -1832,8 +1853,18 @@ impl GameState {
                 .find_nearest_inn()
                 .unwrap_or("tutorial_innkeeper_town".to_string()); // Fallback to tutorial innkeeper ID if no campaign
 
-            self.roster
-                .add_character(character, CharacterLocation::AtInn(inn_id.clone()))?;
+            match existing_index {
+                Some(idx) => {
+                    if self.roster.character_locations[idx] != CharacterLocation::InParty {
+                        self.roster
+                            .update_location(idx, CharacterLocation::AtInn(inn_id.clone()))?;
+                    }
+                }
+                None => {
+                    self.roster
+                        .add_character(character, CharacterLocation::AtInn(inn_id.clone()))?;
+                }
+            }
 
             Ok(RecruitResult::SentToInn(inn_id))
         }
@@ -3758,6 +3789,37 @@ mod tests {
 
         // Party size should have decreased by one
         assert_eq!(state.party.size(), 1);
+    }
+
+    #[test]
+    fn test_recruit_from_map_premade_reuses_roster_entry_no_duplicate() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
+        let campaign = loader
+            .load_campaign("test_campaign")
+            .expect("Failed to load test campaign");
+        let (mut state, db) = GameState::new_game(campaign).expect("new_game should succeed");
+
+        // "Whisper" is a premade that starts at the inn, so she already has a roster entry.
+        let roster_len = state.roster.characters.len();
+        let result = state
+            .recruit_from_map("whisper", &db)
+            .expect("recruit should succeed");
+        assert!(matches!(result, RecruitResult::AddedToParty));
+
+        assert_eq!(state.roster.characters.len(), roster_len);
+        let entries: Vec<_> = state
+            .roster
+            .characters
+            .iter()
+            .zip(&state.roster.character_locations)
+            .filter(|(c, _)| c.name == "Whisper")
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            *entries[0].1,
+            crate::domain::character::CharacterLocation::InParty
+        );
+        assert!(state.party.members.iter().any(|c| c.name == "Whisper"));
     }
 
     #[test]

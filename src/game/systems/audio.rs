@@ -360,6 +360,7 @@ impl AudioSettings {
 ///     config: audio_config,
 ///     audio_dir: "assets/audio".to_string(),
 ///     audio_manifest: None,
+///     audio_map: None,
 /// });
 /// # }
 /// ```

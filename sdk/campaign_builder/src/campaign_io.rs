@@ -2132,19 +2132,22 @@ impl CampaignBuilderApp {
                             audio_state.refresh_imported_files(dir);
                             self.logger
                                 .info(category::FILE_IO, "Loaded audio map from data/audio.ron");
-                            self.ui_state.status_message = "Loaded audio map".to_string();
                         }
                         Err(e) => {
-                            let msg = format!("Failed to parse audio.ron: {}", e);
-                            self.ui_state.status_message = msg.clone();
-                            self.logger.warn(category::FILE_IO, &msg);
+                            // Rule 13: parse errors go to logger, NOT status_message.
+                            self.logger.warn(
+                                category::FILE_IO,
+                                &format!("Failed to parse audio.ron: {}", e),
+                            );
                             audio_state.refresh_imported_files(dir);
                         }
                     },
                     Err(e) => {
-                        let msg = format!("Failed to read audio.ron: {}", e);
-                        self.ui_state.status_message = msg.clone();
-                        self.logger.warn(category::FILE_IO, &msg);
+                        // Rule 13: I/O errors go to logger, NOT status_message.
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to read audio.ron: {}", e),
+                        );
                     }
                 }
             } else {
@@ -2155,6 +2158,9 @@ impl CampaignBuilderApp {
             }
         }
 
+        // Rule 13: clear the auto-load flag so show_audio_editor does not re-read
+        // the file on every subsequent frame.
+        audio_state.needs_initial_load = false;
         self.editor_registry.audio_editor_state = audio_state;
     }
 
@@ -3167,6 +3173,12 @@ impl CampaignBuilderApp {
             .reset_for_new_campaign();
         self.campaign_data.levels.clear();
 
+        // Reset audio editor for the same reason — prevent stale data from a
+        // previous campaign leaking into the new campaign workspace (SDK Rule 13).
+        self.editor_registry
+            .audio_editor_state
+            .reset_for_new_campaign();
+
         self.campaign = CampaignMetadata::default();
 
         // Sync the campaign editor's authoritative metadata and edit buffer with
@@ -3374,10 +3386,23 @@ impl CampaignBuilderApp {
         }
 
         // Guard: only write audio map if it was successfully loaded from disk
-        // this session OR the user made explicit in-editor changes. Without the
-        // guard an all-empty default map would overwrite a valid data/audio.ron.
-        let should_save_audio = self.editor_registry.audio_editor_state.loaded_from_file
-            || self.editor_registry.audio_editor_state.unsaved_changes;
+        // this session OR the campaign has non-empty audio mappings authored by
+        // the user.  Without the guard a default-empty AudioMap would overwrite
+        // a valid data/audio.ron (SDK Rule 17 — mirrors the creatures guard).
+        let has_audio_data = self
+            .editor_registry
+            .audio_editor_state
+            .sfx_mappings
+            .iter()
+            .any(|r| !r.mapped_file.is_empty())
+            || self
+                .editor_registry
+                .audio_editor_state
+                .music_mappings
+                .iter()
+                .any(|r| !r.mapped_file.is_empty());
+        let should_save_audio =
+            self.editor_registry.audio_editor_state.loaded_from_file || has_audio_data;
         if should_save_audio {
             if let Err(e) = self.save_audio() {
                 save_warnings.push(format!("Audio: {}", e));
@@ -3586,6 +3611,11 @@ impl CampaignBuilderApp {
                     self.load_maps();
                     self.load_conditions();
                     self.load_furniture();
+                    // Rule 13: reset audio state before loading so stale data
+                    // from a previous campaign cannot survive into the new one.
+                    self.editor_registry
+                        .audio_editor_state
+                        .reset_for_new_campaign();
                     self.load_audio();
                     self.editor_registry
                         .landscape_editor_state

@@ -76,9 +76,6 @@ pub enum GameError {
     SkillTraining(#[from] crate::application::skill_training::SkillTrainingError),
 
     // ---- domain layer ----
-    /// Loading or resolving a campaign (domain view) failed.
-    #[error(transparent)]
-    Campaign(#[from] crate::domain::campaign_loader::CampaignError),
     /// A character definition was invalid.
     #[error(transparent)]
     CharacterDefinition(#[from] crate::domain::character_definition::CharacterDefinitionError),

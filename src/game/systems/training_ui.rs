@@ -52,7 +52,6 @@ use crate::application::TrainingState;
 use crate::domain::character::{Character, Party};
 use crate::domain::levels::LevelDatabase;
 use crate::domain::progression::experience_for_level_with_config;
-use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
@@ -471,8 +470,8 @@ fn render_training_footer(
 /// - `global_state`  — read-only game state; party, campaign config, and
 ///   training session state are read here.
 /// - `nav_state`     — keyboard-focus state for arrow-key navigation.
-/// - `content`       — campaign content; NPC database for trainer lookups.
-/// - `game_data`     — optional per-class XP table; `None` uses the formula.
+/// - `content`       — campaign content; NPC database for trainer lookups and
+///   the per-class XP table (empty table behaves like the formula fallback).
 /// - `train_events`  — writer for [`TrainCharacter`] events.
 /// - `exit_events`   — writer for [`ExitTraining`] events.
 /// - `select_events` — writer for [`SelectTrainingMember`] events.
@@ -482,7 +481,6 @@ fn training_ui_system(
     global_state: Res<GlobalState>,
     nav_state: Res<TrainingNavState>,
     content: Res<GameContent>,
-    game_data: Option<Res<GameDataResource>>,
     mut train_events: MessageWriter<TrainCharacter>,
     mut exit_events: MessageWriter<ExitTraining>,
     mut select_events: MessageWriter<SelectTrainingMember>,
@@ -498,10 +496,9 @@ fn training_ui_system(
         Err(_) => return,
     };
 
-    // Extract optional per-class XP table for threshold display.
-    let level_db: Option<&LevelDatabase> = game_data
-        .as_deref()
-        .and_then(|gd| gd.data().levels.as_ref());
+    // Per-class XP table for threshold display; an empty table (no
+    // `levels.ron`) behaves identically to the formula fallback.
+    let level_db: Option<&LevelDatabase> = Some(&content.db().levels);
 
     // Look up the trainer NPC name for the header.
     let npc = content.db().npcs.get_npc(&training_state.npc_id);
@@ -624,7 +621,6 @@ fn training_action_system(
     mut exit_events: MessageReader<ExitTraining>,
     mut global_state: ResMut<GlobalState>,
     content: Res<GameContent>,
-    game_data: Option<Res<GameDataResource>>,
     mut game_log: Option<ResMut<GameLog>>,
 ) {
     // Bail early when not in Training mode — nothing to do.
@@ -633,11 +629,9 @@ fn training_action_system(
         _ => return,
     };
 
-    // Extract the optional per-class XP table.
-    // The `game_data` binding must outlive `level_db`.
-    let level_db: Option<&LevelDatabase> = game_data
-        .as_deref()
-        .and_then(|gd| gd.data().levels.as_ref());
+    // Per-class XP table; an empty table (no `levels.ron`) behaves
+    // identically to the formula fallback.
+    let level_db: Option<&LevelDatabase> = Some(&content.db().levels);
 
     let mut rng = rng();
 

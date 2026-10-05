@@ -2726,10 +2726,28 @@ impl CampaignBuilderApp {
     /// - Center (fill): SFX event-ID → audio-file mapping table
     /// - Right (260 px): music-track → audio-file mapping table + global volume sliders
     ///
-    /// All `ScrollArea`s carry an `id_salt`; all loop bodies use `push_id`; all
-    /// `ComboBox`es use `from_id_salt` (SDK egui ID audit Rules 1–3).
+    /// Shows the audio tab — Imported Files list/detail split using `TwoColumnLayout`
+    /// (SDK Rule 9).  Left panel = file list; right panel = preview controls, SFX
+    /// mappings, music tracks, and volume settings.
+    ///
+    /// - Rule 9: `TwoColumnLayout` for the list/detail split.
+    /// - Rule 10: pre-computes shared state into owned locals before the two-closure call;
+    ///   left closure captures zero borrows of `self`; mutations deferred and applied after.
+    /// - Rule 12: `horizontal_wrapped` for multi-button toolbar row.
+    /// - Rule 13: auto-load guard fires once per campaign open.
+    /// - Rule 15: `show_standard_list_item` + `StandardListItemConfig` + `MetadataBadge`
+    ///   for the Imported Files list.
+    /// - egui ID audit Rules 1–3: `push_id` in loops, `from_id_salt` on `ComboBox`es.
     fn show_audio_editor(&mut self, ui: &mut egui::Ui) {
-        // ── Title bar (hints right-aligned; no bottom bar — Rule 6) ──────────
+        // Auto-load guard: fires once per campaign open on the first frame the
+        // Audio tab is rendered.  `load_audio` clears `needs_initial_load` on
+        // completion so this does not run on every frame (SDK Rule 13).
+        if self.editor_registry.audio_editor_state.needs_initial_load && self.campaign_dir.is_some()
+        {
+            self.load_audio();
+        }
+
+        // ── Title bar (hints right-aligned) ────────────────────────────────
         let title = if self.editor_registry.audio_editor_state.unsaved_changes {
             "🔊 Audio *"
         } else {
@@ -2745,405 +2763,400 @@ impl CampaignBuilderApp {
         });
         ui.separator();
 
-        // Pre-compute column dimensions BEFORE ui.horizontal (Rule 6 mandatory)
-        let available = ui.available_size();
-        let col_h = available.y;
-        let left_w = 180.0_f32;
-        let right_w = 260.0_f32;
-        let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
-        let center_w = (available.x - left_w - right_w - sep_total).max(200.0);
+        // Rule 10: pre-compute everything the left closure needs from `self` into
+        // owned locals.  The left closure must capture zero borrows of `self` so
+        // that the right closure can take the exclusive `&mut self`.
+        let file_count = self.editor_registry.audio_editor_state.imported_files.len();
+        let selected_idx = self.editor_registry.audio_editor_state.selected_file;
+        let imported_files: Vec<String> = self
+            .editor_registry
+            .audio_editor_state
+            .imported_files
+            .clone();
 
-        ui.horizontal(|ui| {
-            // ── Left column: Imported Files ─────────────────────────────────
-            ui.allocate_ui(egui::vec2(left_w, col_h), |ui| {
-                ui.label(egui::RichText::new("Imported Files").strong());
-                ui.separator();
+        // Deferred mutations from the left closure; applied after show_split returns.
+        let mut pending_select: Option<usize> = None;
+        let mut pending_import = false;
+        let mut pending_scan = false;
 
-                let file_count = self.editor_registry.audio_editor_state.imported_files.len();
-                let selected_idx = self.editor_registry.audio_editor_state.selected_file;
+        // Rule 9: TwoColumnLayout for the list (Imported Files) / detail
+        // (Preview + SFX Mappings + Music Tracks + Volume) split.
+        ui_helpers::TwoColumnLayout::new("audio_editor")
+            .with_inspector_min_width(400.0)
+            .show_split(
+                ui,
+                |ui| {
+                    // ── Left column: Imported Files list ──────────────────
+                    ui.label(egui::RichText::new("Imported Files").strong());
+                    ui.separator();
 
-                egui::ScrollArea::vertical()
-                    .id_salt("audio_files_scroll")
-                    .auto_shrink([true, false])
-                    .show(ui, |ui| {
-                        if file_count == 0 {
-                            ui.label(
-                                egui::RichText::new("No audio files imported")
-                                    .italics()
-                                    .weak(),
-                            );
-                        } else {
-                            for idx in 0..file_count {
-                                // Clone to release the borrow before potential mutation
-                                let name = self.editor_registry.audio_editor_state.imported_files
-                                    [idx]
-                                    .clone();
-                                ui.push_id(idx, |ui| {
-                                    if ui
-                                        .selectable_label(selected_idx == Some(idx), &name)
-                                        .clicked()
-                                    {
-                                        self.editor_registry.audio_editor_state.selected_file =
-                                            Some(idx);
-                                        ui.ctx().request_repaint();
-                                    }
-                                });
-                            }
+                    if file_count == 0 {
+                        ui.label(
+                            egui::RichText::new("No audio files imported")
+                                .italics()
+                                .weak(),
+                        );
+                    } else {
+                        for idx in 0..file_count {
+                            let name = &imported_files[idx];
+                            let ext = std::path::Path::new(name)
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("")
+                                .to_uppercase();
+                            // Rule 15: show_standard_list_item + StandardListItemConfig.
+                            // Rule 1: push_id scopes all child widgets under the file index.
+                            ui.push_id(idx, |ui| {
+                                let badge = ui_helpers::MetadataBadge::new(ext);
+                                let config = ui_helpers::StandardListItemConfig::new(name)
+                                    .with_badges(vec![badge])
+                                    .selected(selected_idx == Some(idx))
+                                    .with_context_menu(false);
+                                let (clicked, _) = ui_helpers::show_standard_list_item(ui, config);
+                                if clicked {
+                                    pending_select = Some(idx);
+                                    ui.ctx().request_repaint();
+                                }
+                            });
+                        }
+                    }
+
+                    ui.separator();
+
+                    // Rule 12: horizontal_wrapped so buttons reflow on narrow windows.
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("📂 Import File…").clicked() {
+                            pending_import = true;
+                        }
+                        if ui.button("🔄 Scan Files").clicked() {
+                            pending_scan = true;
                         }
                     });
+                },
+                |ui| {
+                    // ── Right column: Preview + SFX Mappings + Music Tracks + Volume ─
 
-                ui.separator();
-
-                if ui.button("📂 Import File…").clicked() {
-                    let picked = rfd::FileDialog::new()
-                        .add_filter("Audio Files", &["ogg", "mp3", "wav", "flac"])
-                        .pick_file();
-                    if let Some(path) = picked {
-                        if let Some(dir) = self.campaign_dir.clone() {
-                            match self
-                                .editor_registry
-                                .audio_editor_state
-                                .import_audio_file(&path, &dir)
-                            {
-                                Ok(()) => {
-                                    let fname = path
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or("file")
-                                        .to_string();
-                                    self.ui_state.status_message =
-                                        format!("Imported audio: {fname}");
-                                }
-                                Err(e) => {
-                                    self.ui_state.status_message =
-                                        format!("Audio import failed: {e}");
-                                }
-                            }
-                            ui.ctx().request_repaint();
-                        } else {
-                            self.ui_state.status_message =
-                                "Open a campaign before importing audio".to_string();
-                        }
-                    }
-                }
-
-                if ui.button("🔄 Scan Files").clicked() {
-                    if let Some(dir) = self.campaign_dir.clone() {
-                        self.editor_registry
-                            .audio_editor_state
-                            .refresh_imported_files(&dir);
-                        ui.ctx().request_repaint();
-                    }
-                }
-
-                ui.separator();
-
-                // ── Preview button: toggles between ▶ Play and ⏹ Stop ─────────
-                // Snapshot everything needed as copies/clones so no live borrow
-                // on audio_editor_state remains when we mutate it below.
-                let is_playing = self
-                    .editor_registry
-                    .audio_editor_state
-                    .preview_player
-                    .is_playing();
-                let selected_file_name: Option<String> = self
-                    .editor_registry
-                    .audio_editor_state
-                    .selected_file
-                    .and_then(|idx| {
+                    // ── Preview controls ───────────────────────────────────
+                    let is_playing = self
+                        .editor_registry
+                        .audio_editor_state
+                        .preview_player
+                        .is_playing();
+                    // Compute selected path from self (right closure has &mut self).
+                    let selected_file_idx = self.editor_registry.audio_editor_state.selected_file;
+                    let selected_file_name: Option<String> = selected_file_idx.and_then(|idx| {
                         self.editor_registry
                             .audio_editor_state
                             .imported_files
                             .get(idx)
                             .cloned()
                     });
-                let selected_path: Option<std::path::PathBuf> =
-                    selected_file_name.as_ref().and_then(|name| {
-                        self.campaign_dir
-                            .as_ref()
-                            .map(|dir| dir.join("assets/audio").join(name))
-                    });
-                let preview_volume = self.editor_registry.audio_editor_state.preview_volume;
+                    let selected_path: Option<std::path::PathBuf> =
+                        selected_file_name.as_ref().and_then(|name| {
+                            self.campaign_dir
+                                .as_ref()
+                                .map(|dir| dir.join("assets/audio").join(name))
+                        });
+                    let preview_vol = self.editor_registry.audio_editor_state.preview_volume;
 
-                if is_playing {
-                    if ui.button("⏹ Stop").clicked() {
-                        self.editor_registry
-                            .audio_editor_state
-                            .preview_player
-                            .stop();
-                        self.editor_registry.audio_editor_state.status_message =
-                            "Playback stopped".to_string();
-                        ui.ctx().request_repaint();
-                    }
-                    // Poll every 500 ms so the button flips back to ▶ when the
-                    // file finishes naturally (rodio plays on a background thread).
-                    ui.ctx()
-                        .request_repaint_after(std::time::Duration::from_millis(500));
-                } else {
-                    let can_preview = selected_path.is_some();
-                    if ui
-                        .add_enabled(can_preview, egui::Button::new("▶ Preview"))
-                        .clicked()
-                    {
-                        if let Some(path) = selected_path {
-                            match self
-                                .editor_registry
+                    ui.label(egui::RichText::new("Preview").strong());
+                    ui.separator();
+
+                    if is_playing {
+                        if ui.button("⏹ Stop").clicked() {
+                            self.editor_registry
                                 .audio_editor_state
                                 .preview_player
-                                .play(&path, preview_volume)
-                            {
-                                Ok(()) => {
-                                    let name = path
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or("file")
-                                        .to_string();
-                                    self.editor_registry.audio_editor_state.status_message =
-                                        format!("Playing: {name}");
-                                    ui.ctx().request_repaint();
-                                }
-                                Err(e) => {
-                                    self.editor_registry.audio_editor_state.status_message =
-                                        format!("Preview failed: {e}");
+                                .stop();
+                            self.editor_registry.audio_editor_state.status_message =
+                                "Playback stopped".to_string();
+                            ui.ctx().request_repaint();
+                        }
+                        // Poll every 500 ms so the button flips back when the file
+                        // finishes naturally (rodio plays on a background thread).
+                        ui.ctx()
+                            .request_repaint_after(std::time::Duration::from_millis(500));
+                    } else {
+                        let can_preview = selected_path.is_some();
+                        if ui
+                            .add_enabled(can_preview, egui::Button::new("▶ Preview"))
+                            .clicked()
+                        {
+                            if let Some(ref path) = selected_path {
+                                match self
+                                    .editor_registry
+                                    .audio_editor_state
+                                    .preview_player
+                                    .play(path, preview_vol)
+                                {
+                                    Ok(()) => {
+                                        let name = path
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("file")
+                                            .to_string();
+                                        self.editor_registry.audio_editor_state.status_message =
+                                            format!("Playing: {name}");
+                                        ui.ctx().request_repaint();
+                                    }
+                                    Err(e) => {
+                                        self.editor_registry.audio_editor_state.status_message =
+                                            format!("Preview failed: {e}");
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                ui.label("Preview volume:");
-                ui.add(
-                    egui::Slider::new(
-                        &mut self.editor_registry.audio_editor_state.preview_volume,
-                        0.0..=1.0,
-                    )
-                    .step_by(0.05),
-                );
+                    ui.label("Preview volume:");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.editor_registry.audio_editor_state.preview_volume,
+                            0.0..=1.0,
+                        )
+                        .step_by(0.05),
+                    );
 
-                // Show the audio editor's own status line (e.g. preview stub message)
-                let status = self
-                    .editor_registry
-                    .audio_editor_state
-                    .status_message
-                    .clone();
-                if !status.is_empty() {
+                    let status = self
+                        .editor_registry
+                        .audio_editor_state
+                        .status_message
+                        .clone();
+                    if !status.is_empty() {
+                        ui.label(egui::RichText::new(&status).small());
+                    }
+
                     ui.separator();
-                    ui.label(egui::RichText::new(&status).small());
-                }
-            }); // end left column
 
-            ui.separator();
+                    // ── SFX Mappings ──────────────────────────────────────────
+                    ui.label(egui::RichText::new("SFX Mappings").strong());
+                    ui.separator();
 
-            // ── Center column: SFX Mappings ──────────────────────────────────
-            ui.allocate_ui(egui::vec2(center_w, col_h), |ui| {
-                ui.label(egui::RichText::new("SFX Mappings").strong());
-                ui.separator();
+                    let imported: Vec<String> = self
+                        .editor_registry
+                        .audio_editor_state
+                        .imported_files
+                        .clone();
 
-                // Clone the file list so no live borrow on audio_editor_state
-                // conflicts with the mutations inside the ComboBox callbacks.
-                let imported: Vec<String> = self
-                    .editor_registry
-                    .audio_editor_state
-                    .imported_files
-                    .clone();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("audio_sfx_scroll")
-                    .auto_shrink([true, false])
-                    .show(ui, |ui| {
-                        let sfx_count = self.editor_registry.audio_editor_state.sfx_mappings.len();
-                        for i in 0..sfx_count {
-                            // Clone the values we need; releases borrows before mutation
-                            let engine_id = self.editor_registry.audio_editor_state.sfx_mappings[i]
-                                .engine_id
-                                .clone();
-                            let current = self.editor_registry.audio_editor_state.sfx_mappings[i]
-                                .mapped_file
-                                .clone();
-                            let display = if current.is_empty() {
-                                "(none)".to_string()
-                            } else {
-                                current.clone()
-                            };
-
-                            let mut chosen: Option<String> = None;
-                            ui.push_id(i, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&engine_id).monospace());
-                                    egui::ComboBox::from_id_salt(format!("sfx_combo_{i}"))
-                                        .selected_text(&display)
-                                        .show_ui(ui, |ui| {
-                                            if ui
-                                                .selectable_label(current.is_empty(), "(none)")
-                                                .clicked()
+                    let sfx_count = self.editor_registry.audio_editor_state.sfx_mappings.len();
+                    for i in 0..sfx_count {
+                        let engine_id = self.editor_registry.audio_editor_state.sfx_mappings[i]
+                            .engine_id
+                            .clone();
+                        let current = self.editor_registry.audio_editor_state.sfx_mappings[i]
+                            .mapped_file
+                            .clone();
+                        let display = if current.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            current.clone()
+                        };
+                        let mut chosen: Option<String> = None;
+                        ui.push_id(i, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&engine_id).monospace());
+                                egui::ComboBox::from_id_salt(format!("sfx_combo_{i}"))
+                                    .selected_text(&display)
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_label(current.is_empty(), "(none)")
+                                            .clicked()
+                                        {
+                                            chosen = Some(String::new());
+                                        }
+                                        for file in &imported {
+                                            if ui.selectable_label(&current == file, file).clicked()
                                             {
-                                                chosen = Some(String::new());
+                                                chosen = Some(file.clone());
                                             }
-                                            for file in &imported {
-                                                if ui
-                                                    .selectable_label(&current == file, file)
-                                                    .clicked()
-                                                {
-                                                    chosen = Some(file.clone());
-                                                }
-                                            }
-                                        });
-                                });
+                                        }
+                                    });
                             });
-
-                            if let Some(val) = chosen {
-                                self.editor_registry.audio_editor_state.sfx_mappings[i]
-                                    .mapped_file = val;
-                                self.editor_registry.audio_editor_state.unsaved_changes = true;
-                                ui.ctx().request_repaint();
-                            }
+                        });
+                        if let Some(val) = chosen {
+                            self.editor_registry.audio_editor_state.sfx_mappings[i].mapped_file =
+                                val;
+                            self.editor_registry.audio_editor_state.unsaved_changes = true;
+                            ui.ctx().request_repaint();
                         }
-                    });
+                    }
 
-                if ui.button("+ Custom SFX Row").clicked() {
-                    self.editor_registry.audio_editor_state.sfx_mappings.push(
-                        audio_editor::SfxMappingRow {
-                            engine_id: String::new(),
-                            mapped_file: String::new(),
-                        },
-                    );
-                    self.editor_registry.audio_editor_state.unsaved_changes = true;
-                    ui.ctx().request_repaint();
-                }
-            }); // end center column
+                    if ui.button("+ Custom SFX Row").clicked() {
+                        self.editor_registry.audio_editor_state.sfx_mappings.push(
+                            audio_editor::SfxMappingRow {
+                                engine_id: String::new(),
+                                mapped_file: String::new(),
+                            },
+                        );
+                        self.editor_registry.audio_editor_state.unsaved_changes = true;
+                        ui.ctx().request_repaint();
+                    }
 
-            ui.separator();
+                    ui.separator();
 
-            // ── Right column: Music Tracks + Volume sliders ───────────────────
-            ui.allocate_ui(egui::vec2(right_w, col_h), |ui| {
-                ui.label(egui::RichText::new("Music Tracks").strong());
-                ui.separator();
+                    // ── Music Tracks ──────────────────────────────────────────
+                    ui.label(egui::RichText::new("Music Tracks").strong());
+                    ui.separator();
 
-                let imported: Vec<String> = self
-                    .editor_registry
-                    .audio_editor_state
-                    .imported_files
-                    .clone();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("audio_music_scroll")
-                    .auto_shrink([true, false])
-                    .show(ui, |ui| {
-                        let music_count =
-                            self.editor_registry.audio_editor_state.music_mappings.len();
-                        for i in 0..music_count {
-                            let track_id = self.editor_registry.audio_editor_state.music_mappings
-                                [i]
-                                .track_id
-                                .clone();
-                            let current = self.editor_registry.audio_editor_state.music_mappings[i]
-                                .mapped_file
-                                .clone();
-                            let display = if current.is_empty() {
-                                "(none)".to_string()
-                            } else {
-                                current.clone()
-                            };
-
-                            let mut chosen: Option<String> = None;
-                            ui.push_id(i, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&track_id).monospace());
-                                    egui::ComboBox::from_id_salt(format!("music_combo_{i}"))
-                                        .selected_text(&display)
-                                        .show_ui(ui, |ui| {
-                                            if ui
-                                                .selectable_label(current.is_empty(), "(none)")
-                                                .clicked()
+                    let music_count = self.editor_registry.audio_editor_state.music_mappings.len();
+                    for i in 0..music_count {
+                        let track_id = self.editor_registry.audio_editor_state.music_mappings[i]
+                            .track_id
+                            .clone();
+                        let current = self.editor_registry.audio_editor_state.music_mappings[i]
+                            .mapped_file
+                            .clone();
+                        let display = if current.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            current.clone()
+                        };
+                        let mut chosen: Option<String> = None;
+                        ui.push_id(i, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&track_id).monospace());
+                                egui::ComboBox::from_id_salt(format!("music_combo_{i}"))
+                                    .selected_text(&display)
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_label(current.is_empty(), "(none)")
+                                            .clicked()
+                                        {
+                                            chosen = Some(String::new());
+                                        }
+                                        for file in &imported {
+                                            if ui.selectable_label(&current == file, file).clicked()
                                             {
-                                                chosen = Some(String::new());
+                                                chosen = Some(file.clone());
                                             }
-                                            for file in &imported {
-                                                if ui
-                                                    .selectable_label(&current == file, file)
-                                                    .clicked()
-                                                {
-                                                    chosen = Some(file.clone());
-                                                }
-                                            }
-                                        });
-                                });
+                                        }
+                                    });
                             });
-
-                            if let Some(val) = chosen {
-                                self.editor_registry.audio_editor_state.music_mappings[i]
-                                    .mapped_file = val;
-                                self.editor_registry.audio_editor_state.unsaved_changes = true;
-                                ui.ctx().request_repaint();
-                            }
+                        });
+                        if let Some(val) = chosen {
+                            self.editor_registry.audio_editor_state.music_mappings[i].mapped_file =
+                                val;
+                            self.editor_registry.audio_editor_state.unsaved_changes = true;
+                            ui.ctx().request_repaint();
                         }
-                    });
+                    }
 
-                if ui.button("+ Custom Track").clicked() {
-                    self.editor_registry.audio_editor_state.music_mappings.push(
-                        audio_editor::MusicMappingRow {
-                            track_id: String::new(),
-                            mapped_file: String::new(),
-                        },
-                    );
-                    self.editor_registry.audio_editor_state.unsaved_changes = true;
-                    ui.ctx().request_repaint();
+                    if ui.button("+ Custom Track").clicked() {
+                        self.editor_registry.audio_editor_state.music_mappings.push(
+                            audio_editor::MusicMappingRow {
+                                track_id: String::new(),
+                                mapped_file: String::new(),
+                            },
+                        );
+                        self.editor_registry.audio_editor_state.unsaved_changes = true;
+                        ui.ctx().request_repaint();
+                    }
+
+                    ui.separator();
+
+                    // ── Volume settings (mirrors AudioConfig from Config tab) ───
+                    ui.label(egui::RichText::new("── Volume ──").strong());
+                    ui.separator();
+
+                    let mut volume_changed = false;
+                    {
+                        let audio = &mut self.editor_registry.config_editor_state.game_config.audio;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut audio.master_volume, 0.0..=1.0)
+                                    .text("Master")
+                                    .step_by(0.05),
+                            )
+                            .changed()
+                        {
+                            volume_changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut audio.music_volume, 0.0..=1.0)
+                                    .text("Music")
+                                    .step_by(0.05),
+                            )
+                            .changed()
+                        {
+                            volume_changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut audio.sfx_volume, 0.0..=1.0)
+                                    .text("SFX")
+                                    .step_by(0.05),
+                            )
+                            .changed()
+                        {
+                            volume_changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut audio.ambient_volume, 0.0..=1.0)
+                                    .text("Ambient")
+                                    .step_by(0.05),
+                            )
+                            .changed()
+                        {
+                            volume_changed = true;
+                        }
+                        if ui
+                            .checkbox(&mut audio.enable_audio, "Enable Audio")
+                            .changed()
+                        {
+                            volume_changed = true;
+                        }
+                    } // `audio` borrow released here
+
+                    if volume_changed {
+                        self.unsaved_changes = true;
+                    }
+                },
+            );
+
+        // Apply deferred mutations from the left closure (Rule 10).
+        if let Some(idx) = pending_select {
+            self.editor_registry.audio_editor_state.selected_file = Some(idx);
+        }
+        if pending_scan {
+            if let Some(dir) = self.campaign_dir.clone() {
+                self.editor_registry
+                    .audio_editor_state
+                    .refresh_imported_files(&dir);
+                ui.ctx().request_repaint();
+            }
+        }
+        if pending_import {
+            let picked = rfd::FileDialog::new()
+                .add_filter("Audio Files", &["ogg", "mp3", "wav", "flac"])
+                .pick_file();
+            if let Some(path) = picked {
+                if let Some(dir) = self.campaign_dir.clone() {
+                    match self
+                        .editor_registry
+                        .audio_editor_state
+                        .import_audio_file(&path, &dir)
+                    {
+                        Ok(()) => {
+                            let fname = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("file")
+                                .to_string();
+                            self.ui_state.status_message = format!("Imported audio: {fname}");
+                        }
+                        Err(e) => {
+                            self.ui_state.status_message = format!("Audio import failed: {e}");
+                        }
+                    }
+                } else {
+                    self.ui_state.status_message =
+                        "Open a campaign before importing audio".to_string();
                 }
-
-                // ── Volume sliders (mirror AudioConfig from Config tab) ───────
-                ui.separator();
-                ui.label(egui::RichText::new("── Volume ──").strong());
-                ui.separator();
-
-                // Use a local flag so we don't hold the `audio` borrow while
-                // also accessing `self.unsaved_changes`.
-                let mut volume_changed = false;
-
-                {
-                    let audio = &mut self.editor_registry.config_editor_state.game_config.audio;
-                    let master_r = ui.add(
-                        egui::Slider::new(&mut audio.master_volume, 0.0..=1.0)
-                            .text("Master")
-                            .step_by(0.05),
-                    );
-                    if master_r.changed() {
-                        volume_changed = true;
-                    }
-                    let music_r = ui.add(
-                        egui::Slider::new(&mut audio.music_volume, 0.0..=1.0)
-                            .text("Music")
-                            .step_by(0.05),
-                    );
-                    if music_r.changed() {
-                        volume_changed = true;
-                    }
-                    let sfx_r = ui.add(
-                        egui::Slider::new(&mut audio.sfx_volume, 0.0..=1.0)
-                            .text("SFX")
-                            .step_by(0.05),
-                    );
-                    if sfx_r.changed() {
-                        volume_changed = true;
-                    }
-                    let ambient_r = ui.add(
-                        egui::Slider::new(&mut audio.ambient_volume, 0.0..=1.0)
-                            .text("Ambient")
-                            .step_by(0.05),
-                    );
-                    if ambient_r.changed() {
-                        volume_changed = true;
-                    }
-                    let enable_r = ui.checkbox(&mut audio.enable_audio, "Enable Audio");
-                    if enable_r.changed() {
-                        volume_changed = true;
-                    }
-                } // `audio` borrow released here
-
-                if volume_changed {
-                    self.unsaved_changes = true;
-                }
-            }); // end right column
-        }); // end ui.horizontal
+                ui.ctx().request_repaint();
+            }
+        }
     }
 
     /// Show assets editor

@@ -48,4 +48,5 @@ CampaignMetadata(
         minute: 0,
         second: 0,
     ),
+    audio_file: "data/audio.ron",
 )

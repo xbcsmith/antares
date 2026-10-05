@@ -1,7 +1,7 @@
 [
     (
         id: 1,
-        name: "Willow Tree",
+        name: "Cypress",
         category: Tree,
         default_scale: 1.0,
         color_tint: None,
@@ -13,7 +13,7 @@
             "imported",
         ],
         mesh_id: Some(11000),
-        description: Some("Imported landscape mesh \'Willow Tree\'"),
+        description: Some("Imported landscape mesh \'cypress\'"),
     ),
     (
         id: 2,
@@ -110,5 +110,85 @@
         ],
         mesh_id: Some(11006),
         description: Some("Imported landscape mesh \'Pile of Rocks\'"),
+    ),
+    (
+        id: 8,
+        name: "Short Grizzled Oak",
+        category: Tree,
+        default_scale: 1.0,
+        color_tint: None,
+        flags: (
+            blocking: false,
+        ),
+        icon: None,
+        tags: [
+            "imported",
+        ],
+        mesh_id: Some(11007),
+        description: Some("Imported landscape mesh \'Short Grizzled Oak\'"),
+    ),
+    (
+        id: 9,
+        name: "Giant Sequoia",
+        category: Tree,
+        default_scale: 1.0,
+        color_tint: None,
+        flags: (
+            blocking: false,
+        ),
+        icon: None,
+        tags: [
+            "imported",
+        ],
+        mesh_id: Some(11008),
+        description: Some("Imported landscape mesh \'Giant Sequoia\'"),
+    ),
+    (
+        id: 10,
+        name: "Maple",
+        category: Tree,
+        default_scale: 1.0,
+        color_tint: None,
+        flags: (
+            blocking: false,
+        ),
+        icon: None,
+        tags: [
+            "imported",
+        ],
+        mesh_id: Some(11009),
+        description: Some("Imported landscape mesh \'Maple\'"),
+    ),
+    (
+        id: 11,
+        name: "Acacia",
+        category: Tree,
+        default_scale: 1.0,
+        color_tint: None,
+        flags: (
+            blocking: false,
+        ),
+        icon: None,
+        tags: [
+            "imported",
+        ],
+        mesh_id: Some(11010),
+        description: Some("Imported landscape mesh \'Acacia\'"),
+    ),
+    (
+        id: 12,
+        name: "White Birch",
+        category: Tree,
+        default_scale: 1.0,
+        color_tint: None,
+        flags: (
+            blocking: false,
+        ),
+        icon: None,
+        tags: [
+            "imported",
+        ],
+        mesh_id: Some(11011),
+        description: Some("Imported landscape mesh \'White Birch\'"),
     ),
 ]

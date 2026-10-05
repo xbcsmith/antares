@@ -347,9 +347,25 @@ pub struct ObjectMeshDatabase {
     /// Maps mesh ID string key to the human-readable registry name.
     ///
     /// Populated from `ObjectMeshEntry::name` during `load_from_registry`.
-    /// Also populated during `merge_landscape` and `merge_furniture` using
-    /// `CreatureDefinition::name` as a fallback.
+    /// Fallback (landscape/furniture) names are read on demand from
+    /// `landscape_fallback`/`furniture_fallback` instead of being copied in
+    /// here — see those fields.
     names: HashMap<String, String>,
+    /// Legacy landscape mesh registry, consulted by [`Self::lookup`] when a
+    /// key isn't found in `meshes`.
+    ///
+    /// `merge_landscape` used to eagerly flatten every entry from this
+    /// database into `meshes` right away. Landscape mesh files can be
+    /// individually over a hundred megabytes of inline vertex data, so
+    /// resolving all of them at merge time — regardless of whether
+    /// `object_mesh_registry.ron` even needed them — defeated
+    /// `CreatureDatabase`'s own lazy loading before it ever helped. Keeping
+    /// the source database around and falling through to its (lazy)
+    /// `get_creature` means a mesh is only ever parsed if `lookup` actually
+    /// asks for it.
+    landscape_fallback: Option<LandscapeMeshDatabase>,
+    /// Legacy furniture mesh registry; same rationale as `landscape_fallback`.
+    furniture_fallback: Option<FurnitureMeshDatabase>,
 }
 
 impl ObjectMeshDatabase {
@@ -367,6 +383,8 @@ impl ObjectMeshDatabase {
         Self {
             meshes: HashMap::new(),
             names: HashMap::new(),
+            landscape_fallback: None,
+            furniture_fallback: None,
         }
     }
 
@@ -436,12 +454,15 @@ impl ObjectMeshDatabase {
         Ok(db)
     }
 
-    /// Merges entries from a legacy `LandscapeMeshDatabase` into this database.
+    /// Registers a legacy `LandscapeMeshDatabase` as a fallback source for
+    /// [`lookup`](Self::lookup) (keyed by `id.to_string()`).
     ///
-    /// Each landscape mesh is inserted with its numeric ID converted to a
-    /// string key (e.g. `11001` → `"11001"`).  Existing entries for the same
-    /// key are **not** overwritten — `object_mesh_registry.ron` entries take
-    /// precedence.
+    /// Unlike the old flatten-on-merge behavior, this does **not** read or
+    /// parse any mesh files — `landscape`'s own lazy `CreatureDatabase` is
+    /// consulted (and only actually parses a file) the first time `lookup`
+    /// asks for a key that isn't already in `object_mesh_registry.ron`'s
+    /// entries. `object_mesh_registry.ron` entries always take precedence,
+    /// since `lookup` checks them first.
     ///
     /// # Examples
     ///
@@ -455,22 +476,12 @@ impl ObjectMeshDatabase {
     /// assert!(db.is_empty());
     /// ```
     pub fn merge_landscape(&mut self, landscape: &LandscapeMeshDatabase) {
-        for creature in landscape.as_creature_database().all_creatures() {
-            let key = creature.id.to_string();
-            self.meshes
-                .entry(key.clone())
-                .or_insert_with(|| creature.clone());
-            self.names
-                .entry(key)
-                .or_insert_with(|| creature.name.clone());
-        }
+        self.landscape_fallback = Some(landscape.clone());
     }
 
-    /// Merges entries from a legacy `FurnitureMeshDatabase` into this database.
-    ///
-    /// Each furniture mesh is inserted with its numeric ID converted to a
-    /// string key (e.g. `10001` → `"10001"`).  Existing entries are **not**
-    /// overwritten.
+    /// Registers a legacy `FurnitureMeshDatabase` as a fallback source for
+    /// [`lookup`](Self::lookup). See [`merge_landscape`](Self::merge_landscape)
+    /// for the lazy-fallback rationale.
     ///
     /// # Examples
     ///
@@ -484,18 +495,16 @@ impl ObjectMeshDatabase {
     /// assert!(db.is_empty());
     /// ```
     pub fn merge_furniture(&mut self, furniture: &FurnitureMeshDatabase) {
-        for creature in furniture.as_creature_database().all_creatures() {
-            let key = creature.id.to_string();
-            self.meshes
-                .entry(key.clone())
-                .or_insert_with(|| creature.clone());
-            self.names
-                .entry(key)
-                .or_insert_with(|| creature.name.clone());
-        }
+        self.furniture_fallback = Some(furniture.clone());
     }
 
     /// Looks up a mesh asset by its string key.
+    ///
+    /// Checks `object_mesh_registry.ron` entries first, then falls through to
+    /// the legacy landscape and furniture registries (see
+    /// [`merge_landscape`](Self::merge_landscape) /
+    /// [`merge_furniture`](Self::merge_furniture)), resolving whichever one
+    /// actually holds the key lazily.
     ///
     /// Returns `None` when no entry for `key` exists.
     ///
@@ -508,10 +517,24 @@ impl ObjectMeshDatabase {
     /// assert!(db.lookup("oak_tree").is_none());
     /// ```
     pub fn lookup(&self, key: &str) -> Option<&CreatureDefinition> {
-        self.meshes.get(key)
+        if let Some(m) = self.meshes.get(key) {
+            return Some(m);
+        }
+        let id: crate::domain::types::CreatureId = key.parse().ok()?;
+        self.landscape_fallback
+            .as_ref()
+            .and_then(|l| l.as_creature_database().get_creature(id))
+            .or_else(|| {
+                self.furniture_fallback
+                    .as_ref()
+                    .and_then(|f| f.as_creature_database().get_creature(id))
+            })
     }
 
     /// Returns `true` if a mesh with the given string key is registered.
+    ///
+    /// Cheap: checks fallback registries by ID only, never triggers a mesh
+    /// file load.
     ///
     /// # Examples
     ///
@@ -522,10 +545,23 @@ impl ObjectMeshDatabase {
     /// assert!(!db.has_mesh("oak_tree"));
     /// ```
     pub fn has_mesh(&self, key: &str) -> bool {
-        self.meshes.contains_key(key)
+        if self.meshes.contains_key(key) {
+            return true;
+        }
+        let Ok(id) = key.parse::<crate::domain::types::CreatureId>() else {
+            return false;
+        };
+        self.landscape_fallback
+            .as_ref()
+            .is_some_and(|l| l.as_creature_database().has_creature(id))
+            || self
+                .furniture_fallback
+                .as_ref()
+                .is_some_and(|f| f.as_creature_database().has_creature(id))
     }
 
-    /// Returns all registered mesh IDs (string keys).
+    /// Returns all registered mesh IDs (string keys), including fallback
+    /// registries. Cheap: never triggers a mesh file load.
     ///
     /// Order is unspecified.
     ///
@@ -538,10 +574,26 @@ impl ObjectMeshDatabase {
     /// assert!(db.all_mesh_ids().is_empty());
     /// ```
     pub fn all_mesh_ids(&self) -> Vec<String> {
-        self.meshes.keys().cloned().collect()
+        let mut ids: std::collections::HashSet<String> = self.meshes.keys().cloned().collect();
+        if let Some(l) = &self.landscape_fallback {
+            ids.extend(
+                l.as_creature_database()
+                    .creature_ids()
+                    .map(|id| id.to_string()),
+            );
+        }
+        if let Some(f) = &self.furniture_fallback {
+            ids.extend(
+                f.as_creature_database()
+                    .creature_ids()
+                    .map(|id| id.to_string()),
+            );
+        }
+        ids.into_iter().collect()
     }
 
-    /// Returns all registered mesh IDs paired with their human-readable names.
+    /// Returns all registered mesh IDs paired with their human-readable names,
+    /// including fallback registries. Cheap: never triggers a mesh file load.
     ///
     /// Returns `(id_string, name)` tuples where `id_string` is the string key
     /// (e.g. `"12001"`) and `name` is the display name from the registry
@@ -558,13 +610,28 @@ impl ObjectMeshDatabase {
     /// assert!(db.all_mesh_ids_with_names().is_empty());
     /// ```
     pub fn all_mesh_ids_with_names(&self) -> Vec<(String, String)> {
-        self.names
+        let mut out: HashMap<String, String> = self
+            .names
             .iter()
             .map(|(id, name)| (id.clone(), name.clone()))
-            .collect()
+            .collect();
+        if let Some(l) = &self.landscape_fallback {
+            for (id, name) in l.as_creature_database().creature_ids_and_names() {
+                out.entry(id.to_string())
+                    .or_insert_with(|| name.to_string());
+            }
+        }
+        if let Some(f) = &self.furniture_fallback {
+            for (id, name) in f.as_creature_database().creature_ids_and_names() {
+                out.entry(id.to_string())
+                    .or_insert_with(|| name.to_string());
+            }
+        }
+        out.into_iter().collect()
     }
 
-    /// Returns `true` when no mesh entries are registered.
+    /// Returns `true` when no mesh entries are registered. Cheap: never
+    /// triggers a mesh file load.
     ///
     /// # Examples
     ///
@@ -575,9 +642,18 @@ impl ObjectMeshDatabase {
     /// ```
     pub fn is_empty(&self) -> bool {
         self.meshes.is_empty()
+            && self
+                .landscape_fallback
+                .as_ref()
+                .is_none_or(|l| l.is_empty())
+            && self
+                .furniture_fallback
+                .as_ref()
+                .is_none_or(|f| f.is_empty())
     }
 
-    /// Returns the number of registered mesh entries.
+    /// Returns the number of registered mesh entries, including fallback
+    /// registries. Cheap: never triggers a mesh file load.
     ///
     /// # Examples
     ///
@@ -587,7 +663,7 @@ impl ObjectMeshDatabase {
     /// assert_eq!(ObjectMeshDatabase::new().count(), 0);
     /// ```
     pub fn count(&self) -> usize {
-        self.meshes.len()
+        self.all_mesh_ids().len()
     }
 
     /// Validates all registered mesh assets.
@@ -613,6 +689,28 @@ impl ObjectMeshDatabase {
                     "Object mesh '{}' has an empty name",
                     key
                 )));
+            }
+        }
+        // Fallback registries' names are known without loading any mesh
+        // file (see `creature_ids_and_names`), so this stays cheap.
+        for fallback in [
+            self.landscape_fallback
+                .as_ref()
+                .map(|l| l.as_creature_database()),
+            self.furniture_fallback
+                .as_ref()
+                .map(|f| f.as_creature_database()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for (id, name) in fallback.creature_ids_and_names() {
+                if name.is_empty() {
+                    return Err(ObjectMeshError::ValidationError(format!(
+                        "Object mesh '{}' has an empty name",
+                        id
+                    )));
+                }
             }
         }
         Ok(())

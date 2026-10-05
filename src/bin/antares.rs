@@ -472,6 +472,12 @@ impl Plugin for AntaresPlugin {
         let rng_seed = game_state.rng_seed;
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(antares::game::resources::GameRng::from_seed(rng_seed));
+        // Mirror the campaign's wind config into its own resource — grass/wind
+        // rendering systems (`grass_instancing`, `advanced_grass`) read
+        // `WindConfig` directly rather than reaching into `GameContent`.
+        app.insert_resource(antares::game::resources::WindConfig(
+            content_db.wind.clone(),
+        ));
         app.insert_resource(antares::application::resources::GameContent::new(
             content_db,
         ));

@@ -12,7 +12,7 @@ use crate::domain::world::wind::CampaignWindConfig;
 
 /// Bevy resource that holds the active campaign wind configuration.
 ///
-/// Inserted at campaign load time alongside [`crate::game::resources::GameDataResource`].
+/// Inserted at campaign load time from the campaign's `ContentDatabase::wind`.
 /// A missing `data/wind.ron` results in the default (no wind animation).
 ///
 /// # Examples

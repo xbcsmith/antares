@@ -118,7 +118,6 @@ use crate::domain::character_definition::CharacterLore;
 use crate::domain::progression::experience_for_level_with_config;
 use crate::domain::skill_resolver::{SkillResolver, SkillResolverContext};
 use crate::domain::skills::{SkillCategory, SkillGrantSource};
-use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
 use crate::game::systems::hud::{get_portrait_color, FullPortraitAssets};
 use crate::game::systems::input::{GameAction, InputConfigResource};
@@ -365,7 +364,6 @@ pub fn character_sheet_input_system(
 fn character_sheet_ui_system(
     mut contexts: EguiContexts,
     mut global_state: ResMut<GlobalState>,
-    game_data: Option<Res<GameDataResource>>,
     content: Option<Res<GameContent>>,
     full_portraits: Option<Res<FullPortraitAssets>>,
     images: Option<Res<Assets<Image>>>,
@@ -379,9 +377,11 @@ fn character_sheet_ui_system(
     // &mut EguiContexts) can be called first.
     let party_len = global_state.0.party.members.len();
     let campaign_config = global_state.0.campaign_config.clone();
-    let level_db = game_data.as_ref().map(|gd| gd.data().levels.clone());
     // Borrow content database for proficiency lookups; None when not loaded.
     let content_db: Option<&ContentDatabase> = content.as_ref().map(|c| &c.0);
+    // Per-class XP table; an empty table (no `levels.ron`) behaves
+    // identically to the formula fallback.
+    let level_db: Option<&crate::domain::levels::LevelDatabase> = content_db.map(|db| &db.levels);
 
     let GameMode::CharacterSheet(ref cs_state) = global_state.0.mode else {
         return;
@@ -465,7 +465,7 @@ fn character_sheet_ui_system(
                         party_len,
                         focused_index,
                         campaign_config: &campaign_config,
-                        level_db: level_db.as_ref().and_then(|opt| opt.as_ref()),
+                        level_db,
                         content_db,
                         full_portrait_id,
                         portrait_key: &portrait_key,

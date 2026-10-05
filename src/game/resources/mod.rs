@@ -11,7 +11,6 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 pub mod font_handles;
-pub mod game_data;
 pub mod game_rng;
 pub mod grass_quality_settings;
 pub mod performance;
@@ -21,7 +20,6 @@ pub mod wind_config;
 
 // Re-export commonly used types
 pub use font_handles::CampaignFontHandles;
-pub use game_data::GameDataResource;
 pub use game_rng::GameRng;
 pub use grass_quality_settings::{GrassPerformanceLevel, GrassQualitySettings};
 pub use performance::{

@@ -1731,11 +1731,49 @@ fn update_automap_image(
     }
 }
 
+/// Writes `image`/`color` onto `image_node` only when they differ from the current
+/// values.
+///
+/// `ImageNode` doesn't derive `PartialEq`, so unlike `BackgroundColor` we can't rely
+/// on `set_if_neq` for the whole component. Writing through `Mut<ImageNode>`
+/// unconditionally marks it changed every call (`update_portraits` runs every frame),
+/// which spuriously re-triggers UI extraction/rendering even when nothing visibly
+/// changed — this keeps the change flag accurate.
+fn set_portrait_image(image_node: &mut Mut<'_, ImageNode>, image: Handle<Image>, color: Color) {
+    if image_node.image != image {
+        image_node.image = image;
+    }
+    if image_node.color != color {
+        image_node.color = color;
+    }
+}
+
+/// Per-slot memo of the last portrait resolution, so [`update_portraits`] can skip
+/// re-normalizing keys / re-looking-up handles / logging on frames where nothing
+/// about that slot changed.
+///
+/// `resolved: false` means the slot was left showing a placeholder — either the
+/// handle hasn't been indexed under this key yet, or it has but isn't loaded —
+/// so it must keep re-checking every frame until an image is actually applied.
+/// Only the "image applied" outcome is treated as a stable end state.
+#[derive(Clone, PartialEq, Default)]
+struct PortraitSlotCache {
+    signature: Option<(String, String)>,
+    resolved: bool,
+}
+
 /// Updates portrait images and background colors based on campaign assets
 ///
 /// If an image matching the character's portrait exists it will be displayed
 /// (numeric filename `10.png` or name-based `kira.png`). Otherwise the
 /// deterministic color placeholder continues to be used.
+///
+/// Skips all lookup/logging work for a slot when neither the occupying character
+/// (name/portrait_id) nor its resolution status has changed since last frame —
+/// this system runs every `Update` frame (`hud.rs`'s `run_if(not_in_combat)`
+/// registration has no other gate), so without memoization it re-does full string
+/// normalization, handle lookups, and debug logging for all slots every frame even
+/// though the party's portraits are almost always static between frames.
 ///
 /// # Arguments
 /// * `global_state` - Game state containing party data
@@ -1747,11 +1785,29 @@ fn update_portraits(
     asset_server: Option<Res<AssetServer>>,
     images: Option<Res<Assets<Image>>>,
     mut portrait_query: Query<(&CharacterPortrait, &mut BackgroundColor, &mut ImageNode)>,
+    mut slot_cache: Local<Vec<PortraitSlotCache>>,
 ) {
     let party = &global_state.0.party;
 
     for (portrait, mut bg_color, mut image_node) in portrait_query.iter_mut() {
-        if let Some(character) = party.members.get(portrait.party_index) {
+        let idx = portrait.party_index;
+        if slot_cache.len() <= idx {
+            slot_cache.resize(idx + 1, PortraitSlotCache::default());
+        }
+
+        if let Some(character) = party.members.get(idx) {
+            let unchanged = slot_cache[idx].resolved
+                && slot_cache[idx]
+                    .signature
+                    .as_ref()
+                    .is_some_and(|(name, portrait_id)| {
+                        name == &character.name && portrait_id == &character.portrait_id
+                    });
+            if unchanged {
+                continue;
+            }
+            let signature = Some((character.name.clone(), character.portrait_id.clone()));
+
             debug!(
                 "update_portraits: slot {} checking for character '{}' (portrait_id={})",
                 portrait.party_index, character.name, character.portrait_id
@@ -1812,9 +1868,12 @@ fn update_portraits(
                             portrait_key,
                             handle.id()
                         );
-                        image_node.image = handle.clone();
-                        image_node.color = Color::WHITE;
-                        *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
+                        set_portrait_image(&mut image_node, handle.clone(), Color::WHITE);
+                        bg_color.set_if_neq(BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)));
+                        slot_cache[idx] = PortraitSlotCache {
+                            signature,
+                            resolved: true,
+                        };
                         continue;
                     } else {
                         debug!(
@@ -1823,16 +1882,25 @@ fn update_portraits(
                             portrait_key
                         );
                         // Keep placeholder until asset is fully loaded
-                        image_node.image = Handle::<Image>::default();
-                        image_node.color = Color::WHITE;
-                        *bg_color = BackgroundColor(get_portrait_color(portrait_key.as_str()));
+                        set_portrait_image(
+                            &mut image_node,
+                            Handle::<Image>::default(),
+                            Color::WHITE,
+                        );
+                        bg_color
+                            .set_if_neq(BackgroundColor(get_portrait_color(portrait_key.as_str())));
+                        // Still loading -> resolved=false so we retry every frame until it lands
+                        slot_cache[idx] = PortraitSlotCache {
+                            signature,
+                            resolved: false,
+                        };
                         continue;
                     }
                 }
             }
 
             // Then try lookup by normalized name
-            if let Some(handle) = portraits.handles_by_name.get(&name_key) {
+            let resolved = if let Some(handle) = portraits.handles_by_name.get(&name_key) {
                 debug!(
                     "update_portraits: slot {} fallback found handle for name '{}' (handle id={:?})",
                     portrait.party_index, name_key, handle.id()
@@ -1842,23 +1910,24 @@ fn update_portraits(
                         "update_portraits: slot {} applying loaded portrait for name '{}'",
                         portrait.party_index, name_key
                     );
-                    image_node.image = handle.clone();
-                    image_node.color = Color::WHITE;
-                    *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
+                    set_portrait_image(&mut image_node, handle.clone(), Color::WHITE);
+                    bg_color.set_if_neq(BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)));
+                    true
                 } else {
                     debug!(
                         "update_portraits: slot {} handle for name '{}' not yet loaded; using placeholder color",
                         portrait.party_index, name_key
                     );
                     // No image available / not yet loaded -> fallback to deterministic color
-                    image_node.image = Handle::<Image>::default();
-                    image_node.color = Color::WHITE;
+                    set_portrait_image(&mut image_node, Handle::<Image>::default(), Color::WHITE);
                     let color_key = if !portrait_key.is_empty() {
                         portrait_key.as_str()
                     } else {
                         name_key.as_str()
                     };
-                    *bg_color = BackgroundColor(get_portrait_color(color_key));
+                    bg_color.set_if_neq(BackgroundColor(get_portrait_color(color_key)));
+                    // Still loading -> resolved=false so we retry every frame until it lands
+                    false
                 }
             } else {
                 // No image available -> fallback to deterministic color based on portrait_key or name_key
@@ -1871,19 +1940,33 @@ fn update_portraits(
                     "update_portraits: slot {} no image found for '{}'/'{}'; using placeholder color key='{}'",
                     portrait.party_index, portrait_key, name_key, color_key
                 );
-                image_node.image = Handle::<Image>::default();
-                image_node.color = Color::WHITE;
-                *bg_color = BackgroundColor(get_portrait_color(color_key));
-            }
+                set_portrait_image(&mut image_node, Handle::<Image>::default(), Color::WHITE);
+                bg_color.set_if_neq(BackgroundColor(get_portrait_color(color_key)));
+                // No handle indexed under this key (yet) -> the portrait scan may still be in
+                // flight, or a handle could be registered later (e.g. tests, hot-reload); keep
+                // retrying rather than assuming this is permanent.
+                false
+            };
+            slot_cache[idx] = PortraitSlotCache {
+                signature,
+                resolved,
+            };
         } else {
+            if slot_cache[idx].resolved && slot_cache[idx].signature.is_none() {
+                continue;
+            }
+
             debug!(
                 "update_portraits: clearing empty slot {}",
                 portrait.party_index
             );
             // Empty slot -> clear image and use default placeholder color
-            image_node.image = ImageNode::default().image;
-            image_node.color = Color::WHITE;
-            *bg_color = BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR);
+            set_portrait_image(&mut image_node, ImageNode::default().image, Color::WHITE);
+            bg_color.set_if_neq(BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR));
+            slot_cache[idx] = PortraitSlotCache {
+                signature: None,
+                resolved: true,
+            };
         }
     }
 }

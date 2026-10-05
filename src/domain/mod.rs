@@ -16,12 +16,10 @@
 //! - `items`: Item system (weapons, armor, consumables)
 //! - `visual`: Visual system (creature meshes, procedural geometry)
 //! - `campaign`: Campaign system (campaign definitions, metadata)
-//! - `campaign_loader`: Campaign loading system (game data loading)
 //! - `skills`: Skill system (level-scaled numeric character capabilities)
 
 pub mod audio;
 pub mod campaign;
-pub mod campaign_loader;
 pub mod character;
 pub mod character_definition;
 pub mod classes;
@@ -107,7 +105,6 @@ pub use visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 
 // Re-export campaign types
 pub use campaign::{Campaign, CampaignConfig};
-pub use campaign_loader::{CampaignError, CampaignLoader, GameData};
 
 // Re-export level database types
 pub use levels::{ClassLevelThresholds, LevelDatabase, LevelError};

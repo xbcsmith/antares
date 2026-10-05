@@ -57,7 +57,6 @@ use crate::domain::levels::LevelDatabase;
 use crate::domain::progression::{
     check_level_up_with_db, level_up_and_grant_spells_with_level_db, ProgressionError,
 };
-use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui::{GameLog, LogCategory};
 
@@ -68,12 +67,11 @@ use crate::game::systems::ui::{GameLog, LogCategory};
 ///
 /// - `global_state` — mutable game state; party members and campaign config
 ///   are read and modified here.
-/// - `content` — optional campaign content resource; supplies the class and
-///   spell databases required by the level-up pipeline.  When absent the
-///   system returns early without modifying any state.
-/// - `game_data` — optional game data resource; supplies the optional
-///   per-class XP threshold table ([`LevelDatabase`]).  `None` means the
-///   formula fallback is used for all classes.
+/// - `content` — optional campaign content resource; supplies the class,
+///   spell, and per-class XP threshold ([`LevelDatabase`]) data required by
+///   the level-up pipeline.  When absent the system returns early without
+///   modifying any state.  An empty `LevelDatabase` (no `levels.ron` in the
+///   campaign) behaves identically to the formula fallback for every class.
 /// - `game_log` — optional [`GameLog`] resource; level-up messages are
 ///   written here as [`LogCategory::System`] entries.
 ///
@@ -100,7 +98,6 @@ use crate::game::systems::ui::{GameLog, LogCategory};
 pub fn auto_level_up_system(
     mut global_state: ResMut<GlobalState>,
     content: Option<Res<GameContent>>,
-    game_data: Option<Res<GameDataResource>>,
     mut game_log: Option<ResMut<GameLog>>,
 ) {
     // 1. Only run in Auto level-up mode.
@@ -118,12 +115,9 @@ pub fn auto_level_up_system(
         return;
     };
 
-    // 4. Extract optional per-class XP table.
-    //    The lifetime of `level_db` is tied to `game_data`, which remains
-    //    alive for the duration of this function — safe to use in the loop.
-    let level_db: Option<&LevelDatabase> = game_data
-        .as_deref()
-        .and_then(|gd| gd.data().levels.as_ref());
+    // 4. Per-class XP table, if the campaign has one (`levels.ron`). An empty
+    //    table (no file) behaves identically to `None` per-class below.
+    let level_db: Option<&LevelDatabase> = Some(&content.db().levels);
 
     // Copy the campaign max level — it is `Option<u32>` (Copy).
     let max_level = global_state.0.campaign_config.max_party_level;
@@ -225,13 +219,11 @@ mod tests {
     use crate::application::resources::GameContent;
     use crate::application::{GameMode, GameState};
     use crate::domain::campaign::LevelUpMode;
-    use crate::domain::campaign_loader::GameData;
     use crate::domain::character::{Alignment, Character, Condition, Sex};
     use crate::domain::combat::engine::CombatState;
     use crate::domain::combat::types::Handicap;
     use crate::domain::levels::LevelDatabase;
     use crate::domain::progression::award_experience;
-    use crate::game::resources::game_data::GameDataResource;
     use crate::game::resources::GlobalState;
     use crate::game::systems::ui::GameLog;
 
@@ -502,8 +494,8 @@ mod tests {
         );
     }
 
-    /// With an explicit [`LevelDatabase`] injected via [`GameDataResource`],
-    /// the per-class XP table overrides the formula.
+    /// With an explicit [`LevelDatabase`] present on `GameContent`, the
+    /// per-class XP table overrides the formula.
     ///
     /// A knight table requiring 1 200 XP for level 2 must prevent level-up
     /// when the character has only 1 000 XP.
@@ -515,9 +507,10 @@ mod tests {
         let ron = r#"(entries: [(class_id: "knight", thresholds: [0, 1200, 3000, 6000])])"#;
         let level_db =
             LevelDatabase::load_from_string(ron).expect("valid RON for test LevelDatabase");
-        let mut game_data = GameData::new();
-        game_data.levels = Some(level_db);
-        app.insert_resource(GameDataResource::new(game_data));
+        app.world_mut()
+            .resource_mut::<GameContent>()
+            .db_mut()
+            .levels = level_db;
 
         // 1 000 XP meets the formula threshold but NOT the table threshold.
         let mut knight = make_knight("Table Knight");
@@ -549,9 +542,10 @@ mod tests {
         let ron = r#"(entries: [(class_id: "knight", thresholds: [0, 1200, 3000, 6000])])"#;
         let level_db =
             LevelDatabase::load_from_string(ron).expect("valid RON for test LevelDatabase");
-        let mut game_data = GameData::new();
-        game_data.levels = Some(level_db);
-        app.insert_resource(GameDataResource::new(game_data));
+        app.world_mut()
+            .resource_mut::<GameContent>()
+            .db_mut()
+            .levels = level_db;
 
         let mut knight = make_knight("Table Knight Advance");
         award_experience(&mut knight, 1_200).unwrap();

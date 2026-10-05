@@ -794,7 +794,7 @@ pub struct Item {
     /// ID of the pre-authored mesh RON entry (e.g. 9003 = ItemMeshShortSword).
     ///
     /// When `Some`, `spawn_dropped_item_system` looks up the full `CreatureDefinition`
-    /// from `GameDataResource` and uses its `scale` and mesh data directly.
+    /// from `ContentDatabase::item_meshes` and uses its `scale` and mesh data directly.
     /// When `None`, the system falls back to the procedural `ItemMeshDescriptor::from_item` path.
     #[serde(default)]
     pub mesh_id: Option<u32>,
