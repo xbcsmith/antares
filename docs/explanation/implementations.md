@@ -108,6 +108,7 @@ Related fixes: Terrain Editor stored absolute machine-specific texture paths
 | Area            | Problem                                                              | Fix                                                                            |
 | --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Inn             | Party members still listed as available to recruit                   | Match party member to roster by name + `InParty`, not position                 |
+| Recruitment     | Recruiting a premade at the inn left its map recruitment event and mesh in the world | `GameState::remove_recruitable_events_for` removes the events on all maps; inn recruit/swap also despawn the visual |
 | Recruitment     | Premade characters duplicated in roster when recruited from the map  | `recruit_from_map` and `execute_recruit_to_inn` reuse the existing roster entry |
 | Inventory       | Healing Potions / Food Rations did not stack                         | `build_grouped_inventory` no longer requires `charges == 0`                    |
 | Combat          | Long Bow caused endless attacks and always showed "Miss"             | Two combined bugs in ranged attack handling fixed                              |

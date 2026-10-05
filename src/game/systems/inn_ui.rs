@@ -7,9 +7,11 @@
 //! party members when visiting an inn. This system is active when the game
 //! is in `GameMode::InnManagement` mode.
 
+use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::character::{CharacterLocation, PARTY_MAX_SIZE};
 use crate::game::resources::GlobalState;
+use crate::game::systems::map::DespawnRecruitableVisual;
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -669,12 +671,59 @@ fn inn_selection_system(
     }
 }
 
+/// Removes the map recruitment event (and its visual) for a character who has
+/// just joined the party through the inn.
+///
+/// Without this, a premade character recruited at the inn would still appear as
+/// a recruitable on the map. Character definitions are matched by name because
+/// roster entries do not store their definition id.
+fn retire_map_recruitment(
+    game_state: &mut crate::application::GameState,
+    roster_index: usize,
+    content: Option<&GameContent>,
+    mut despawn_writer: Option<&mut MessageWriter<DespawnRecruitableVisual>>,
+) {
+    let (Some(content), Some(name)) = (
+        content,
+        game_state
+            .roster
+            .characters
+            .get(roster_index)
+            .map(|c| c.name.clone()),
+    ) else {
+        return;
+    };
+
+    let character_ids: Vec<String> = content
+        .db()
+        .characters
+        .all_characters()
+        .filter(|def| def.name == name)
+        .map(|def| def.id.clone())
+        .collect();
+
+    for character_id in character_ids {
+        for (map_id, position) in game_state.remove_recruitable_events_for(&character_id) {
+            if let Some(writer) = despawn_writer.as_deref_mut() {
+                writer.write(DespawnRecruitableVisual {
+                    map_id,
+                    position,
+                    character_id: character_id.clone(),
+                });
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn inn_action_system(
     mut recruit_events: MessageReader<InnRecruitCharacter>,
     mut dismiss_events: MessageReader<InnDismissCharacter>,
     mut swap_events: MessageReader<InnSwapCharacters>,
     mut exit_events: MessageReader<ExitInn>,
     mut global_state: ResMut<GlobalState>,
+    content: Option<Res<GameContent>>,
+    mut despawn_writer: Option<MessageWriter<DespawnRecruitableVisual>>,
     mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
 ) {
     // Get current inn ID before processing events (clone to avoid moving out of state)
@@ -687,6 +736,12 @@ fn inn_action_system(
     for event in recruit_events.read() {
         match global_state.0.recruit_character(event.roster_index) {
             Ok(_) => {
+                retire_map_recruitment(
+                    &mut global_state.0,
+                    event.roster_index,
+                    content.as_deref(),
+                    despawn_writer.as_mut(),
+                );
                 if let Some(character) = global_state.0.roster.characters.get(event.roster_index) {
                     if let Some(ref mut writer) = game_log_writer {
                         writer.write(GameLogEvent {
@@ -748,6 +803,12 @@ fn inn_action_system(
             .swap_party_member(event.party_index, event.roster_index)
         {
             Ok(_) => {
+                retire_map_recruitment(
+                    &mut global_state.0,
+                    event.roster_index,
+                    content.as_deref(),
+                    despawn_writer.as_mut(),
+                );
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: "Party members swapped!".to_string(),

@@ -1,6 +1,6 @@
 (
-    id: 11000,
-    name: "cypress",
+    id: 11012,
+    name: "Cypress",
     meshes: [
         (
             name: Some("Mesh0_0"),

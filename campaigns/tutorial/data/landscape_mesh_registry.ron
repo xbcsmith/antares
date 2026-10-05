@@ -1,8 +1,8 @@
 [
     (
         id: 11000,
-        name: "cypress",
-        filepath: "assets/meshes/landscape/tree/cypress.ron",
+        name: "Acacia",
+        filepath: "assets/meshes/landscape/tree/acacia.ron",
     ),
     (
         id: 11001,
@@ -51,12 +51,22 @@
     ),
     (
         id: 11010,
-        name: "Acacia",
-        filepath: "assets/meshes/landscape/tree/acacia.ron",
+        name: "Tall Grizzled Oak Tree",
+        filepath: "assets/meshes/landscape/tree/tall_grizzled_oak_tree.ron",
     ),
     (
         id: 11011,
         name: "White Birch",
         filepath: "assets/meshes/landscape/tree/white_birch.ron",
+    ),
+    (
+        id: 11012,
+        name: "Cypress",
+        filepath: "assets/meshes/landscape/tree/cypress.ron",
+    ),
+    (
+        id: 11013,
+        name: "Willow",
+        filepath: "assets/meshes/landscape/tree/willow.ron",
     ),
 ]
