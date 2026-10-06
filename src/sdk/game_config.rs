@@ -95,6 +95,7 @@
 
 use crate::domain::campaign::LevelUpMode;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
@@ -528,6 +529,199 @@ impl AudioConfig {
         }
 
         Ok(())
+    }
+}
+
+/// Per-campaign audio manifest that maps engine SFX and music event IDs to
+/// campaign-specific audio files.
+///
+/// Campaign authors place an `audio.ron` file in their campaign directory to
+/// remap the built-in engine event IDs to arbitrarily-named assets.  When an
+/// ID has no mapping the existing `resolve_audio_path` fallback (using the ID
+/// as the filename stem) applies unchanged, so campaigns without `audio.ron`
+/// continue to work with zero changes.
+///
+/// # Well-Known Engine IDs
+///
+/// **SFX** (see [`AudioManifest::well_known_sfx_ids`]):
+/// `combat_hit`, `combat_miss`, `combat_heal`, `spell_fizzle`, `victory_fanfare`
+///
+/// **Music** (see [`AudioManifest::well_known_music_ids`]):
+/// `combat_theme`, `exploration_theme`
+///
+/// # RON Format
+///
+/// ```text
+/// // campaigns/<name>/audio.ron
+/// AudioManifest(
+///     sfx_mappings: {
+///         "combat_hit":      "sounds/heavy_impact.wav",
+///         "combat_miss":     "sounds/whoosh.ogg",
+///         "combat_heal":     "sounds/heal_chime.ogg",
+///         "spell_fizzle":    "sounds/fizzle.ogg",
+///         "victory_fanfare": "sounds/victory.mp3",
+///     },
+///     music_tracks: {
+///         "combat_theme":      "music/battle_theme.ogg",
+///         "exploration_theme": "music/overworld.ogg",
+///     },
+/// )
+/// ```
+///
+/// Values are relative to the campaign's `audio_dir` (`assets/audio/` by
+/// default).  Extension-handling logic in `resolve_audio_path` applies to
+/// mapped values just as it does to bare IDs.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::game_config::AudioManifest;
+///
+/// let ron_str = r#"(
+///     sfx_mappings: {
+///         "combat_hit": "sounds/impact.ogg",
+///     },
+///     music_tracks: {
+///         "combat_theme": "music/battle.ogg",
+///     },
+/// )"#;
+/// let manifest: AudioManifest = ron::from_str(ron_str).expect("parse AudioManifest");
+/// assert_eq!(manifest.resolve_sfx("combat_hit"), Some("sounds/impact.ogg"));
+/// assert_eq!(manifest.resolve_sfx("unknown_id"), None);
+///
+/// let serialized = ron::to_string(&manifest).expect("serialize AudioManifest");
+/// let back: AudioManifest = ron::from_str(&serialized).expect("round-trip AudioManifest");
+/// assert_eq!(manifest, back);
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AudioManifest {
+    /// Maps engine SFX event IDs to audio filenames relative to the campaign's `audio_dir`.
+    ///
+    /// Keys are engine event IDs (e.g. `"combat_hit"`).  Values are filenames
+    /// relative to the campaign audio directory; the file extension is optional.
+    #[serde(default)]
+    pub sfx_mappings: BTreeMap<String, String>,
+
+    /// Maps engine music track IDs to audio filenames relative to the campaign's `audio_dir`.
+    ///
+    /// Keys are engine track IDs (e.g. `"combat_theme"`).  Values are filenames
+    /// relative to the campaign audio directory; the file extension is optional.
+    #[serde(default)]
+    pub music_tracks: BTreeMap<String, String>,
+}
+
+impl AudioManifest {
+    /// Returns the mapped audio filename for a SFX engine event ID, if present.
+    ///
+    /// # Arguments
+    ///
+    /// * `engine_id` - The engine SFX event ID to look up (e.g. `"combat_hit"`)
+    ///
+    /// # Returns
+    ///
+    /// `Some(&str)` with the mapped filename, or `None` if no mapping exists for
+    /// `engine_id`.  When `None` is returned the caller should fall back to the
+    /// existing filename-by-convention logic (`resolve_audio_path`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::AudioManifest;
+    ///
+    /// let mut manifest = AudioManifest::default();
+    /// manifest.sfx_mappings.insert("combat_hit".to_string(), "sounds/impact.ogg".to_string());
+    ///
+    /// assert_eq!(manifest.resolve_sfx("combat_hit"), Some("sounds/impact.ogg"));
+    /// assert_eq!(manifest.resolve_sfx("combat_miss"), None);
+    /// ```
+    pub fn resolve_sfx(&self, engine_id: &str) -> Option<&str> {
+        self.sfx_mappings.get(engine_id).map(String::as_str)
+    }
+
+    /// Returns the mapped audio filename for a music track ID, if present.
+    ///
+    /// # Arguments
+    ///
+    /// * `track_id` - The engine music track ID to look up (e.g. `"combat_theme"`)
+    ///
+    /// # Returns
+    ///
+    /// `Some(&str)` with the mapped filename, or `None` if no mapping exists for
+    /// `track_id`.  When `None` is returned the caller should fall back to the
+    /// existing filename-by-convention logic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::AudioManifest;
+    ///
+    /// let mut manifest = AudioManifest::default();
+    /// manifest.music_tracks.insert("combat_theme".to_string(), "music/battle.ogg".to_string());
+    ///
+    /// assert_eq!(manifest.resolve_music("combat_theme"), Some("music/battle.ogg"));
+    /// assert_eq!(manifest.resolve_music("exploration_theme"), None);
+    /// ```
+    pub fn resolve_music(&self, track_id: &str) -> Option<&str> {
+        self.music_tracks.get(track_id).map(String::as_str)
+    }
+
+    /// Returns the built-in engine SFX event IDs known to the game engine.
+    ///
+    /// These five IDs are hardcoded in `src/game/systems/combat.rs` and are the
+    /// canonical keys the SDK populates when seeding a new `sfx_mappings` table.
+    /// Campaign authors may remap any subset of them in `audio.ron`.
+    ///
+    /// | Engine ID         | Triggered by |
+    /// |-------------------|--------------|
+    /// | `combat_hit`      | Successful attack or spell hit |
+    /// | `combat_miss`     | Missed attack |
+    /// | `combat_heal`     | Healing item use |
+    /// | `spell_fizzle`    | Spell cast with no effect |
+    /// | `victory_fanfare` | Combat victory |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::AudioManifest;
+    ///
+    /// let ids = AudioManifest::well_known_sfx_ids();
+    /// assert_eq!(ids.len(), 5);
+    /// assert!(ids.contains(&"combat_hit"));
+    /// assert!(ids.contains(&"victory_fanfare"));
+    /// ```
+    pub fn well_known_sfx_ids() -> &'static [&'static str] {
+        &[
+            "combat_hit",
+            "combat_miss",
+            "combat_heal",
+            "spell_fizzle",
+            "victory_fanfare",
+        ]
+    }
+
+    /// Returns the built-in engine music track IDs known to the game engine.
+    ///
+    /// These two IDs are hardcoded in `src/game/systems/combat.rs` and are the
+    /// canonical keys the SDK populates when seeding a new `music_tracks` table.
+    /// Campaign authors may remap either of them in `audio.ron`.
+    ///
+    /// | Engine ID           | Triggered by |
+    /// |---------------------|--------------|
+    /// | `combat_theme`      | Combat start |
+    /// | `exploration_theme` | Combat victory (return to exploration) |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::AudioManifest;
+    ///
+    /// let ids = AudioManifest::well_known_music_ids();
+    /// assert_eq!(ids.len(), 2);
+    /// assert!(ids.contains(&"combat_theme"));
+    /// assert!(ids.contains(&"exploration_theme"));
+    /// ```
+    pub fn well_known_music_ids() -> &'static [&'static str] {
+        &["combat_theme", "exploration_theme"]
     }
 }
 
@@ -2663,5 +2857,110 @@ mod tests {
             err.to_string().contains("relative"),
             "validate must propagate font error: {err}"
         );
+    }
+
+    // ── AudioManifest tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_audio_manifest_resolve_sfx_returns_mapped_value_when_present() {
+        let mut manifest = AudioManifest::default();
+        manifest
+            .sfx_mappings
+            .insert("combat_hit".to_string(), "sounds/impact.ogg".to_string());
+        assert_eq!(
+            manifest.resolve_sfx("combat_hit"),
+            Some("sounds/impact.ogg")
+        );
+    }
+
+    #[test]
+    fn test_audio_manifest_resolve_sfx_returns_none_when_absent() {
+        let manifest = AudioManifest::default();
+        assert_eq!(manifest.resolve_sfx("combat_hit"), None);
+    }
+
+    #[test]
+    fn test_audio_manifest_resolve_music_returns_mapped_value_when_present() {
+        let mut manifest = AudioManifest::default();
+        manifest
+            .music_tracks
+            .insert("combat_theme".to_string(), "music/battle.ogg".to_string());
+        assert_eq!(
+            manifest.resolve_music("combat_theme"),
+            Some("music/battle.ogg")
+        );
+    }
+
+    #[test]
+    fn test_audio_manifest_resolve_music_returns_none_when_absent() {
+        let manifest = AudioManifest::default();
+        assert_eq!(manifest.resolve_music("combat_theme"), None);
+    }
+
+    #[test]
+    fn test_audio_manifest_well_known_sfx_ids_contains_five_entries() {
+        let ids = AudioManifest::well_known_sfx_ids();
+        assert_eq!(ids.len(), 5, "expected exactly 5 well-known SFX IDs");
+        assert!(ids.contains(&"combat_hit"));
+        assert!(ids.contains(&"combat_miss"));
+        assert!(ids.contains(&"combat_heal"));
+        assert!(ids.contains(&"spell_fizzle"));
+        assert!(ids.contains(&"victory_fanfare"));
+    }
+
+    #[test]
+    fn test_audio_manifest_well_known_music_ids_contains_two_entries() {
+        let ids = AudioManifest::well_known_music_ids();
+        assert_eq!(
+            ids.len(),
+            2,
+            "expected exactly 2 well-known music track IDs"
+        );
+        assert!(ids.contains(&"combat_theme"));
+        assert!(ids.contains(&"exploration_theme"));
+    }
+
+    #[test]
+    fn test_audio_manifest_default_is_empty_maps() {
+        let manifest = AudioManifest::default();
+        assert!(
+            manifest.sfx_mappings.is_empty(),
+            "default AudioManifest must have no SFX mappings"
+        );
+        assert!(
+            manifest.music_tracks.is_empty(),
+            "default AudioManifest must have no music track mappings"
+        );
+    }
+
+    #[test]
+    fn test_audio_manifest_ron_roundtrip() {
+        let ron_str = r#"(
+            sfx_mappings: {
+                "combat_hit": "sounds/impact.ogg",
+                "combat_miss": "sounds/whoosh.ogg",
+            },
+            music_tracks: {
+                "combat_theme": "music/battle.ogg",
+            },
+        )"#;
+        let manifest: AudioManifest =
+            ron::from_str(ron_str).expect("AudioManifest must parse from RON");
+        assert_eq!(
+            manifest.resolve_sfx("combat_hit"),
+            Some("sounds/impact.ogg")
+        );
+        assert_eq!(
+            manifest.resolve_sfx("combat_miss"),
+            Some("sounds/whoosh.ogg")
+        );
+        assert_eq!(
+            manifest.resolve_music("combat_theme"),
+            Some("music/battle.ogg")
+        );
+        let serialized = ron::to_string(&manifest).expect("AudioManifest must serialize to RON");
+        let back: AudioManifest =
+            ron::from_str(&serialized).expect("AudioManifest must round-trip through RON");
+        assert_eq!(manifest, back);
     }
 }

@@ -36,6 +36,7 @@ use crate::domain::campaign::LevelUpMode;
 use crate::domain::path_security::validate_identifier;
 use crate::domain::types::{Direction, GameTime, Position};
 use crate::sdk::database::ContentDatabase;
+use crate::sdk::game_config::AudioManifest;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -136,6 +137,13 @@ pub struct Campaign {
     /// Game engine configuration
     #[serde(skip)]
     pub game_config: crate::sdk::game_config::GameConfig,
+
+    /// Audio manifest loaded from `audio.ron` at the campaign root.
+    ///
+    /// `None` when `audio.ron` does not exist — full backwards compatibility
+    /// with campaigns that predate this field.
+    #[serde(skip)]
+    pub audio_manifest: Option<AudioManifest>,
 }
 
 /// Campaign configuration (gameplay settings)
@@ -313,6 +321,13 @@ pub struct CampaignData {
     /// Skill definitions data file
     #[serde(default = "default_skills_path")]
     pub skills: String,
+
+    /// Audio mapping data file.
+    ///
+    /// Defaults to `"data/audio.ron"` — campaigns without this file use
+    /// filename-by-convention audio resolution.
+    #[serde(default = "default_audio_file_path")]
+    pub audio: String,
 }
 
 fn default_items_path() -> String {
@@ -365,6 +380,10 @@ fn default_landscape_path() -> String {
 
 fn default_skills_path() -> String {
     "data/skills.ron".to_string()
+}
+
+fn default_audio_file_path() -> String {
+    "data/audio.ron".to_string()
 }
 
 /// Asset paths within campaign
@@ -468,6 +487,7 @@ impl Default for CampaignData {
             furniture: default_furniture_path(),
             landscape: default_landscape_path(),
             skills: default_skills_path(),
+            audio: default_audio_file_path(),
         }
     }
 }
@@ -485,6 +505,33 @@ impl Default for CampaignAssets {
             fonts: default_fonts_path(),
         }
     }
+}
+
+/// Loads `audio.ron` from `campaign_path` if it exists, returning `None` when absent.
+///
+/// A missing file is not an error — campaigns without `audio.ron` continue to work
+/// using the filename-by-convention fallback in `resolve_audio_path`.
+///
+/// # Errors
+///
+/// Returns `CampaignLoadError::MetadataError` if the file exists but cannot be
+/// read or parsed.
+fn load_audio_manifest(campaign_path: &Path) -> Result<Option<AudioManifest>, CampaignLoadError> {
+    let audio_path = campaign_path.join("audio.ron");
+    if !audio_path.exists() {
+        tracing::debug!(
+            "No audio.ron found at {:?}; using filename-by-convention",
+            audio_path
+        );
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(&audio_path).map_err(|e| {
+        CampaignLoadError::MetadataError(format!("Failed to read audio.ron: {}", e))
+    })?;
+    let manifest = ron::from_str::<AudioManifest>(&contents).map_err(|e| {
+        CampaignLoadError::MetadataError(format!("Failed to parse audio.ron: {}", e))
+    })?;
+    Ok(Some(manifest))
 }
 
 impl Campaign {
@@ -535,6 +582,9 @@ impl Campaign {
                 CampaignLoadError::MetadataError(format!("Failed to load game config: {}", e))
             })?;
 
+            // Load audio manifest from audio.ron (optional; None if file absent)
+            campaign.audio_manifest = load_audio_manifest(path)?;
+
             // Ensure ID matches directory if possible, or keep metadata ID
             if let Some(dir_name) = path.file_name() {
                 let dir_id = dir_name.to_string_lossy().to_string();
@@ -562,6 +612,9 @@ impl Campaign {
             .map_err(|e| {
             CampaignLoadError::MetadataError(format!("Failed to load game config: {}", e))
         })?;
+
+        // Load audio manifest from audio.ron (optional; None if file absent)
+        campaign.audio_manifest = load_audio_manifest(path)?;
 
         // Extract ID from directory name
         if let Some(dir_name) = path.file_name() {
@@ -636,6 +689,12 @@ pub struct CampaignMetadata {
     /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
     #[serde(default = "default_starting_time")]
     pub starting_time: GameTime,
+    /// Audio mapping data file.
+    ///
+    /// Defaults to `"data/audio.ron"` so existing `campaign.ron` files
+    /// that lack this field continue to deserialize correctly.
+    #[serde(default = "default_audio_file_path")]
+    pub audio_file: String,
 }
 
 impl TryFrom<CampaignMetadata> for Campaign {
@@ -705,6 +764,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 furniture: metadata.furniture_file,
                 landscape: metadata.landscape_file,
                 skills: metadata.skills_file,
+                audio: metadata.audio_file,
             },
             assets: CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
@@ -716,6 +776,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
             },
             root_path: PathBuf::new(),
             game_config: crate::sdk::game_config::GameConfig::default(),
+            audio_manifest: None,
         })
     }
 }
@@ -1000,6 +1061,7 @@ pub(crate) mod test_fixtures {
             assets: CampaignAssets::default(),
             root_path: PathBuf::from("test"),
             game_config: GameConfig::default(),
+            audio_manifest: None,
         }
     }
 }
@@ -1135,6 +1197,7 @@ mod tests {
             furniture: default_furniture_path(),
             landscape: default_landscape_path(),
             skills: default_skills_path(),
+            audio: default_audio_file_path(),
         };
 
         assert_eq!(data.items, "data/items.ron");
@@ -1143,6 +1206,7 @@ mod tests {
         assert_eq!(data.characters, "data/characters.ron");
         assert_eq!(data.landscape, "data/landscape.ron");
         assert_eq!(data.skills, "data/skills.ron");
+        assert_eq!(data.audio, "data/audio.ron");
     }
 
     #[test]
@@ -1253,6 +1317,7 @@ mod tests {
             landscape_file: "data/landscape.ron".to_string(),
             skills_file: "data/skills.ron".to_string(),
             starting_time: GameTime::new(1, 8, 0),
+            audio_file: "data/audio.ron".to_string(),
         };
 
         let result: Result<Campaign, String> = metadata.try_into();
@@ -1332,5 +1397,202 @@ mod tests {
 
         // And a real fixture id still loads successfully through the guard.
         assert!(loader.load_campaign("test_campaign").is_ok());
+    }
+
+    // ── AudioManifest loading tests ───────────────────────────────────────────
+
+    /// Writes a minimal valid `CampaignMetadata` RON to `{dir}/campaign.ron`.
+    /// Used by audio manifest tests that need a throwaway campaign directory.
+    fn write_minimal_campaign_ron(dir: &std::path::Path) {
+        let content = r#"CampaignMetadata(
+    id: "test",
+    name: "Test",
+    version: "1.0.0",
+    author: "Test Author",
+    description: "Test campaign for audio manifest loading",
+    engine_version: "0.1.0",
+    starting_map: "1",
+    starting_position: (0, 0),
+    starting_direction: "North",
+    starting_gold: 100,
+    starting_food: 10,
+    max_party_size: 6,
+    max_roster_size: 20,
+    difficulty: Normal,
+    permadeath: false,
+    allow_multiclassing: false,
+    starting_level: 1,
+    max_level: 20,
+    items_file: "data/items.ron",
+    spells_file: "data/spells.ron",
+    monsters_file: "data/monsters.ron",
+    classes_file: "data/classes.ron",
+    races_file: "data/races.ron",
+    maps_dir: "data/maps",
+    quests_file: "data/quests.ron",
+    dialogue_file: "data/dialogues.ron",
+)"#;
+        std::fs::write(dir.join("campaign.ron"), content)
+            .expect("write_minimal_campaign_ron: failed to write campaign.ron");
+    }
+
+    #[test]
+    fn test_campaign_load_without_audio_ron_sets_manifest_to_none() {
+        // A campaign directory without audio.ron must yield audio_manifest = None.
+        // Uses a temp dir so the result is not affected by future fixture changes.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_minimal_campaign_ron(dir.path());
+        // Deliberately do NOT create audio.ron in this directory.
+        let campaign =
+            Campaign::load(dir.path()).expect("campaign without audio.ron must load successfully");
+        assert!(
+            campaign.audio_manifest.is_none(),
+            "audio_manifest must be None when audio.ron is absent from the campaign directory"
+        );
+    }
+
+    #[test]
+    fn test_campaign_load_with_valid_audio_ron_populates_manifest() {
+        // A well-formed audio.ron must be parsed and stored as Some(AudioManifest).
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_minimal_campaign_ron(dir.path());
+
+        let audio_ron = r#"(
+    sfx_mappings: {
+        "combat_hit": "sounds/impact.ogg",
+    },
+    music_tracks: {
+        "combat_theme": "music/battle.ogg",
+    },
+)"#;
+        std::fs::write(dir.path().join("audio.ron"), audio_ron).expect("failed to write audio.ron");
+
+        let campaign = Campaign::load(dir.path())
+            .expect("campaign with a valid audio.ron must load successfully");
+
+        let manifest = campaign
+            .audio_manifest
+            .as_ref()
+            .expect("audio_manifest must be Some when a valid audio.ron is present");
+
+        assert_eq!(
+            manifest.resolve_sfx("combat_hit"),
+            Some("sounds/impact.ogg"),
+            "resolve_sfx must return the mapped filename"
+        );
+        assert_eq!(
+            manifest.resolve_music("combat_theme"),
+            Some("music/battle.ogg"),
+            "resolve_music must return the mapped filename"
+        );
+        assert_eq!(
+            manifest.resolve_sfx("combat_miss"),
+            None,
+            "resolve_sfx must return None for an unmapped id"
+        );
+    }
+
+    #[test]
+    fn test_campaign_load_with_malformed_audio_ron_returns_error() {
+        // A syntactically invalid audio.ron must produce CampaignLoadError::MetadataError.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_minimal_campaign_ron(dir.path());
+
+        std::fs::write(dir.path().join("audio.ron"), "INVALID RON {{ GARBAGE")
+            .expect("failed to write malformed audio.ron");
+
+        let result = Campaign::load(dir.path());
+
+        assert!(
+            matches!(result, Err(CampaignLoadError::MetadataError(_))),
+            "malformed audio.ron must produce CampaignLoadError::MetadataError, got {:?}",
+            result
+        );
+    }
+
+    // ── Phase 4: audio.ron fixture integration tests ──────────────────────────
+
+    #[test]
+    fn test_campaign_load_test_campaign_populates_audio_manifest() {
+        // data/test_campaign/audio.ron exists; the manifest must be loaded and populated.
+        let campaign = CampaignLoader::new("data")
+            .load_campaign("test_campaign")
+            .expect("failed to load data/test_campaign");
+
+        let manifest = campaign
+            .audio_manifest
+            .as_ref()
+            .expect("data/test_campaign has audio.ron so audio_manifest must be Some");
+
+        assert_eq!(
+            manifest.resolve_sfx("combat_hit"),
+            Some("test_hit.ogg"),
+            "resolve_sfx must return the value mapped in data/test_campaign/audio.ron"
+        );
+        assert_eq!(
+            manifest.resolve_music("combat_theme"),
+            Some("test_battle.ogg"),
+            "resolve_music must return the value mapped in data/test_campaign/audio.ron"
+        );
+        // IDs absent from the manifest fall back to filename-by-convention (return None here).
+        assert_eq!(
+            manifest.resolve_sfx("combat_miss"),
+            None,
+            "resolve_sfx must return None for IDs absent from the manifest"
+        );
+    }
+
+    #[test]
+    fn test_campaign_metadata_audio_file_defaults_to_data_audio_ron() {
+        // A CampaignMetadata RON without audio_file must deserialize with the
+        // default value "data/audio.ron".
+        let ron = r#"CampaignMetadata(
+    id: "test",
+    name: "Test",
+    version: "1.0.0",
+    author: "Tester",
+    description: "desc",
+    engine_version: "0.1.0",
+    starting_map: "1",
+    starting_position: (0, 0),
+    starting_direction: "North",
+    starting_gold: 100,
+    starting_food: 10,
+    max_party_size: 6,
+    max_roster_size: 20,
+    difficulty: Normal,
+    permadeath: false,
+    allow_multiclassing: false,
+    starting_level: 1,
+    max_level: 20,
+    items_file: "data/items.ron",
+    spells_file: "data/spells.ron",
+    monsters_file: "data/monsters.ron",
+    classes_file: "data/classes.ron",
+    races_file: "data/races.ron",
+    maps_dir: "data/maps",
+    quests_file: "data/quests.ron",
+    dialogue_file: "data/dialogues.ron",
+)"#;
+        let metadata: CampaignMetadata =
+            ron::from_str(ron).expect("CampaignMetadata without audio_file must deserialize");
+        assert_eq!(
+            metadata.audio_file, "data/audio.ron",
+            "audio_file must default to \"data/audio.ron\" when absent from RON"
+        );
+    }
+
+    #[test]
+    fn test_audio_manifest_missing_file_gives_none() {
+        // When audio.ron is absent from a campaign directory, audio_manifest must be None.
+        // Uses an isolated temp dir so the test never depends on fixture file presence.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_minimal_campaign_ron(dir.path());
+        // No audio.ron written — confirm the absent-file path.
+        let campaign = Campaign::load(dir.path()).expect("campaign without audio.ron must load");
+        assert!(
+            campaign.audio_manifest.is_none(),
+            "audio_manifest must be None when audio.ron is absent"
+        );
     }
 }

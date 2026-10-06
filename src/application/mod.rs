@@ -1697,6 +1697,57 @@ impl GameState {
 
     // ===== Map Recruitment System =====
 
+    /// Removes every `RecruitableCharacter` map event for `character_id` on all maps.
+    ///
+    /// Used when a character joins the party by some route other than the map
+    /// event (for example, recruited at an inn), so the now-stale recruitment
+    /// encounter no longer appears in the world. The character is also marked as
+    /// encountered to prevent a later re-recruitment.
+    ///
+    /// # Returns
+    ///
+    /// The `(MapId, Position)` of every removed event, so callers can despawn the
+    /// matching visuals.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let mut state = GameState::new();
+    /// let removed = state.remove_recruitable_events_for("whisper");
+    /// assert!(removed.is_empty());
+    /// assert!(state.encountered_characters.contains("whisper"));
+    /// ```
+    pub fn remove_recruitable_events_for(
+        &mut self,
+        character_id: &str,
+    ) -> Vec<(crate::MapId, crate::Position)> {
+        use crate::domain::world::MapEvent;
+
+        self.encountered_characters.insert(character_id.to_string());
+
+        let mut removed = Vec::new();
+        for (map_id, map) in self.world.maps.iter_mut() {
+            let positions: Vec<_> = map
+                .events
+                .iter()
+                .filter_map(|(pos, event)| match event {
+                    MapEvent::RecruitableCharacter {
+                        character_id: cid, ..
+                    } if cid == character_id => Some(*pos),
+                    _ => None,
+                })
+                .collect();
+            for pos in positions {
+                if map.remove_event(pos).is_some() {
+                    removed.push((*map_id, pos));
+                }
+            }
+        }
+        removed
+    }
+
     /// Finds the nearest inn to the party's current position
     ///
     /// This simplified implementation returns the campaign's configured
@@ -1818,12 +1869,33 @@ impl GameState {
         // Mark as encountered to prevent re-recruitment
         self.encountered_characters.insert(character_id.to_string());
 
+        // Premade characters are already in the roster (at the starting inn).
+        // Reuse that entry instead of adding a duplicate, otherwise the same
+        // character appears both in the party and in the inn's recruit list.
+        let existing_index = self
+            .roster
+            .characters
+            .iter()
+            .position(|c| c.name == character.name);
+
         // Determine where to place the character
         if self.party.size() < crate::domain::character::Party::MAX_MEMBERS {
             // Party has room - add directly to party
-            self.party.add_member(character.clone())?;
-            self.roster
-                .add_character(character, CharacterLocation::InParty)?;
+            match existing_index {
+                Some(idx) => {
+                    if self.roster.character_locations[idx] != CharacterLocation::InParty {
+                        let existing = self.roster.characters[idx].clone();
+                        self.party.add_member(existing)?;
+                        self.roster
+                            .update_location(idx, CharacterLocation::InParty)?;
+                    }
+                }
+                None => {
+                    self.party.add_member(character.clone())?;
+                    self.roster
+                        .add_character(character, CharacterLocation::InParty)?;
+                }
+            }
 
             Ok(RecruitResult::AddedToParty)
         } else {
@@ -1832,8 +1904,18 @@ impl GameState {
                 .find_nearest_inn()
                 .unwrap_or("tutorial_innkeeper_town".to_string()); // Fallback to tutorial innkeeper ID if no campaign
 
-            self.roster
-                .add_character(character, CharacterLocation::AtInn(inn_id.clone()))?;
+            match existing_index {
+                Some(idx) => {
+                    if self.roster.character_locations[idx] != CharacterLocation::InParty {
+                        self.roster
+                            .update_location(idx, CharacterLocation::AtInn(inn_id.clone()))?;
+                    }
+                }
+                None => {
+                    self.roster
+                        .add_character(character, CharacterLocation::AtInn(inn_id.clone()))?;
+                }
+            }
 
             Ok(RecruitResult::SentToInn(inn_id))
         }
@@ -3758,6 +3840,75 @@ mod tests {
 
         // Party size should have decreased by one
         assert_eq!(state.party.size(), 1);
+    }
+
+    #[test]
+    fn test_remove_recruitable_events_for_removes_matching_events_on_all_maps() {
+        use crate::domain::world::{Map, MapEvent};
+        use crate::Position;
+
+        let mut state = GameState::new();
+        let make_event = |cid: &str| MapEvent::RecruitableCharacter {
+            name: String::new(),
+            description: String::new(),
+            character_id: cid.to_string(),
+            dialogue_id: None,
+            time_condition: None,
+            facing: None,
+            face_on_dialogue: false,
+        };
+        let mut map1 = Map::new(1, "One".to_string(), "".to_string(), 5, 5);
+        map1.add_event(Position::new(1, 1), make_event("whisper"));
+        map1.add_event(Position::new(2, 2), make_event("isolde"));
+        let mut map2 = Map::new(2, "Two".to_string(), "".to_string(), 5, 5);
+        map2.add_event(Position::new(3, 3), make_event("whisper"));
+        state.world.add_map(map1);
+        state.world.add_map(map2);
+
+        let removed = state.remove_recruitable_events_for("whisper");
+
+        assert_eq!(removed.len(), 2);
+        assert!(state.encountered_characters.contains("whisper"));
+        assert!(state.world.maps[&1]
+            .get_event(Position::new(1, 1))
+            .is_none());
+        assert!(state.world.maps[&2]
+            .get_event(Position::new(3, 3))
+            .is_none());
+        assert!(state.world.maps[&1]
+            .get_event(Position::new(2, 2))
+            .is_some());
+    }
+
+    #[test]
+    fn test_recruit_from_map_premade_reuses_roster_entry_no_duplicate() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
+        let campaign = loader
+            .load_campaign("test_campaign")
+            .expect("Failed to load test campaign");
+        let (mut state, db) = GameState::new_game(campaign).expect("new_game should succeed");
+
+        // "Whisper" is a premade that starts at the inn, so she already has a roster entry.
+        let roster_len = state.roster.characters.len();
+        let result = state
+            .recruit_from_map("whisper", &db)
+            .expect("recruit should succeed");
+        assert!(matches!(result, RecruitResult::AddedToParty));
+
+        assert_eq!(state.roster.characters.len(), roster_len);
+        let entries: Vec<_> = state
+            .roster
+            .characters
+            .iter()
+            .zip(&state.roster.character_locations)
+            .filter(|(c, _)| c.name == "Whisper")
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            *entries[0].1,
+            crate::domain::character::CharacterLocation::InParty
+        );
+        assert!(state.party.members.iter().any(|c| c.name == "Whisper"));
     }
 
     #[test]

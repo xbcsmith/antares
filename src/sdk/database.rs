@@ -36,7 +36,9 @@ use crate::domain::classes::ClassDatabase;
 use crate::domain::combat::monster::Monster;
 use crate::domain::conditions::{ConditionDefinition, ConditionId};
 use crate::domain::dialogue::{DialogueCondition, DialogueId, DialogueTree, NodeId};
+use crate::domain::items::database::ItemMeshDatabase;
 use crate::domain::items::ItemDatabase;
+use crate::domain::levels::LevelDatabase;
 use crate::domain::magic::types::Spell;
 use crate::domain::quest::{Quest, QuestId};
 use crate::domain::races::{RaceDatabase, RaceError};
@@ -105,6 +107,10 @@ pub enum DatabaseError {
     #[error("Failed to load object meshes: {0}")]
     ObjectMeshLoadError(String),
 
+    /// Failed to load or parse `data/item_mesh_registry.ron`
+    #[error("Failed to load item meshes: {0}")]
+    ItemMeshLoadError(String),
+
     #[error("Failed to load skills: {0}")]
     SkillLoadError(String),
 
@@ -114,6 +120,10 @@ pub enum DatabaseError {
 
     #[error("Failed to load terrain: {0}")]
     TerrainLoadError(String),
+
+    /// Failed to load or parse `data/levels.ron`
+    #[error("Failed to load level tables: {0}")]
+    LevelLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: String, error: String },
@@ -749,6 +759,21 @@ pub struct ContentDatabase {
     /// on top: new IDs are added, re-used built-in IDs override the built-in.
     /// Missing `terrain.ron` is not an error.
     pub terrain: TerrainDatabase,
+
+    /// Per-class explicit XP thresholds for leveling.
+    ///
+    /// Loaded from `data/levels.ron` in the campaign directory. Missing file
+    /// is not an error — classes without an explicit table use the default
+    /// XP formula (see [`crate::domain::progression::award_experience`]).
+    pub levels: LevelDatabase,
+
+    /// Item mesh registry — optional data-driven `CreatureDefinition` mesh
+    /// override for dropped-item visuals, keyed by [`crate::domain::types::MeshId`].
+    ///
+    /// Loaded from `data/item_mesh_registry.ron` in the campaign directory.
+    /// Missing file is not an error — items without a registry entry fall
+    /// back to the procedural mesh generator.
+    pub item_meshes: ItemMeshDatabase,
 }
 
 impl ContentDatabase {
@@ -785,6 +810,8 @@ impl ContentDatabase {
             skills: SkillDatabase::new(),
             wind: crate::domain::world::wind::CampaignWindConfig::default(),
             terrain: TerrainDatabase::new(),
+            levels: LevelDatabase::new(),
+            item_meshes: ItemMeshDatabase::new(),
         }
     }
 
@@ -976,15 +1003,19 @@ impl ContentDatabase {
         };
 
         // Load landscape mesh registry (opt-in per campaign; missing file is not an error)
+        //
+        // Texture-path validation happens in `validate_landscape_content` below,
+        // not here — `CreatureDatabase::load_from_registry` only registers mesh
+        // files lazily now (parsing on first actual use), and forcing a full
+        // `validate_texture_paths` pass immediately after load would eagerly
+        // parse every mesh file anyway, undoing that laziness before it ever
+        // helps (landscape tree meshes alone can total gigabytes of RON text).
         let landscape_meshes = if data_dir.join("landscape_mesh_registry.ron").exists() {
-            let db = LandscapeMeshDatabase::load_from_registry(
+            LandscapeMeshDatabase::load_from_registry(
                 &data_dir.join("landscape_mesh_registry.ron"),
                 campaign_path,
             )
-            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
-            db.validate_texture_paths(Some(campaign_path))
-                .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
-            db
+            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?
         } else {
             LandscapeMeshDatabase::new()
         };
@@ -1058,6 +1089,29 @@ impl ContentDatabase {
             db
         };
 
+        // Load per-class level tables (opt-in per campaign; missing file means
+        // "use the default XP formula for every class").
+        let levels_path = data_dir.join("levels.ron");
+        let levels = if levels_path.exists() {
+            LevelDatabase::load_from_file(&levels_path)
+                .map_err(|e| DatabaseError::LevelLoadError(e.to_string()))?
+        } else {
+            LevelDatabase::new()
+        };
+
+        // Load item mesh registry (opt-in per campaign; missing file is not an
+        // error). Like `creatures`/`landscape_meshes`, this only registers file
+        // references lazily — no per-item mesh file is parsed here.
+        let item_meshes = if data_dir.join("item_mesh_registry.ron").exists() {
+            ItemMeshDatabase::load_from_registry(
+                &data_dir.join("item_mesh_registry.ron"),
+                campaign_path,
+            )
+            .map_err(|e| DatabaseError::ItemMeshLoadError(e.to_string()))?
+        } else {
+            ItemMeshDatabase::new()
+        };
+
         let db = Self {
             classes,
             races,
@@ -1079,8 +1133,13 @@ impl ContentDatabase {
             skills,
             wind,
             terrain,
+            levels,
+            item_meshes,
         };
-        db.validate_landscape_content(Some(campaign_path))?;
+        // `thorough: false` — this runs on every game launch; see
+        // `validate_landscape_content`'s doc comment for why the expensive
+        // texture-path scan is skipped here.
+        db.validate_landscape_content(Some(campaign_path), false)?;
         Ok(db)
     }
 
@@ -1300,6 +1359,27 @@ impl ContentDatabase {
             db
         };
 
+        // Load per-class level tables (opt-in; missing file means "use the
+        // default XP formula for every class").
+        let levels_path = data_path.join("levels.ron");
+        let levels = if levels_path.exists() {
+            LevelDatabase::load_from_file(&levels_path)
+                .map_err(|e| DatabaseError::LevelLoadError(e.to_string()))?
+        } else {
+            LevelDatabase::new()
+        };
+
+        // Load item mesh registry (opt-in; missing file is not an error).
+        let item_meshes = if data_path.join("item_mesh_registry.ron").exists() {
+            ItemMeshDatabase::load_from_registry(
+                &data_path.join("item_mesh_registry.ron"),
+                asset_root,
+            )
+            .map_err(|e| DatabaseError::ItemMeshLoadError(e.to_string()))?
+        } else {
+            ItemMeshDatabase::new()
+        };
+
         let db = Self {
             classes,
             races,
@@ -1321,18 +1401,36 @@ impl ContentDatabase {
             skills,
             wind,
             terrain,
+            levels,
+            item_meshes,
         };
-        db.validate_landscape_content(Some(asset_root))?;
+        // `load_core` is only used by SDK editor tooling, not the shipped
+        // game, so the thorough (texture-path-scanning) check is fine here.
+        db.validate_landscape_content(Some(asset_root), true)?;
         Ok(db)
     }
 
-    fn validate_landscape_content(&self, asset_root: Option<&Path>) -> Result<(), DatabaseError> {
+    /// Validates landscape/mesh content.
+    ///
+    /// `thorough` controls whether [`LandscapeMeshDatabase::validate_texture_paths`]
+    /// runs: that check walks every registered mesh's `texture_path`, which
+    /// requires fully parsing each (potentially many-MB) mesh file — exactly
+    /// the eager cost `CreatureDatabase`'s lazy loading exists to avoid.
+    /// Callers on the hot campaign-load path pass `false`; only an explicit,
+    /// developer-triggered "validate everything" action should pay for `true`.
+    fn validate_landscape_content(
+        &self,
+        asset_root: Option<&Path>,
+        thorough: bool,
+    ) -> Result<(), DatabaseError> {
         self.landscape_meshes
             .validate()
             .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
-        self.landscape_meshes
-            .validate_texture_paths(asset_root)
-            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+        if thorough {
+            self.landscape_meshes
+                .validate_texture_paths(asset_root)
+                .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+        }
         self.landscape
             .validate_mesh_references(&self.landscape_meshes)
             .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
@@ -1501,7 +1599,10 @@ impl ContentDatabase {
 
         // Validate landscape definitions, mesh references, texture prefixes,
         // map placements, and movement-critical blocking conflicts.
-        self.validate_landscape_content(None)?;
+        // `thorough: true` — this is the explicit, developer-triggered
+        // "validate everything" entry point, so paying for the full
+        // texture-path scan here is the right trade-off.
+        self.validate_landscape_content(None, true)?;
 
         // Cross-reference validation
 

@@ -101,6 +101,41 @@ fn main() {
     let controls_config = campaign.game_config.controls.clone();
     let audio_config = campaign.game_config.audio.clone();
     let audio_dir = campaign.assets.audio.clone();
+    let audio_manifest = campaign.audio_manifest.clone();
+
+    // Load the domain-layer AudioMap from data/audio.ron inside the campaign.
+    // A missing file is not an error — campaigns without data/audio.ron fall back
+    // to AudioManifestResource (SDK layer) then to filename-by-convention.
+    let audio_map_path = campaign.root_path.join(&campaign.data.audio);
+    let audio_map: Option<antares::domain::AudioMap> = if audio_map_path.exists() {
+        match std::fs::read_to_string(&audio_map_path) {
+            Err(e) => {
+                tracing::warn!(
+                    "could not read audio map at {}: {}",
+                    audio_map_path.display(),
+                    e
+                );
+                None
+            }
+            Ok(contents) => match ron::from_str::<antares::domain::AudioMap>(&contents) {
+                Ok(map) => Some(map),
+                Err(e) => {
+                    tracing::warn!(
+                        "could not parse audio map at {}: {}",
+                        audio_map_path.display(),
+                        e
+                    );
+                    None
+                }
+            },
+        }
+    } else {
+        tracing::debug!(
+            "No audio map found at {}; falling back to filename-by-convention",
+            audio_map_path.display()
+        );
+        None
+    };
 
     // Configure window plugin from graphics config
     let window_plugin = WindowPlugin {
@@ -194,6 +229,8 @@ fn main() {
     .add_plugins(antares::game::systems::audio::AudioPlugin {
         config: audio_config,
         audio_dir,
+        audio_manifest,
+        audio_map,
     })
     .add_plugins(antares::game::systems::ui::UiPlugin);
 
@@ -435,6 +472,12 @@ impl Plugin for AntaresPlugin {
         let rng_seed = game_state.rng_seed;
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(antares::game::resources::GameRng::from_seed(rng_seed));
+        // Mirror the campaign's wind config into its own resource — grass/wind
+        // rendering systems (`grass_instancing`, `advanced_grass`) read
+        // `WindConfig` directly rather than reaching into `GameContent`.
+        app.insert_resource(antares::game::resources::WindConfig(
+            content_db.wind.clone(),
+        ));
         app.insert_resource(antares::application::resources::GameContent::new(
             content_db,
         ));
@@ -556,6 +599,7 @@ mod tests {
                 graphics,
                 ..GameConfig::default()
             },
+            audio_manifest: None,
         }
     }
 

@@ -3205,26 +3205,24 @@ mod tests {
     /// The test_campaign item mesh registry is non-empty after loading.
     #[test]
     fn test_item_mesh_registry_tutorial_coverage() {
-        use crate::domain::campaign_loader::CampaignLoader;
+        use crate::domain::items::database::ItemMeshDatabase;
         use std::path::PathBuf;
 
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let base = PathBuf::from(manifest_dir).join("data");
-        let campaign = base.join("test_campaign");
+        let campaign = PathBuf::from(manifest_dir).join("data/test_campaign");
+        let registry_path = campaign.join("data/item_mesh_registry.ron");
 
-        let mut loader = CampaignLoader::new(base, campaign);
-        let result = loader.load_game_data();
-        assert!(result.is_ok(), "load_game_data failed: {:?}", result.err());
+        let item_meshes = ItemMeshDatabase::load_from_registry(&registry_path, &campaign)
+            .expect("item mesh registry must load for test_campaign");
 
-        let game_data = result.unwrap();
         assert!(
-            !game_data.item_meshes.is_empty(),
+            !item_meshes.is_empty(),
             "Expected non-empty item mesh registry in test_campaign"
         );
         assert!(
-            game_data.item_meshes.count() >= 2,
+            item_meshes.count() >= 2,
             "Expected at least 2 item mesh entries, got {}",
-            game_data.item_meshes.count()
+            item_meshes.count()
         );
     }
 

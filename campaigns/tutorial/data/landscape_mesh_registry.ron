@@ -1,8 +1,8 @@
 [
     (
         id: 11000,
-        name: "Willow Tree",
-        filepath: "assets/meshes/landscape/tree/willow_tree.ron",
+        name: "Acacia",
+        filepath: "assets/meshes/landscape/tree/acacia.ron",
     ),
     (
         id: 11001,
@@ -33,5 +33,40 @@
         id: 11006,
         name: "Pile of Rocks",
         filepath: "assets/meshes/landscape/rock/pile_of_rocks.ron",
+    ),
+    (
+        id: 11007,
+        name: "Short Grizzled Oak",
+        filepath: "assets/meshes/landscape/tree/short_grizzled_oak.ron",
+    ),
+    (
+        id: 11008,
+        name: "Giant Sequoia",
+        filepath: "assets/meshes/landscape/tree/giant_sequoia.ron",
+    ),
+    (
+        id: 11009,
+        name: "Maple",
+        filepath: "assets/meshes/landscape/tree/maple.ron",
+    ),
+    (
+        id: 11010,
+        name: "Tall Grizzled Oak Tree",
+        filepath: "assets/meshes/landscape/tree/tall_grizzled_oak_tree.ron",
+    ),
+    (
+        id: 11011,
+        name: "White Birch",
+        filepath: "assets/meshes/landscape/tree/white_birch.ron",
+    ),
+    (
+        id: 11012,
+        name: "Cypress",
+        filepath: "assets/meshes/landscape/tree/cypress.ron",
+    ),
+    (
+        id: 11013,
+        name: "Willow",
+        filepath: "assets/meshes/landscape/tree/willow.ron",
     ),
 ]

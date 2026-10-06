@@ -2105,6 +2105,97 @@ impl CampaignBuilderApp {
         Ok(())
     }
 
+    /// Load the audio mapping from `data/audio.ron` inside the campaign directory.
+    ///
+    /// A missing file is not an error — audio mapping is opt-in.
+    /// Sets `editor_registry.audio_editor_state.loaded_from_file = true` on success.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.load_audio();
+    /// ```
+    pub fn load_audio(&mut self) {
+        let mut audio_state = audio_editor::AudioEditorState::new();
+
+        if let Some(ref dir) = self.campaign_dir {
+            let path = dir.join(&self.campaign.audio_file);
+            if path.exists() {
+                match fs::read_to_string(&path) {
+                    Ok(contents) => match ron::from_str::<antares::domain::AudioMap>(&contents) {
+                        Ok(map) => {
+                            audio_state.load_from_map(&map);
+                            audio_state.loaded_from_file = true;
+                            audio_state.refresh_imported_files(dir);
+                            self.logger
+                                .info(category::FILE_IO, "Loaded audio map from data/audio.ron");
+                        }
+                        Err(e) => {
+                            // Rule 13: parse errors go to logger, NOT status_message.
+                            self.logger.warn(
+                                category::FILE_IO,
+                                &format!("Failed to parse audio.ron: {}", e),
+                            );
+                            audio_state.refresh_imported_files(dir);
+                        }
+                    },
+                    Err(e) => {
+                        // Rule 13: I/O errors go to logger, NOT status_message.
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to read audio.ron: {}", e),
+                        );
+                    }
+                }
+            } else {
+                // Missing file is not an error; refresh imported files from assets/audio/
+                audio_state.refresh_imported_files(dir);
+                self.logger
+                    .debug(category::FILE_IO, "No data/audio.ron found (opt-in)");
+            }
+        }
+
+        // Rule 13: clear the auto-load flag so show_audio_editor does not re-read
+        // the file on every subsequent frame.
+        audio_state.needs_initial_load = false;
+        self.editor_registry.audio_editor_state = audio_state;
+    }
+
+    /// Save the audio mapping to `data/audio.ron` inside the campaign directory.
+    ///
+    /// Only non-empty `mapped_file` rows are written. Returns an error if the
+    /// campaign directory is not set or the file cannot be written.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CampaignIoError`] when the campaign directory is not set or the
+    /// file cannot be written.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.save_audio().ok();
+    /// ```
+    pub fn save_audio(&mut self) -> Result<(), CampaignIoError> {
+        let dir = self
+            .campaign_dir
+            .as_ref()
+            .ok_or(CampaignIoError::NoCampaignDir)?;
+        let path = dir.join(&self.campaign.audio_file);
+        let map = self.editor_registry.audio_editor_state.to_audio_map();
+        write_ron_to_path(&path, &map, "audio")?;
+        self.editor_registry.audio_editor_state.unsaved_changes = false;
+        self.logger
+            .info(category::FILE_IO, "Saved audio map to data/audio.ron");
+        Ok(())
+    }
+
     /// Load creatures from RON file
     pub fn load_creatures(&mut self) {
         let creatures_file = self.campaign.creatures_file.clone();
@@ -3082,6 +3173,12 @@ impl CampaignBuilderApp {
             .reset_for_new_campaign();
         self.campaign_data.levels.clear();
 
+        // Reset audio editor for the same reason — prevent stale data from a
+        // previous campaign leaking into the new campaign workspace (SDK Rule 13).
+        self.editor_registry
+            .audio_editor_state
+            .reset_for_new_campaign();
+
         self.campaign = CampaignMetadata::default();
 
         // Sync the campaign editor's authoritative metadata and edit buffer with
@@ -3288,6 +3385,30 @@ impl CampaignBuilderApp {
             save_warnings.push(format!("Furniture: {}", e));
         }
 
+        // Guard: only write audio map if it was successfully loaded from disk
+        // this session OR the campaign has non-empty audio mappings authored by
+        // the user.  Without the guard a default-empty AudioMap would overwrite
+        // a valid data/audio.ron (SDK Rule 17 — mirrors the creatures guard).
+        let has_audio_data = self
+            .editor_registry
+            .audio_editor_state
+            .sfx_mappings
+            .iter()
+            .any(|r| !r.mapped_file.is_empty())
+            || self
+                .editor_registry
+                .audio_editor_state
+                .music_mappings
+                .iter()
+                .any(|r| !r.mapped_file.is_empty());
+        let should_save_audio =
+            self.editor_registry.audio_editor_state.loaded_from_file || has_audio_data;
+        if should_save_audio {
+            if let Err(e) = self.save_audio() {
+                save_warnings.push(format!("Audio: {}", e));
+            }
+        }
+
         if let Err(e) = self.save_landscape() {
             save_warnings.push(format!("Landscape: {}", e));
         }
@@ -3490,6 +3611,12 @@ impl CampaignBuilderApp {
                     self.load_maps();
                     self.load_conditions();
                     self.load_furniture();
+                    // Rule 13: reset audio state before loading so stale data
+                    // from a previous campaign cannot survive into the new one.
+                    self.editor_registry
+                        .audio_editor_state
+                        .reset_for_new_campaign();
+                    self.load_audio();
                     self.editor_registry
                         .landscape_editor_state
                         .reset_for_new_campaign();

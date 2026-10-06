@@ -1,0 +1,14 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// Audio manifest fixture for the test_campaign integration test fixture.
+// Maps engine SFX and music event IDs to test-campaign-specific audio filenames.
+// These paths are intentionally short so tests can assert exact string equality.
+AudioManifest(
+    sfx_mappings: {
+        "combat_hit": "test_hit.ogg",
+    },
+    music_tracks: {
+        "combat_theme": "test_battle.ogg",
+    },
+)

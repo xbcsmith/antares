@@ -33,7 +33,6 @@ use crate::domain::world::terrain::TERRAIN_GROUND;
 use crate::domain::world::MapEvent;
 use crate::game::components::billboard::Billboard;
 use crate::game::components::dropped_item::DroppedItem;
-use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::{DroppedItemRegistry, GlobalState};
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::map::{MapEntity, TileCoord};
@@ -288,7 +287,6 @@ pub fn spawn_dropped_item_system(
     mut registry: ResMut<DroppedItemRegistry>,
     mut events: MessageReader<ItemDroppedEvent>,
     content: Option<Res<GameContent>>,
-    game_data: Option<Res<GameDataResource>>,
     global_state: Option<Res<GlobalState>>,
 ) {
     let Some(content) = content else {
@@ -320,34 +318,28 @@ pub fn spawn_dropped_item_system(
         // pre-authored `CreatureDefinition` directly.  This lets campaign authors
         // control scale and mesh geometry via RON files without touching Rust.
         //
-        // Procedural fallback: if no `mesh_id` is present, or `GameDataResource`
-        // is not yet loaded, or the ID is not found in the database, fall back to
-        // the procedural `ItemMeshDescriptor::from_item` path.
-        let mut creature_def = if let Some(mesh_id) = item.mesh_id {
-            if let Some(gd) = game_data.as_ref() {
-                if let Some(def) = gd
-                    .data()
-                    .item_meshes
-                    .as_creature_database()
-                    .get_creature(mesh_id)
-                {
-                    def.clone()
-                } else {
+        // Procedural fallback: if no `mesh_id` is present, or the ID is not
+        // found in the database, fall back to the procedural
+        // `ItemMeshDescriptor::from_item` path.
+        let mut creature_def = match item.mesh_id.and_then(|mesh_id| {
+            content
+                .db()
+                .item_meshes
+                .as_creature_database()
+                .get_creature(mesh_id)
+        }) {
+            Some(def) => def.clone(),
+            None => {
+                if let Some(mesh_id) = item.mesh_id {
                     warn!(
                         "spawn_dropped_item_system: mesh_id {} not found in item_meshes for \
                          item_id {}; falling back to procedural mesh",
                         mesh_id, ev.item_id
                     );
-                    ItemMeshDescriptor::from_item(item)
-                        .to_creature_definition_with_charges(charges_fraction)
                 }
-            } else {
                 ItemMeshDescriptor::from_item(item)
                     .to_creature_definition_with_charges(charges_fraction)
             }
-        } else {
-            ItemMeshDescriptor::from_item(item)
-                .to_creature_definition_with_charges(charges_fraction)
         };
 
         // Stand every non-shadow child mesh upright.

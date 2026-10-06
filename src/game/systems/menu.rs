@@ -188,6 +188,11 @@ fn despawn_with_children(
 }
 
 /// Detect submenu transitions and despawn old menu UI
+///
+/// Runs every `Update` frame with no gate, so it must stay a no-op (including no
+/// logging) on the steady-state frames where the submenu hasn't changed — this
+/// system used to `debug!` its full state on every single call regardless, which
+/// flooded `--log` output with thousands of identical lines per minute of play.
 fn submenu_transition_cleanup(
     mut commands: Commands,
     global_state: Res<GlobalState>,
@@ -195,59 +200,59 @@ fn submenu_transition_cleanup(
     children_query: Query<&Children>,
     mut previous_submenu: bevy::ecs::system::Local<Option<MenuType>>,
 ) {
-    // Diagnostic logging: show mode, previous submenu, and how many MenuRoot entities exist
-    let menu_count = menu_query.iter().count();
-    debug!(
-        "submenu_transition_cleanup called: mode={:?}, previous_submenu={:?}, menu_count={}",
-        global_state.0.mode, *previous_submenu, menu_count
-    );
-
     let GameMode::Menu(menu_state) = &global_state.0.mode else {
-        // Not in menu mode - reset tracking
-        debug!(
-            "submenu_transition_cleanup: not in Menu mode - clearing previous_submenu (was: {:?})",
-            *previous_submenu
-        );
-        *previous_submenu = None;
+        // Not in menu mode - reset tracking, but only act (and log) the first frame
+        // this becomes true; subsequent frames are already reset and have nothing to do.
+        if previous_submenu.is_some() {
+            debug!(
+                "submenu_transition_cleanup: left Menu mode - clearing previous_submenu (was: {:?})",
+                *previous_submenu
+            );
+            *previous_submenu = None;
+        }
         return;
     };
 
     let current_submenu = menu_state.current_submenu;
 
-    debug!(
-        "submenu_transition_cleanup: in Menu - current_submenu={:?}, previous_submenu={:?}, menu_count={}",
-        current_submenu, *previous_submenu, menu_count
-    );
+    // Steady state: same submenu as last frame -> nothing to do.
+    if *previous_submenu == Some(current_submenu) {
+        return;
+    }
 
-    // Check if this is a submenu transition (not first entry into menu)
-    if let Some(prev) = *previous_submenu {
-        if prev != current_submenu {
-            // Submenu changed - log and despawn old UI
-            let entities: Vec<Entity> = menu_query.iter().collect();
-            if entities.is_empty() {
-                debug!(
-                    "submenu_transition_cleanup: submenu changed {:?} -> {:?} but no MenuRoot entities found",
-                    prev, current_submenu
-                );
-            } else {
-                debug!(
-                    "submenu_transition_cleanup: despawning {} MenuRoot entity(ies) for transition: {:?} -> {:?}",
-                    entities.len(),
-                    prev,
-                    current_submenu
-                );
-                for entity in entities.iter() {
-                    debug!(
-                        "submenu_transition_cleanup: despawning entity {:?} for submenu transition {:?} -> {:?}",
-                        entity, prev, current_submenu
-                    );
-                    despawn_with_children(&mut commands, *entity, &children_query);
-                }
-            }
+    // First entry into Menu mode - start tracking, nothing to despawn yet.
+    let Some(prev) = *previous_submenu else {
+        debug!(
+            "submenu_transition_cleanup: entered Menu mode at submenu {:?}",
+            current_submenu
+        );
+        *previous_submenu = Some(current_submenu);
+        return;
+    };
+
+    // Real submenu transition - despawn old menu UI.
+    let entities: Vec<Entity> = menu_query.iter().collect();
+    if entities.is_empty() {
+        debug!(
+            "submenu_transition_cleanup: submenu changed {:?} -> {:?} but no MenuRoot entities found",
+            prev, current_submenu
+        );
+    } else {
+        debug!(
+            "submenu_transition_cleanup: despawning {} MenuRoot entity(ies) for transition: {:?} -> {:?}",
+            entities.len(),
+            prev,
+            current_submenu
+        );
+        for entity in entities.iter() {
+            debug!(
+                "submenu_transition_cleanup: despawning entity {:?} for submenu transition {:?} -> {:?}",
+                entity, prev, current_submenu
+            );
+            despawn_with_children(&mut commands, *entity, &children_query);
         }
     }
 
-    // Update tracked submenu
     *previous_submenu = Some(current_submenu);
 }
 
@@ -1495,35 +1500,35 @@ fn populate_save_list(
 }
 
 /// Clean up menu UI when exiting Menu mode
+///
+/// Runs every `Update` frame with no gate. The steady state (either still in Menu
+/// mode, or already cleaned up with no `MenuRoot` entities left) is the overwhelming
+/// majority of frames, so it returns silently there instead of `debug!`-logging its
+/// full state every call — that used to flood `--log` output every frame regardless
+/// of whether there was anything to clean up.
 fn menu_cleanup(
     mut commands: Commands,
     menu_query: Query<Entity, With<MenuRoot>>,
     children_query: Query<&Children>,
     global_state: Res<GlobalState>,
 ) {
+    if matches!(global_state.0.mode, GameMode::Menu(_)) {
+        return;
+    }
+
+    if menu_query.is_empty() {
+        return;
+    }
+
     let menu_count = menu_query.iter().count();
     debug!(
-        "menu_cleanup called: mode={:?}, menu_root_count={}",
-        global_state.0.mode, menu_count
+        "menu_cleanup: despawning {} menu entity(ies) after leaving Menu mode (mode={:?})",
+        menu_count, global_state.0.mode
     );
 
-    if matches!(global_state.0.mode, GameMode::Menu(_)) {
-        debug!("menu_cleanup: in Menu mode - skipping cleanup");
-        return;
-    }
-
-    if menu_count == 0 {
-        debug!("menu_cleanup: no menu entities to cleanup");
-        return;
-    }
-
     for entity in menu_query.iter() {
-        debug!(
-            "menu_cleanup: despawning entity {:?} due to mode {:?}",
-            entity, global_state.0.mode
-        );
+        debug!("menu_cleanup: despawning entity {:?}", entity);
         despawn_with_children(&mut commands, entity, &children_query);
-        debug!("menu_cleanup: despawned entity {:?}", entity);
     }
 }
 

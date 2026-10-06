@@ -4746,7 +4746,7 @@
             ),
         ),
         (
-            terrain: 13000,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4766,7 +4766,7 @@
             ),
         ),
         (
-            terrain: 13000,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4806,7 +4806,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4906,7 +4906,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5506,7 +5506,7 @@
             ),
         ),
         (
-            terrain: 13000,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5606,7 +5606,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5926,7 +5926,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6106,7 +6106,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6246,7 +6246,7 @@
             ),
         ),
         (
-            terrain: 13000,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6366,7 +6366,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6386,7 +6386,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6706,7 +6706,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6726,7 +6726,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6746,7 +6746,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6766,7 +6766,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6786,7 +6786,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6806,7 +6806,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6826,7 +6826,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6906,7 +6906,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13001,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6986,7 +6986,7 @@
             ),
         ),
         (
-            terrain: 13000,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7046,7 +7046,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7366,7 +7366,7 @@
             ),
         ),
         (
-            terrain: 13000,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7466,7 +7466,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7486,7 +7486,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7506,7 +7506,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7526,7 +7526,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7566,7 +7566,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7586,7 +7586,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7746,7 +7746,7 @@
             ),
         ),
         (
-            terrain: 13000,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7886,7 +7886,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7906,7 +7906,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7926,7 +7926,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7946,7 +7946,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7966,7 +7966,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7986,7 +7986,7 @@
             ),
         ),
         (
-            terrain: 13007,
+            terrain: 13004,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8095,6 +8095,240 @@
             ),
             facing: Some(South),
             dialogue_override: None,
+        ),
+    ],
+    landscape_placements: [
+        (
+            landscape_id: 1,
+            position: (
+                x: 19,
+                y: 16,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 19,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 18,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 18,
+                y: 16,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 19,
+                y: 18,
+            ),
+            scale: Some(1.3),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 19,
+                y: 19,
+            ),
+            scale: Some(1.15),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 18,
+                y: 19,
+            ),
+            scale: Some(1.25),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 18,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 17,
+                y: 19,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 12,
+                y: 19,
+            ),
+            scale: Some(1.15),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 12,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 13,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 14,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 10,
+                y: 19,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 9,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 10,
+                y: 16,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 12,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 7,
+                y: 19,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 14,
+                y: 16,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 15,
+                y: 14,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 16,
+                y: 13,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 18,
+                y: 13,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 19,
+                y: 11,
+            ),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 18,
+                y: 11,
+            ),
+            offset: Some((0.07449648, -0.028581232)),
+            rotation_y: Some(110.80567),
+            scale: Some(1.0303905),
+            color_tint: Some((1.0176102, 0.96703863, 0.9804463)),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 1,
+                y: 17,
+            ),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 4,
+                y: 17,
+            ),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 5,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 5,
+                y: 13,
+            ),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 3,
+                y: 12,
+            ),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 1,
+                y: 12,
+            ),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 1,
+                y: 14,
+            ),
+        ),
+        (
+            landscape_id: 12,
+            position: (
+                x: 0,
+                y: 16,
+            ),
         ),
     ],
     is_outdoor: false,

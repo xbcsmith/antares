@@ -43,6 +43,9 @@ sdk: ; $(info $(M) running  cargo run --package campaign_builder --bin campaign-
 run: ; $(info $(M) running cargo run...) @ ## Runs a cargo run
 	$Q $(CARGO) run --package antares --bin antares -- --campaign campaigns/tutorial
 
+run-debug: ; $(info $(M) running cargo run with debug...) @ ## Runs a cargo run with debug
+	$Q $(CARGO) run --package antares --bin antares -- --campaign campaigns/tutorial --log antares-debug.log
+
 # Run tests
 test: ; $(info $(M) running cargo test...) @ ## Runs a cargo test
 	$Q $(CARGO) nextest run --all-features
@@ -90,4 +93,4 @@ help:
 	@grep -E '^[ a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
         awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: all build run sdk test clean format check lint install megalint doc help
+.PHONY: all build run run-debug sdk test clean format check lint install megalint doc help

@@ -41,9 +41,9 @@
 //! ```
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::database_common::load_ron_entries;
@@ -88,9 +88,65 @@ pub enum CreatureDatabaseError {
 /// assert_eq!(db.count(), 0);
 /// assert!(db.is_empty());
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// A creature registered via [`CreatureDatabase::load_from_registry`] whose full
+/// definition (including mesh geometry) is parsed from disk lazily, on first
+/// access, rather than eagerly at registry-load time.
+///
+/// Creature/mesh `.ron` files can be many megabytes of inline vertex data (a
+/// single landscape tree mesh file in this codebase is over a hundred
+/// megabytes); a typical session only ever spawns a fraction of a campaign's
+/// registered meshes, so eagerly parsing all of them serially on the main
+/// thread turned campaign startup into a multi-minute stall as the registry
+/// grew. `OnceLock` gives every entry a stable `&CreatureDefinition` once
+/// resolved, so [`CreatureDatabase::get_creature`] can keep its `&self`
+/// signature (matching how it's read through a shared Bevy `Res<_>` almost
+/// everywhere) instead of requiring exclusive access just to cache a load.
+struct LazyCreatureEntry {
+    id: CreatureId,
+    name: String,
+    path: PathBuf,
+    definition: OnceLock<Option<CreatureDefinition>>,
+}
+
+impl std::fmt::Debug for LazyCreatureEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazyCreatureEntry")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("path", &self.path)
+            .field("loaded", &self.definition.get().is_some())
+            .finish()
+    }
+}
+
+impl Clone for LazyCreatureEntry {
+    /// Preserves an already-resolved definition; an entry that hasn't been
+    /// loaded yet stays unloaded on the clone (it will simply load lazily on
+    /// its own first access later, same as the original).
+    fn clone(&self) -> Self {
+        let definition = OnceLock::new();
+        if let Some(resolved) = self.definition.get() {
+            // `definition` is a just-created, still-empty `OnceLock`, so `set`
+            // cannot fail here; the `Result` only exists for the general case.
+            definition
+                .set(resolved.clone())
+                .unwrap_or_else(|_| unreachable!("freshly-created OnceLock cannot already be set"));
+        }
+        Self {
+            id: self.id,
+            name: self.name.clone(),
+            path: self.path.clone(),
+            definition,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct CreatureDatabase {
     creatures: HashMap<CreatureId, CreatureDefinition>,
+    /// Registry-driven entries loaded via [`Self::load_from_registry`], resolved
+    /// from disk on first access instead of eagerly. See [`LazyCreatureEntry`].
+    lazy: HashMap<CreatureId, LazyCreatureEntry>,
 }
 
 impl CreatureDatabase {
@@ -107,6 +163,7 @@ impl CreatureDatabase {
     pub fn new() -> Self {
         Self {
             creatures: HashMap::new(),
+            lazy: HashMap::new(),
         }
     }
 
@@ -180,7 +237,70 @@ impl CreatureDatabase {
     /// assert!(db.get_creature(1).is_none());
     /// ```
     pub fn get_creature(&self, id: CreatureId) -> Option<&CreatureDefinition> {
-        self.creatures.get(&id)
+        if let Some(c) = self.creatures.get(&id) {
+            return Some(c);
+        }
+        let entry = self.lazy.get(&id)?;
+        entry
+            .definition
+            .get_or_init(|| Self::load_lazy_creature(entry))
+            .as_ref()
+    }
+
+    /// Parses a lazily-registered creature's file from disk, applying the same
+    /// registry-authoritative ID/name override and validation that eager
+    /// [`add_creature`](Self::add_creature) callers get.
+    ///
+    /// Returns `None` (logging a warning) on any read/parse/validation
+    /// failure instead of propagating an error — by the time this runs, the
+    /// registry has already loaded successfully and the campaign is in play,
+    /// so a single malformed mesh file shouldn't take down the whole session.
+    fn load_lazy_creature(entry: &LazyCreatureEntry) -> Option<CreatureDefinition> {
+        let contents = match std::fs::read_to_string(&entry.path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read creature file '{}' for creature {} ('{}'): {}",
+                    entry.path.display(),
+                    entry.id,
+                    entry.name,
+                    e
+                );
+                return None;
+            }
+        };
+
+        let mut creature: CreatureDefinition = match ron::from_str(&contents) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse creature file '{}' for creature {} ('{}'): {}",
+                    entry.path.display(),
+                    entry.id,
+                    entry.name,
+                    e
+                );
+                return None;
+            }
+        };
+
+        // Registry metadata is authoritative in registry-driven loads. This
+        // allows many registry entries to share a single mesh asset file.
+        creature.id = entry.id;
+        creature.name = entry.name.clone();
+
+        if let Err(e) = creature.validate() {
+            tracing::warn!(
+                "Creature {} ('{}') from '{}' failed validation: {}",
+                entry.id,
+                entry.name,
+                entry.path.display(),
+                e
+            );
+            return None;
+        }
+
+        Some(creature)
     }
 
     /// Gets a mutable reference to a creature by ID
@@ -200,7 +320,52 @@ impl CreatureDatabase {
     /// assert_eq!(count, 0);
     /// ```
     pub fn all_creatures(&self) -> impl Iterator<Item = &CreatureDefinition> {
-        self.creatures.values()
+        self.creatures
+            .values()
+            .chain(self.lazy.values().filter_map(|entry| {
+                entry
+                    .definition
+                    .get_or_init(|| Self::load_lazy_creature(entry))
+                    .as_ref()
+            }))
+    }
+
+    /// Iterates creatures that are already resolved in memory: eagerly added
+    /// via [`add_creature`](Self::add_creature), plus any registry entries a
+    /// prior [`get_creature`](Self::get_creature) / [`all_creatures`](Self::all_creatures)
+    /// call has already lazily loaded.
+    ///
+    /// Unlike [`all_creatures`](Self::all_creatures), this never triggers a
+    /// load itself — safe to use from validation that runs on every campaign
+    /// load without paying the cost of parsing every registered mesh file up
+    /// front. Registry entries that haven't been accessed yet are simply
+    /// skipped; they get equivalent validation lazily, the first time
+    /// something actually requests them.
+    pub fn loaded_creatures(&self) -> impl Iterator<Item = &CreatureDefinition> {
+        self.creatures.values().chain(
+            self.lazy
+                .values()
+                .filter_map(|entry| entry.definition.get().and_then(|d| d.as_ref())),
+        )
+    }
+
+    /// Iterates all known creature IDs (eager and lazy-registered) without
+    /// triggering any lazy loads.
+    pub fn creature_ids(&self) -> impl Iterator<Item = CreatureId> + '_ {
+        self.creatures
+            .keys()
+            .copied()
+            .chain(self.lazy.keys().copied())
+    }
+
+    /// Iterates `(id, name)` pairs for all known creatures without triggering
+    /// any lazy loads. `name` is the registry-authoritative display name —
+    /// identical to what a fully-loaded `CreatureDefinition::name` would hold.
+    pub fn creature_ids_and_names(&self) -> impl Iterator<Item = (CreatureId, &str)> {
+        self.creatures
+            .values()
+            .map(|c| (c.id, c.name.as_str()))
+            .chain(self.lazy.values().map(|e| (e.id, e.name.as_str())))
     }
 
     /// Removes a creature from the database
@@ -316,11 +481,21 @@ impl CreatureDatabase {
         Ok(map.into_values().collect())
     }
 
-    /// Loads creature registry and resolves all file references eagerly
+    /// Loads a creature registry, resolving file references lazily
     ///
-    /// Reads a lightweight registry file containing `CreatureReference` entries,
-    /// then loads the full `CreatureDefinition` from each referenced file.
-    /// All creatures are loaded at campaign startup for performance (eager loading).
+    /// Reads a lightweight registry file containing `CreatureReference` entries
+    /// and validates that each referenced path is safely contained within
+    /// `campaign_root` — but does **not** read or parse the referenced
+    /// `CreatureDefinition` files themselves. Each file's full contents
+    /// (including mesh geometry, which can run to many megabytes) is only
+    /// read and parsed the first time [`get_creature`](Self::get_creature) (or
+    /// [`all_creatures`](Self::all_creatures)) is called for that ID, and the
+    /// result is cached from then on.
+    ///
+    /// A consequence of this laziness: a malformed or unreadable creature file
+    /// no longer fails the registry load itself. It's only detected (and
+    /// logged as a warning, with `get_creature` returning `None` for that ID)
+    /// the first time something actually tries to use it.
     ///
     /// # Arguments
     ///
@@ -329,15 +504,17 @@ impl CreatureDatabase {
     ///
     /// # Returns
     ///
-    /// Returns `CreatureDatabase` with all creatures loaded from individual files
+    /// Returns `CreatureDatabase` with the registry's entries registered for
+    /// lazy loading (`count()` reflects them immediately; `get_creature` loads
+    /// on demand).
     ///
     /// # Errors
     ///
     /// Returns error if:
     /// - Registry file cannot be read or parsed
-    /// - Any referenced creature file fails to load
-    /// - Any creature definition is invalid
-    /// - Duplicate creature IDs are found
+    /// - Any referenced creature filepath is unsafe (absolute, empty, or
+    ///   escapes `campaign_root`)
+    /// - Duplicate creature IDs are found in the registry
     ///
     /// # Examples
     ///
@@ -369,11 +546,15 @@ impl CreatureDatabase {
         // 2. Create empty database
         let mut database = Self::new();
 
-        // 3. For each reference, resolve filepath and load creature
+        // 3. For each reference, resolve and validate its filepath, but defer
+        //    actually reading/parsing the (potentially many-MB) mesh file
+        //    until the creature is first requested via `get_creature`.
         for reference in references {
             // Resolve filepath relative to campaign_root, rejecting untrusted
             // registry paths that are empty, absolute, or attempt `..`
             // traversal (or symlink escape) out of the campaign directory.
+            // This is a cheap path-structure check (no file content is read),
+            // so it stays eager without reintroducing the startup cost.
             let creature_path = validate_campaign_relative_path(campaign_root, &reference.filepath)
                 .map_err(|e| {
                     CreatureDatabaseError::ReadError(format!(
@@ -382,29 +563,21 @@ impl CreatureDatabase {
                     ))
                 })?;
 
-            // Load full CreatureDefinition from resolved path
-            let creature_contents = std::fs::read_to_string(&creature_path).map_err(|e| {
-                CreatureDatabaseError::ReadError(format!(
-                    "Failed to read creature file '{}': {}",
-                    reference.filepath, e
-                ))
-            })?;
+            if database.creatures.contains_key(&reference.id)
+                || database.lazy.contains_key(&reference.id)
+            {
+                return Err(CreatureDatabaseError::DuplicateId(reference.id));
+            }
 
-            let mut creature: CreatureDefinition =
-                ron::from_str(&creature_contents).map_err(|e| {
-                    CreatureDatabaseError::ParseError(format!(
-                        "Failed to parse creature file '{}': {}",
-                        reference.filepath, e
-                    ))
-                })?;
-
-            // Registry metadata is authoritative in registry-driven loads.
-            // This allows many registry entries to share a single mesh asset file.
-            creature.id = reference.id;
-            creature.name = reference.name.clone();
-
-            // Add to database (this validates and checks for duplicates)
-            database.add_creature(creature)?;
+            database.lazy.insert(
+                reference.id,
+                LazyCreatureEntry {
+                    id: reference.id,
+                    name: reference.name,
+                    path: creature_path,
+                    definition: OnceLock::new(),
+                },
+            );
         }
 
         Ok(database)
@@ -421,7 +594,7 @@ impl CreatureDatabase {
     /// assert!(!db.has_creature(1));
     /// ```
     pub fn has_creature(&self, id: CreatureId) -> bool {
-        self.creatures.contains_key(&id)
+        self.creatures.contains_key(&id) || self.lazy.contains_key(&id)
     }
 
     /// Returns the number of creatures in the database
@@ -435,7 +608,7 @@ impl CreatureDatabase {
     /// assert_eq!(db.count(), 0);
     /// ```
     pub fn count(&self) -> usize {
-        self.creatures.len()
+        self.creatures.len() + self.lazy.len()
     }
 
     /// Returns true if the database is empty
@@ -449,7 +622,7 @@ impl CreatureDatabase {
     /// assert!(db.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.creatures.is_empty()
+        self.creatures.is_empty() && self.lazy.is_empty()
     }
 
     /// Finds a creature by name (case-sensitive)
@@ -465,7 +638,15 @@ impl CreatureDatabase {
     /// assert!(db.get_creature_by_name("Dragon").is_none());
     /// ```
     pub fn get_creature_by_name(&self, name: &str) -> Option<&CreatureDefinition> {
-        self.creatures.values().find(|c| c.name == name)
+        if let Some(c) = self.creatures.values().find(|c| c.name == name) {
+            return Some(c);
+        }
+        let id = self
+            .lazy
+            .values()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.id)?;
+        self.get_creature(id)
     }
 
     /// Validates all creatures in the database
@@ -942,13 +1123,80 @@ mod tests {
         let registry_path = data_dir.join("creatures.ron");
         std::fs::write(&registry_path, registry_content).unwrap();
 
-        // Should fail to load
-        let result = CreatureDatabase::load_from_registry(&registry_path, campaign_root);
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            CreatureDatabaseError::ReadError(_)
-        ));
+        // Registering a reference to a missing file is not itself an error —
+        // loading is lazy, so the failure only surfaces when the creature is
+        // actually requested.
+        let db = CreatureDatabase::load_from_registry(&registry_path, campaign_root).unwrap();
+        assert!(db.has_creature(999));
+        assert!(db.get_creature(999).is_none());
+    }
+
+    #[test]
+    fn test_load_from_registry_is_lazy() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        let mesh_dir = campaign_root.join("assets/creatures");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&mesh_dir).unwrap();
+
+        // A registry entry pointing at a file that doesn't exist yet — if
+        // `load_from_registry` eagerly read/parsed referenced files, this
+        // would fail immediately, before the file is ever written below.
+        let registry_content = r#"[
+    CreatureReference(
+        id: 1,
+        name: "Goblin",
+        filepath: "assets/creatures/goblin.ron",
+    ),
+]"#;
+        let registry_path = data_dir.join("creatures.ron");
+        std::fs::write(&registry_path, registry_content).unwrap();
+
+        let db = CreatureDatabase::load_from_registry(&registry_path, campaign_root)
+            .expect("registering a reference to a not-yet-existing file must not fail");
+        assert_eq!(db.count(), 1);
+        assert!(db.has_creature(1));
+
+        // Now the file appears (as if written moments after registry load) —
+        // the first `get_creature` call should read and parse it on demand.
+        std::fs::write(
+            mesh_dir.join("goblin.ron"),
+            r#"(
+    id: 0,
+    name: "placeholder",
+    meshes: [
+        (
+            vertices: [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0)],
+            indices: [0, 1, 2],
+        ),
+    ],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 1.0,
+)"#,
+        )
+        .unwrap();
+
+        let goblin = db
+            .get_creature(1)
+            .expect("should lazily load on first access");
+        assert_eq!(goblin.id, 1, "registry id must override the file's own id");
+        assert_eq!(goblin.name, "Goblin");
+
+        // A second access must return the cached definition rather than
+        // re-reading the file (deleting it here would make a second parse
+        // attempt fail if caching weren't working).
+        std::fs::remove_file(mesh_dir.join("goblin.ron")).unwrap();
+        let goblin_again = db.get_creature(1).expect("must be served from cache");
+        assert_eq!(goblin_again.name, "Goblin");
     }
 
     #[test]

@@ -966,7 +966,25 @@ fn execute_recruit_to_inn(
     };
 
     let location = crate::domain::character::CharacterLocation::AtInn(innkeeper_id.to_string());
-    if let Err(e) = game_state.roster.add_character(character, location) {
+    // Premade characters already have a roster entry; move it instead of duplicating.
+    let existing_index = game_state
+        .roster
+        .characters
+        .iter()
+        .position(|c| c.name == character.name);
+    let result = match existing_index {
+        Some(idx) => {
+            if game_state.roster.character_locations[idx]
+                != crate::domain::character::CharacterLocation::InParty
+            {
+                game_state.roster.update_location(idx, location)
+            } else {
+                Ok(())
+            }
+        }
+        None => game_state.roster.add_character(character, location),
+    };
+    if let Err(e) = result {
         error!("Failed to add '{}' to roster: {}", character_id, e);
         if let Some(log) = game_log.as_deref_mut() {
             log.add_system(format!("Error: {}", e));

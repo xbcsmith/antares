@@ -61,6 +61,7 @@ fn test_ron_serialization() {
         base_xp: 1000,
         xp_multiplier: 1.5,
         starting_time: default_starting_time(),
+        audio_file: "data/audio.ron".to_string(),
     };
 
     let ron_config = ron::ser::PrettyConfig::new()

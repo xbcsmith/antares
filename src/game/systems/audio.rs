@@ -38,13 +38,55 @@
 //! app.add_plugins(AudioPlugin {
 //!     config: audio_config,
 //!     audio_dir: "assets/audio".to_string(),
+//!     audio_manifest: None,
+//!     audio_map: None,
 //! });
 //! # }
 //! ```
 
-use crate::sdk::game_config::AudioConfig;
+use crate::domain::AudioMap;
+use crate::sdk::game_config::{AudioConfig, AudioManifest};
 use bevy::audio::Volume;
 use bevy::prelude::*;
+
+/// Bevy resource holding the campaign's audio manifest, if one was loaded.
+///
+/// `None` means no `audio.ron` was found; all SFX and music IDs are resolved
+/// by filename-by-convention (the engine ID used directly as the filename stem).
+///
+/// Inserted by [`AudioPlugin`] at startup; available to any Bevy system that
+/// needs to resolve audio paths.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::audio::AudioManifestResource;
+///
+/// // Default: no manifest loaded
+/// let resource = AudioManifestResource::default();
+/// assert!(resource.0.is_none());
+/// ```
+#[derive(Resource, Default, Clone)]
+pub struct AudioManifestResource(pub Option<AudioManifest>);
+
+/// Bevy resource wrapping the domain-layer [`AudioMap`] for the loaded campaign.
+///
+/// `None` means no `data/audio.ron` was found; all IDs are resolved by
+/// filename-by-convention.  Inserted by [`AudioPlugin`] at startup.
+///
+/// [`AudioMapResource`] is consulted first in [`handle_audio_messages`] before
+/// falling back to [`AudioManifestResource`] and then to the bare event ID.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::audio::AudioMapResource;
+///
+/// let resource = AudioMapResource::default();
+/// assert!(resource.0.is_none());
+/// ```
+#[derive(Resource, Default, Clone)]
+pub struct AudioMapResource(pub Option<AudioMap>);
 
 /// Resource that holds the resolved audio directory path for the loaded campaign.
 ///
@@ -75,38 +117,31 @@ impl Default for AudioPaths {
     }
 }
 
-/// Resolves a bare track/sfx identifier to a campaign-relative asset path.
+/// Resolves a bare track/sfx identifier to a campaign-relative asset path,
+/// optionally consulting an [`AudioManifest`] for a remapped filename.
 ///
-/// If `id` already ends with a recognised audio extension (`.ogg`, `.mp3`,
-/// `.wav`, `.flac`) the extension is preserved.  Otherwise `.ogg` is appended
-/// as the project-standard audio format.
+/// # Resolution order
 ///
-/// # Examples
-///
-/// ```rust
-/// use antares::game::systems::audio::resolve_audio_path;
-///
-/// assert_eq!(resolve_audio_path("assets/audio", "combat_theme"),
-///            "assets/audio/combat_theme.ogg");
-/// assert_eq!(resolve_audio_path("assets/audio", "combat_theme.ogg"),
-///            "assets/audio/combat_theme.ogg");
-/// assert_eq!(resolve_audio_path("assets/audio", "fanfare.mp3"),
-///            "assets/audio/fanfare.mp3");
-/// // Trailing slash in audio_dir is normalised — no double-slash in result:
-/// assert_eq!(resolve_audio_path("assets/audio/", "combat_theme"),
-///            "assets/audio/combat_theme.ogg");
-/// ```
-pub fn resolve_audio_path(audio_dir: &str, id: &str) -> String {
+/// 1. If `manifest` is `Some` and contains a mapping for `id` via
+///    [`AudioManifest::resolve_sfx`], the mapped value is used as the
+///    effective filename.
+/// 2. Otherwise `id` is used as the effective filename (existing behaviour).
+/// 3. If the effective filename has no recognised audio extension (`.ogg`,
+///    `.mp3`, `.wav`, `.flac`) then `.ogg` is appended.
+/// 4. The result is `{audio_dir}/{effective_filename}`.
+pub fn resolve_audio_path(audio_dir: &str, id: &str, manifest: Option<&AudioManifest>) -> String {
     // Strip any trailing slash so format! never produces "dir//file".
     let audio_dir = audio_dir.trim_end_matches('/');
-    let has_ext = id.ends_with(".ogg")
-        || id.ends_with(".mp3")
-        || id.ends_with(".wav")
-        || id.ends_with(".flac");
+    // Consult the manifest first; fall back to bare id.
+    let effective_id = manifest.and_then(|m| m.resolve_sfx(id)).unwrap_or(id);
+    let has_ext = effective_id.ends_with(".ogg")
+        || effective_id.ends_with(".mp3")
+        || effective_id.ends_with(".wav")
+        || effective_id.ends_with(".flac");
     if has_ext {
-        format!("{}/{}", audio_dir, id)
+        format!("{}/{}", audio_dir, effective_id)
     } else {
-        format!("{}/{}.ogg", audio_dir, id)
+        format!("{}/{}.ogg", audio_dir, effective_id)
     }
 }
 
@@ -324,6 +359,8 @@ impl AudioSettings {
 /// app.add_plugins(AudioPlugin {
 ///     config: audio_config,
 ///     audio_dir: "assets/audio".to_string(),
+///     audio_manifest: None,
+///     audio_map: None,
 /// });
 /// # }
 /// ```
@@ -373,11 +410,14 @@ pub struct SfxMarker;
 /// Listens for `PlayMusic` and `PlaySfx` messages and spawns
 /// appropriate audio entities with the correct playback settings
 /// and volume levels derived from `AudioSettings`.
+#[allow(clippy::too_many_arguments)]
 fn handle_audio_messages(
     mut music_reader: MessageReader<PlayMusic>,
     mut sfx_reader: MessageReader<PlaySfx>,
     settings: Res<AudioSettings>,
     paths: Res<AudioPaths>,
+    manifest: Res<AudioManifestResource>,
+    audio_map: Res<AudioMapResource>,
     asset_server: Option<Res<AssetServer>>,
     mut commands: Commands,
     mut current_music: ResMut<CurrentMusicTrack>,
@@ -403,8 +443,22 @@ fn handle_audio_messages(
         }
 
         let volume = settings.effective_music_volume();
-        let asset_path = resolve_audio_path(&paths.audio_dir, &ev.track_id);
-        let handle: Handle<AudioSource> = server.load(asset_path);
+        // Domain-layer map takes priority; SDK manifest is the fallback.
+        let effective_track_id: String = audio_map
+            .0
+            .as_ref()
+            .and_then(|m| m.resolve_music(&ev.track_id))
+            .map(str::to_owned)
+            .or_else(|| {
+                manifest
+                    .0
+                    .as_ref()
+                    .and_then(|m| m.resolve_music(&ev.track_id))
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| ev.track_id.clone());
+        let asset_path = resolve_audio_path(&paths.audio_dir, &effective_track_id, None);
+        let handle: Handle<AudioSource> = server.load(asset_path.clone());
 
         let playback = if ev.looped {
             PlaybackSettings::LOOP
@@ -422,10 +476,7 @@ fn handle_audio_messages(
 
         info!(
             "Audio: Playing music '{}' path='{}' looped={} volume={:.2}",
-            ev.track_id,
-            resolve_audio_path(&paths.audio_dir, &ev.track_id),
-            ev.looped,
-            volume
+            ev.track_id, asset_path, ev.looped, volume
         );
     }
 
@@ -442,8 +493,22 @@ fn handle_audio_messages(
         };
 
         let volume = settings.effective_sfx_volume();
-        let asset_path = resolve_audio_path(&paths.audio_dir, &ev.sfx_id);
-        let handle: Handle<AudioSource> = server.load(asset_path);
+        // Domain-layer map takes priority; SDK manifest is the fallback.
+        let effective_sfx_id: String = audio_map
+            .0
+            .as_ref()
+            .and_then(|m| m.resolve_sfx(&ev.sfx_id))
+            .map(str::to_owned)
+            .or_else(|| {
+                manifest
+                    .0
+                    .as_ref()
+                    .and_then(|m| m.resolve_sfx(&ev.sfx_id))
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| ev.sfx_id.clone());
+        let asset_path = resolve_audio_path(&paths.audio_dir, &effective_sfx_id, None);
+        let handle: Handle<AudioSource> = server.load(asset_path.clone());
 
         let playback = PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume));
 
@@ -451,13 +516,46 @@ fn handle_audio_messages(
 
         info!(
             "Audio: Playing SFX '{}' path='{}' volume={:.2}",
-            ev.sfx_id,
-            resolve_audio_path(&paths.audio_dir, &ev.sfx_id),
-            volume
+            ev.sfx_id, asset_path, volume
         );
     }
 }
 
+/// Bevy plugin that initialises the audio subsystem for a loaded campaign.
+///
+/// Insert via `app.add_plugins(AudioPlugin { ... })` after loading a campaign.
+/// The plugin inserts [`AudioSettings`], [`AudioPaths`],
+/// [`AudioManifestResource`], and [`AudioMapResource`] as Bevy resources and registers the
+/// [`handle_audio_messages`] system on the [`Update`] schedule.
+///
+/// # Fields
+///
+/// * `config` — [`AudioConfig`] controlling volume levels (from `config.ron`)
+/// * `audio_dir` — campaign-relative directory for audio assets (e.g. `"assets/audio"`)
+/// * `audio_manifest` — optional [`AudioManifest`] loaded from `audio.ron`;
+///   `None` means filename-by-convention applies for all IDs
+/// * `audio_map` — optional domain-layer [`AudioMap`] loaded from `data/audio.ron`;
+///   consulted before `audio_manifest` when resolving IDs
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::audio::AudioPlugin;
+/// use antares::sdk::game_config::AudioConfig;
+/// use bevy::prelude::*;
+///
+/// # fn example() {
+/// let audio_config = AudioConfig::default();
+///
+/// let mut app = App::new();
+/// app.add_plugins(AudioPlugin {
+///     config: audio_config,
+///     audio_dir: "assets/audio".to_string(),
+///     audio_manifest: None,
+///     audio_map: None,
+/// });
+/// # }
+/// ```
 pub struct AudioPlugin {
     /// Audio configuration to use for initializing AudioSettings
     pub config: AudioConfig,
@@ -467,6 +565,15 @@ pub struct AudioPlugin {
     /// [`AudioPaths`] resource so [`handle_audio_messages`] can build
     /// correct relative asset paths from bare track/sfx identifiers.
     pub audio_dir: String,
+    /// Campaign audio manifest, if `audio.ron` was present when the campaign loaded.
+    ///
+    /// `None` is valid — campaigns without `audio.ron` use filename-by-convention.
+    pub audio_manifest: Option<AudioManifest>,
+    /// Domain-layer audio map loaded from `data/audio.ron`, if present.
+    ///
+    /// `None` is valid — campaigns without `data/audio.ron` fall back first to
+    /// [`AudioManifestResource`] then to filename-by-convention.
+    pub audio_map: Option<AudioMap>,
 }
 
 impl Plugin for AudioPlugin {
@@ -478,6 +585,8 @@ impl Plugin for AudioPlugin {
 
         app.insert_resource(settings)
             .insert_resource(paths)
+            .insert_resource(AudioManifestResource(self.audio_manifest.clone()))
+            .insert_resource(AudioMapResource(self.audio_map.clone()))
             .init_resource::<CurrentMusicTrack>()
             .add_message::<PlayMusic>()
             .add_message::<PlaySfx>()
@@ -626,6 +735,8 @@ mod tests {
         app.add_plugins(AudioPlugin {
             config: config.clone(),
             audio_dir: "assets/audio".to_string(),
+            audio_manifest: None,
+            audio_map: None,
         });
 
         // Verify resources were inserted
@@ -678,7 +789,7 @@ mod tests {
     #[test]
     fn test_resolve_audio_path_no_ext() {
         assert_eq!(
-            resolve_audio_path("assets/audio", "combat_theme"),
+            resolve_audio_path("assets/audio", "combat_theme", None),
             "assets/audio/combat_theme.ogg"
         );
     }
@@ -686,7 +797,7 @@ mod tests {
     #[test]
     fn test_resolve_audio_path_with_ogg_ext() {
         assert_eq!(
-            resolve_audio_path("assets/audio", "combat_theme.ogg"),
+            resolve_audio_path("assets/audio", "combat_theme.ogg", None),
             "assets/audio/combat_theme.ogg"
         );
     }
@@ -694,7 +805,7 @@ mod tests {
     #[test]
     fn test_resolve_audio_path_with_mp3_ext() {
         assert_eq!(
-            resolve_audio_path("assets/audio", "fanfare.mp3"),
+            resolve_audio_path("assets/audio", "fanfare.mp3", None),
             "assets/audio/fanfare.mp3"
         );
     }
@@ -703,20 +814,191 @@ mod tests {
     fn test_resolve_audio_path_trailing_slash_stripped() {
         // A trailing slash in audio_dir must NOT produce a double-slash "//" in the result.
         assert_eq!(
-            resolve_audio_path("assets/audio/", "combat_theme"),
+            resolve_audio_path("assets/audio/", "combat_theme", None),
             "assets/audio/combat_theme.ogg",
             "trailing slash in audio_dir must be stripped before joining"
         );
         assert_eq!(
-            resolve_audio_path("assets/audio/", "ambient.ogg"),
+            resolve_audio_path("assets/audio/", "ambient.ogg", None),
             "assets/audio/ambient.ogg",
             "trailing slash must not produce double-slash with an explicit ext"
         );
         // Multiple trailing slashes should also be normalised.
         assert_eq!(
-            resolve_audio_path("assets/audio///", "fanfare.mp3"),
+            resolve_audio_path("assets/audio///", "fanfare.mp3", None),
             "assets/audio/fanfare.mp3",
             "multiple trailing slashes must all be stripped"
+        );
+    }
+
+    // ── AudioManifest-aware resolve_audio_path tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_audio_path_with_manifest_uses_mapped_value() {
+        // When the manifest has a mapping for the id, the mapped filename is used.
+        use crate::sdk::game_config::AudioManifest;
+        let mut manifest = AudioManifest::default();
+        manifest.sfx_mappings.insert(
+            "combat_hit".to_string(),
+            "sounds/heavy_impact.wav".to_string(),
+        );
+        assert_eq!(
+            resolve_audio_path("assets/audio", "combat_hit", Some(&manifest)),
+            "assets/audio/sounds/heavy_impact.wav",
+            "mapped value with extension must be used verbatim"
+        );
+    }
+
+    #[test]
+    fn test_resolve_audio_path_without_manifest_falls_back_to_id() {
+        // None manifest: id is used as-is with .ogg appended (old behaviour).
+        assert_eq!(
+            resolve_audio_path("assets/audio", "combat_hit", None),
+            "assets/audio/combat_hit.ogg",
+            "None manifest must fall back to id-based filename"
+        );
+    }
+
+    #[test]
+    fn test_resolve_audio_path_with_manifest_falls_back_when_id_not_in_map() {
+        // Manifest present but the id has no mapping: filename-by-convention applies.
+        use crate::sdk::game_config::AudioManifest;
+        let manifest = AudioManifest::default(); // empty maps
+        assert_eq!(
+            resolve_audio_path("assets/audio", "combat_hit", Some(&manifest)),
+            "assets/audio/combat_hit.ogg",
+            "unmapped id with non-None manifest must still fall back to convention"
+        );
+    }
+
+    #[test]
+    fn test_resolve_audio_path_manifest_mapped_value_with_extension_preserved() {
+        // When the mapped value already has an extension, .ogg must NOT be appended.
+        use crate::sdk::game_config::AudioManifest;
+        let mut manifest = AudioManifest::default();
+        manifest.sfx_mappings.insert(
+            "victory_fanfare".to_string(),
+            "sounds/victory.mp3".to_string(),
+        );
+        assert_eq!(
+            resolve_audio_path("assets/audio", "victory_fanfare", Some(&manifest)),
+            "assets/audio/sounds/victory.mp3",
+            "mapped value with .mp3 extension must not have .ogg appended"
+        );
+    }
+
+    #[test]
+    fn test_audio_plugin_with_manifest_inserts_resource() {
+        // AudioPlugin with a non-None manifest must insert a populated AudioManifestResource.
+        use crate::sdk::game_config::{AudioConfig, AudioManifest};
+        let mut manifest = AudioManifest::default();
+        manifest
+            .sfx_mappings
+            .insert("combat_hit".to_string(), "sounds/impact.ogg".to_string());
+
+        let mut app = App::new();
+        app.add_plugins(AudioPlugin {
+            config: AudioConfig::default(),
+            audio_dir: "assets/audio".to_string(),
+            audio_manifest: Some(manifest.clone()),
+            audio_map: None,
+        });
+
+        let resource = app.world().resource::<AudioManifestResource>();
+        let inner = resource
+            .0
+            .as_ref()
+            .expect("AudioManifestResource must be Some");
+        assert_eq!(
+            inner.resolve_sfx("combat_hit"),
+            Some("sounds/impact.ogg"),
+            "manifest resource must contain the manifest passed to AudioPlugin"
+        );
+    }
+
+    // ── AudioMapResource tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_audio_map_resource_resolves_sfx_through_mapping() {
+        // AudioMapResource with a mapping must resolve the SFX ID to the mapped filename.
+        use std::collections::BTreeMap;
+        let mut sfx = BTreeMap::new();
+        sfx.insert("combat_hit".to_string(), "sounds/impact.ogg".to_string());
+        let map = AudioMap {
+            sfx,
+            music: BTreeMap::new(),
+        };
+        let resource = AudioMapResource(Some(map));
+
+        assert_eq!(
+            resource.0.as_ref().expect("Some").resolve_sfx("combat_hit"),
+            Some("sounds/impact.ogg"),
+            "mapped SFX ID must resolve to the configured filename"
+        );
+        assert_eq!(
+            resource
+                .0
+                .as_ref()
+                .expect("Some")
+                .resolve_sfx("combat_miss"),
+            None,
+            "unmapped SFX ID must return None"
+        );
+    }
+
+    #[test]
+    fn test_audio_map_resource_falls_back_to_id_when_no_mapping() {
+        // AudioMapResource(None) holds no map; resolve_sfx/resolve_music must return None
+        // for every engine ID, signalling to callers that they must use the bare event ID.
+        let resource = AudioMapResource(None);
+        assert!(
+            resource.0.is_none(),
+            "AudioMapResource(None) must have no inner map"
+        );
+        // Verify that querying through the Option<AudioMap> layer returns None for all
+        // well-known engine IDs — confirming callers will fall back to the bare ID.
+        for engine_id in AudioMap::default_sfx_ids() {
+            assert_eq!(
+                resource.0.as_ref().and_then(|m| m.resolve_sfx(engine_id)),
+                None,
+                "resolve_sfx({engine_id:?}) through None map must return None"
+            );
+            assert_eq!(
+                resource.0.as_ref().and_then(|m| m.resolve_music(engine_id)),
+                None,
+                "resolve_music({engine_id:?}) through None map must return None"
+            );
+        }
+    }
+
+    #[test]
+    fn test_audio_plugin_with_audio_map_inserts_resource() {
+        // AudioPlugin with audio_map: Some(...) must insert a populated AudioMapResource.
+        use std::collections::BTreeMap;
+        let mut sfx = BTreeMap::new();
+        sfx.insert("combat_hit".to_string(), "sounds/impact.ogg".to_string());
+        let map = AudioMap {
+            sfx,
+            music: BTreeMap::new(),
+        };
+
+        let mut app = App::new();
+        app.add_plugins(AudioPlugin {
+            config: AudioConfig::default(),
+            audio_dir: "assets/audio".to_string(),
+            audio_manifest: None,
+            audio_map: Some(map),
+        });
+
+        let resource = app.world().resource::<AudioMapResource>();
+        let inner = resource
+            .0
+            .as_ref()
+            .expect("AudioMapResource must be Some when audio_map is provided");
+        assert_eq!(
+            inner.resolve_sfx("combat_hit"),
+            Some("sounds/impact.ogg"),
+            "AudioMapResource must contain the map passed to AudioPlugin"
         );
     }
 }

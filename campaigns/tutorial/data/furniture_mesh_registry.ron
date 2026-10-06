@@ -5,11 +5,6 @@
         filepath: "assets/furniture/seating/sandstone_throne.ron",
     ),
     (
-        id: 10002,
-        name: "Ironbound Treasure Chest",
-        filepath: "assets/furniture/storage/ironbound_treasure_chest.ron",
-    ),
-    (
         id: 10003,
         name: "Anvil on Stand",
         filepath: "assets/furniture/utility/anvil_on_stand.ron",
