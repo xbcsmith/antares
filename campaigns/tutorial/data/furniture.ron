@@ -280,26 +280,6 @@
         description: Some("Imported furniture mesh \'Sandstone Throne\'"),
     ),
     (
-        id: 14,
-        name: "Ironbound Treasure Chest",
-        category: Storage,
-        base_type: Chest,
-        material: Wood,
-        scale: 1.0,
-        color_tint: None,
-        flags: (
-            lit: false,
-            locked: false,
-            blocking: false,
-        ),
-        icon: None,
-        tags: [
-            "imported",
-        ],
-        mesh_id: Some(10002),
-        description: Some("Imported furniture mesh \'Ironbound Treasure Chest\'"),
-    ),
-    (
         id: 15,
         name: "Anvil on Stand",
         category: Utility,
