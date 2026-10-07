@@ -102,7 +102,101 @@ Every explicit `CreatureDefinition { ... }` literal across the codebase had
 
 ---
 
-## GLTF 2.0 Support — Phase 2: SDK Raw GLB Export Mode
+## GLTF 2.0 Support — Phase 3: Runtime GLB Rendering
+
+Added a startup-populated handle cache and GLB rendering branches to all
+creature/object/item spawn sites. Entities backed by a `glb_path` now spawn
+with `WorldAssetRoot` instead of inline `Mesh3d` components; Bevy's scene
+spawner attaches the GLB child hierarchy asynchronously.
+
+### 3.1 `GlbHandleCache` resource (`src/game/resources/glb_assets.rs`)
+
+- New `pub struct GlbHandleCache` (`#[derive(Resource, Default)]`) with one
+  field: `pub scenes: HashMap<String, Handle<WorldAsset>>`.
+- Keys are campaign-relative GLB paths (e.g. `"assets/meshes/foo.glb"`),
+  values are pre-loaded `Handle<WorldAsset>` handles.
+- Re-exported from `src/game/resources/mod.rs` as `pub use glb_assets::GlbHandleCache`.
+- Tests: `test_glb_handle_cache_default_is_empty`,
+  `test_glb_handle_cache_insert_and_lookup`,
+  `test_glb_handle_cache_multiple_entries`.
+
+### 3.2 `glb_scene_loader_system` (`src/game/systems/glb_scene_loader.rs`)
+
+- New startup system that iterates all three content databases:
+  1. `ContentDatabase::creatures` — uses `all_creatures()` to preserve
+     per-entry `glb_scene_index`.
+  2. `ContentDatabase::object_meshes` — uses `glb_paths()` (Scene 0).
+  3. `ContentDatabase::item_meshes` — uses `glb_paths()` (Scene 0).
+- Collects all paths into owned `Vec<(String, usize)>` / `Vec<String>` _before_
+  calling `asset_server.load()`. This releases the `Res<GameContent>` borrow,
+  satisfying the `'static` lifetime required by
+  `GltfAssetLabel::Scene(n).from_asset(owned_string)`.
+- Deduplicates paths via `HashSet<String>` so each GLB file is loaded at most once.
+- Graceful-degradation: if `GameContent` is absent at startup the system logs a
+  `warn!` and returns early; the cache stays empty (map spawning falls back to
+  RON meshes).
+- Registered ONLY in `MapRenderingPlugin::build()` immediately before
+  `spawn_map_system` in the startup chain. `antares.rs` calls
+  `init_resource::<GlbHandleCache>()` (idempotent) but does not register the
+  system a second time.
+- Tests: `test_glb_scene_loader_populates_cache_from_all_databases`
+  (requires `app.init_asset::<WorldAsset>()` before `app.update()`),
+  `test_glb_scene_loader_no_content_does_not_panic`.
+
+### 3.3 GLB branch in `spawn_creature()` (`src/game/systems/creature_spawning.rs`)
+
+- Added `glb_cache: Option<&GlbHandleCache>` parameter to `pub fn spawn_creature()`.
+  All call-sites in `map.rs` and `item_world_events.rs` pass `Some(glb_cache)`;
+  test code passes `None`.
+- When `creature_def.glb_path.is_some()` the function delegates immediately to the
+  new private `fn spawn_creature_glb()`.
+- `spawn_creature_glb()` logic:
+  - Uses `let Some(glb_path) = ... else { warn!; return placeholder }` instead of
+    `.expect()` to satisfy `clippy::expect-used`.
+  - Looks up `glb_cache.scenes.get(glb_path)` for the pre-loaded handle.
+  - On cache hit: spawns root entity with `WorldAssetRoot(handle)` + `CreatureVisual`
+    - `FacingComponent` + transforms; Bevy scene spawner attaches children async.
+  - On cache miss or absent cache: logs `warn!` and spawns a zero-mesh placeholder
+    entity so the caller always gets a valid `Entity` back.
+- Tests: `test_spawn_creature_with_glb_path_uses_scene_root` (requires
+  `init_asset::<Mesh>` + `init_asset::<StandardMaterial>` + `RunSystemOnce` trait),
+  `test_spawn_creature_without_glb_path_uses_mesh_bundle`.
+
+### 3.4 GLB branches in map mesh-spawning functions (`src/game/systems/map.rs`)
+
+- `spawn_event_meshes()`: when the resolved `CreatureDefinition` has `glb_path`,
+  looks up the handle in `GlbHandleCache` and spawns `WorldAssetRoot` instead of
+  inline mesh children.
+- `spawn_furniture_mesh()`: same GLB-first guard before RON procedural path.
+- `spawn_landscape_root()` / imported landscape path: threads `glb_cache` through;
+  GLB landscape definitions spawn `WorldAssetRoot` on the root entity.
+- All three `spawn_creature()` call-sites in `spawn_map()` updated to pass
+  `Some(glb_cache)` (NPC / encounter creatures now use the GLB path when available).
+- `make_spawn_app` test helper: added `app.init_asset::<WorldAsset>()` so that the
+  `glb_scene_loader_system` (run via `MapRenderingPlugin`) can call
+  `asset_server.load::<WorldAsset>()` without panicking.
+
+### 3.5 GLB branch in `spawn_dropped_item_system()` (`src/game/systems/item_world_events.rs`)
+
+- Added `Option<Res<GlbHandleCache>>` parameter.
+- Guard: GLB items are spawned with a floor-clearance Y offset
+  (`DROPPED_ITEM_GLB_FLOOR_CLEARANCE = 0.05`) so they rest visually on the tile.
+- Calls `spawn_creature(…, Some(&*glb_cache))` on the matching `CreatureDefinition`.
+- Test: `test_spawn_dropped_item_glb_uses_floor_clearance_height`.
+
+### 3.6 `antares.rs` registration (`src/bin/antares.rs`)
+
+- Added `app.init_resource::<GlbHandleCache>()`. The system itself is registered
+  only inside `MapRenderingPlugin` to avoid double-execution.
+
+### Quality gates (final run)
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — zero errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings.
+- `cargo nextest run --all-features` — **5618 passed, 8 skipped, 0 failed**.
+
+---
 
 Added a `RawGlb` export mode to the Campaign Builder importer. When selected, the
 source `.glb` is copied directly into `assets/meshes/{type}/` with a companion

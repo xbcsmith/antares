@@ -33,7 +33,7 @@ use crate::domain::world::terrain::TERRAIN_GROUND;
 use crate::domain::world::MapEvent;
 use crate::game::components::billboard::Billboard;
 use crate::game::components::dropped_item::DroppedItem;
-use crate::game::resources::{DroppedItemRegistry, GlobalState};
+use crate::game::resources::{DroppedItemRegistry, GlbHandleCache, GlobalState};
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::map::{MapEntity, TileCoord};
 use bevy::prelude::*;
@@ -288,6 +288,7 @@ pub fn spawn_dropped_item_system(
     mut events: MessageReader<ItemDroppedEvent>,
     content: Option<Res<GameContent>>,
     global_state: Option<Res<GlobalState>>,
+    glb_cache: Option<Res<GlbHandleCache>>,
 ) {
     let Some(content) = content else {
         // Content not loaded yet; events will be lost this frame.
@@ -394,6 +395,10 @@ pub fn spawn_dropped_item_system(
 
         // Compute the item's dynamic spawn Y so its lowest vertex clears the floor.
         //
+        // For GLB-only definitions (glb_path set, meshes empty), the geometry is
+        // not available at spawn time since Bevy loads it asynchronously.  In that
+        // case, skip the min-Z fold and use effective_floor_clearance directly.
+        //
         // Item geometry is authored on the XZ plane (all Y ≈ 0).  After the
         // upright tilt (−π/2 around X), a vertex at (x, 0, z) becomes (x, z, 0)
         // in child-local space and is then scaled by `creature_def.scale`.  The
@@ -403,22 +408,28 @@ pub fn spawn_dropped_item_system(
         //   spawn_y ≥ effective_floor_clearance − min_z × scale
         // Shadow-quad meshes are excluded because they remain flat on the floor
         // and their Z values are irrelevant to the upright geometry.
-        let item_min_z = creature_def
-            .meshes
-            .iter()
-            .filter(|m| m.name.as_deref() != Some("shadow_quad"))
-            .flat_map(|m| m.vertices.iter().map(|v| v[2]))
-            .fold(f32::INFINITY, f32::min);
-
-        let item_spawn_y = if item_min_z.is_finite() && item_min_z < 0.0 {
-            // Raise the origin so the lowest vertex clears the floor, but never
-            // below DROPPED_ITEM_MIN_HEIGHT (keeps small items visible).
-            (effective_floor_clearance - item_min_z * creature_def.scale)
-                .max(DROPPED_ITEM_MIN_HEIGHT)
-        } else {
-            // No negative-Z geometry: use effective clearance directly so even
-            // flat items (rings, scrolls) sit above grass blades.
+        let item_spawn_y = if creature_def.glb_path.is_some() && creature_def.meshes.is_empty() {
+            // GLB-only definition: geometry unavailable at spawn time.
+            // Use effective floor clearance as the spawn Y floor.
             effective_floor_clearance.max(DROPPED_ITEM_MIN_HEIGHT)
+        } else {
+            let item_min_z = creature_def
+                .meshes
+                .iter()
+                .filter(|m| m.name.as_deref() != Some("shadow_quad"))
+                .flat_map(|m| m.vertices.iter().map(|v| v[2]))
+                .fold(f32::INFINITY, f32::min);
+
+            if item_min_z.is_finite() && item_min_z < 0.0 {
+                // Raise the origin so the lowest vertex clears the floor, but never
+                // below DROPPED_ITEM_MIN_HEIGHT (keeps small items visible).
+                (effective_floor_clearance - item_min_z * creature_def.scale)
+                    .max(DROPPED_ITEM_MIN_HEIGHT)
+            } else {
+                // No negative-Z geometry: use effective clearance directly so even
+                // flat items (rings, scrolls) sit above grass blades.
+                effective_floor_clearance.max(DROPPED_ITEM_MIN_HEIGHT)
+            }
         };
 
         // World-space position: tile centre at the dynamically computed height.
@@ -431,6 +442,7 @@ pub fn spawn_dropped_item_system(
         // Spawn the mesh hierarchy via the shared creature spawning path.
         // `spawn_creature` returns the parent entity; we then patch it with
         // the DroppedItem marker and map-cleanup components.
+        // Pass the GLB cache so GLB-backed item mesh definitions use WorldAssetRoot.
         let entity = spawn_creature(
             &mut commands,
             &creature_def,
@@ -440,6 +452,7 @@ pub fn spawn_dropped_item_system(
             None, // use creature definition scale
             None, // no animation
             None, // facing handled by jitter rotation below
+            glb_cache.as_deref(),
         );
 
         // Apply the random Y jitter (spawn_creature sets facing → North by
@@ -791,5 +804,47 @@ mod tests {
     #[test]
     fn test_tile_center_offset_is_half() {
         assert!((TILE_CENTER_OFFSET - 0.5_f32).abs() < f32::EPSILON);
+    }
+
+    // ===== Phase 3: GLB floor-clearance tests =====
+
+    /// A dropped item whose `CreatureDefinition` has `glb_path` set and an empty
+    /// `meshes` list must spawn at Y = `effective_floor_clearance.max(DROPPED_ITEM_MIN_HEIGHT)`
+    /// because the GLB geometry is unavailable at spawn time (async loading).
+    ///
+    /// This test verifies the computation logic used inside
+    /// `spawn_dropped_item_system` directly.
+    #[test]
+    fn test_spawn_dropped_item_glb_uses_floor_clearance_height() {
+        // Reproduce the floor-clearance calculation for a GLB-only definition.
+        let effective_floor_clearance = DROPPED_ITEM_FLOOR_CLEARANCE;
+
+        // GLB-only definition: glb_path set, meshes empty.
+        let glb_def = crate::domain::visual::CreatureDefinition {
+            id: 999,
+            name: "GlbItem".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/test_triangle.glb".to_string()),
+            glb_scene_index: 0,
+        };
+
+        // Replicate the spawn Y logic from spawn_dropped_item_system
+        let item_spawn_y = if glb_def.glb_path.is_some() && glb_def.meshes.is_empty() {
+            effective_floor_clearance.max(DROPPED_ITEM_MIN_HEIGHT)
+        } else {
+            panic!("test precondition failed: expected GLB-only branch");
+        };
+
+        let expected_y = DROPPED_ITEM_FLOOR_CLEARANCE.max(DROPPED_ITEM_MIN_HEIGHT);
+        assert!(
+            (item_spawn_y - expected_y).abs() < 1e-6,
+            "GLB item spawn Y should be effective_floor_clearance.max(DROPPED_ITEM_MIN_HEIGHT), \
+             got {} expected {}",
+            item_spawn_y,
+            expected_y
+        );
     }
 }

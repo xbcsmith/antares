@@ -482,6 +482,14 @@ impl Plugin for AntaresPlugin {
             content_db,
         ));
 
+        // Initialise the GLB handle cache resource so it is available to the
+        // pre-loader and map spawn systems during the Startup schedule.
+        // GlbHandleCache is also initialised in MapRenderingPlugin::build();
+        // init_resource is idempotent so this is safe.
+        // The glb_scene_loader_system itself is registered in MapRenderingPlugin
+        // to guarantee it runs before spawn_map_system in the startup chain.
+        app.init_resource::<antares::game::resources::GlbHandleCache>();
+
         // Register dialogue and quest plugins so their systems are available
         app.add_plugins(antares::game::systems::dialogue::DialoguePlugin);
         app.add_plugins(antares::game::systems::quest::QuestPlugin);

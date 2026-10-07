@@ -35,6 +35,7 @@
 //!         None,
 //!         None,
 //!         None,
+//!         None, // glb_cache: RON path used
 //!     );
 //! }
 //! ```
@@ -45,6 +46,7 @@ use crate::domain::visual::CreatureDefinition;
 use crate::game::components::creature::{
     CreatureAnimation, CreatureVisual, FacingComponent, LodState, MeshPart,
 };
+use crate::game::resources::GlbHandleCache;
 use crate::game::systems::creature_meshes::{
     create_material_from_color, material_definition_to_bevy, mesh_definition_to_bevy,
 };
@@ -67,6 +69,9 @@ use bevy::prelude::*;
 /// * `animation` - Optional animation to play on spawn
 /// * `facing` - Optional cardinal direction the creature should face on spawn.
 ///   `None` defaults to [`Direction::North`] (zero rotation).
+/// * `glb_cache` - Optional reference to the pre-populated [`GlbHandleCache`].
+///   When `Some` and the definition has `glb_path` set, the GLB rendering path
+///   is used (`WorldAssetRoot`).  Pass `None` to always use the RON path.
 ///
 /// # Returns
 ///
@@ -109,7 +114,7 @@ use bevy::prelude::*;
 ///         glb_scene_index: 0,
 ///     };
 ///
-///     // Spawn facing South
+///     // Spawn facing South (RON path — no GLB cache needed)
 ///     let entity = spawn_creature(
 ///         &mut commands,
 ///         &creature_def,
@@ -119,6 +124,7 @@ use bevy::prelude::*;
 ///         None,
 ///         None,
 ///         Some(Direction::South),
+///         None, // glb_cache
 ///     );
 /// }
 /// ```
@@ -132,7 +138,23 @@ pub fn spawn_creature(
     scale_override: Option<f32>,
     animation: Option<AnimationDefinition>,
     facing: Option<Direction>,
+    glb_cache: Option<&GlbHandleCache>,
 ) -> Entity {
+    // GLB rendering path: delegate to spawn_creature_glb() when a glb_path is set.
+    // This path uses Bevy's WorldAssetRoot instead of the inline mesh definitions.
+    if creature_def.glb_path.is_some() {
+        return spawn_creature_glb(
+            commands,
+            creature_def,
+            position,
+            scale_override,
+            animation,
+            facing,
+            glb_cache,
+        );
+    }
+
+    // RON rendering path (unchanged from pre-Phase-3 behaviour).
     // Determine effective scale
     let scale = scale_override.unwrap_or(creature_def.scale);
 
@@ -235,12 +257,139 @@ pub fn spawn_creature(
     parent
 }
 
+/// Spawns a GLB-backed creature using Bevy's `WorldAssetRoot` component.
+///
+/// Called by [`spawn_creature`] when `creature_def.glb_path` is `Some`.
+/// Bevy's `SceneSpawner` will asynchronously attach the GLB scene's child
+/// hierarchy once the asset finishes loading.
+///
+/// # Graceful degradation
+///
+/// - If `glb_cache` is `None`, logs a warning and spawns a placeholder entity
+///   (a root with no mesh) so callers are not left with an invalid entity ID.
+/// - If the handle is not found in the cache (pre-load in `glb_scene_loader_system`
+///   should prevent this in normal operation), logs a warning and spawns a
+///   placeholder entity.
+#[allow(clippy::too_many_arguments)]
+fn spawn_creature_glb(
+    commands: &mut Commands,
+    creature_def: &CreatureDefinition,
+    position: Vec3,
+    scale_override: Option<f32>,
+    animation: Option<AnimationDefinition>,
+    facing: Option<Direction>,
+    glb_cache: Option<&GlbHandleCache>,
+) -> Entity {
+    // Resolve transform parameters first so the placeholder branch can use them.
+    let effective_scale = scale_override.unwrap_or(creature_def.scale);
+    let effective_direction = facing.unwrap_or(Direction::North);
+    let yaw = effective_direction.direction_to_yaw_radians();
+    let rotation = Quat::from_rotation_y(yaw);
+
+    // Safety: this function is only called from spawn_creature() when
+    // creature_def.glb_path.is_some() — the None branch is a programming
+    // error guard that logs and spawns a placeholder so the caller always
+    // gets a valid Entity back.
+    let Some(glb_path) = creature_def.glb_path.as_deref() else {
+        warn!(
+            "spawn_creature_glb called without glb_path for creature '{}'; \
+             this is a programming error. Spawning empty placeholder.",
+            creature_def.name
+        );
+        let mut placeholder_cmds = commands.spawn((
+            CreatureVisual {
+                creature_id: creature_def.id,
+                scale_override,
+            },
+            FacingComponent::new(effective_direction),
+            Transform::from_translation(position)
+                .with_rotation(rotation)
+                .with_scale(Vec3::splat(effective_scale)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ));
+        if let Some(anim_def) = animation {
+            placeholder_cmds.insert(CreatureAnimation::new(anim_def));
+        }
+        return placeholder_cmds.id();
+    };
+
+    // Attempt to look up the pre-loaded scene handle from the cache.
+    let handle_opt = glb_cache
+        .and_then(|cache| cache.scenes.get(glb_path))
+        .cloned();
+
+    let Some(handle) = handle_opt else {
+        if glb_cache.is_none() {
+            warn!(
+                "spawn_creature_glb: GlbHandleCache not provided for GLB-only creature '{}' \
+                 (glb_path='{}'). Spawning placeholder entity.",
+                creature_def.name, glb_path
+            );
+        } else {
+            warn!(
+                "spawn_creature_glb: GLB path '{}' not found in GlbHandleCache for creature '{}'. \
+                 Ensure glb_scene_loader_system ran before map spawn. Spawning placeholder entity.",
+                glb_path, creature_def.name
+            );
+        }
+        // Spawn a zero-vertex placeholder entity when the handle is unavailable.
+        // GLB-only definitions have no `meshes` to fall back to.
+        let mut entity_cmds = commands.spawn((
+            CreatureVisual {
+                creature_id: creature_def.id,
+                scale_override,
+            },
+            FacingComponent::new(effective_direction),
+            Transform::from_translation(position)
+                .with_rotation(rotation)
+                .with_scale(Vec3::splat(effective_scale)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ));
+        if let Some(anim_def) = animation {
+            entity_cmds.insert(CreatureAnimation::new(anim_def));
+        }
+        return entity_cmds.id();
+    };
+
+    // Spawn the root entity with WorldAssetRoot so Bevy's scene spawner
+    // attaches the GLB scene's child hierarchy asynchronously.
+    let mut entity_cmds = commands.spawn((
+        CreatureVisual {
+            creature_id: creature_def.id,
+            scale_override,
+        },
+        FacingComponent::new(effective_direction),
+        Transform::from_translation(position)
+            .with_rotation(rotation)
+            .with_scale(Vec3::splat(effective_scale)),
+        GlobalTransform::default(),
+        Visibility::default(),
+        InheritedVisibility::default(),
+        ViewVisibility::default(),
+        WorldAssetRoot(handle),
+    ));
+
+    // Mirror the existing RON path: insert CreatureAnimation when provided.
+    if let Some(anim_def) = animation {
+        entity_cmds.insert(CreatureAnimation::new(anim_def));
+    }
+
+    entity_cmds.id()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::types::Direction;
     use crate::domain::visual::MeshDefinition;
     use crate::game::components::creature::SpawnCreatureRequest;
+    use bevy::ecs::system::RunSystemOnce;
 
     #[test]
     fn test_creature_visual_component_creation() {
@@ -470,4 +619,134 @@ mod tests {
     // Integration tests with full Bevy app context are complex due to borrow checker
     // requirements. Full integration testing should be done via manual testing or
     // end-to-end tests that run the actual game systems.
+
+    // ===== Phase 3: GLB rendering path tests =====
+
+    /// A creature with `glb_path: Some(…)` and a pre-populated `GlbHandleCache`
+    /// must spawn an entity with a `WorldAssetRoot` component and must NOT have
+    /// a direct `Mesh3d` component on the root entity.
+    #[test]
+    fn test_spawn_creature_with_glb_path_uses_scene_root() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+
+        // Build a GLB-only creature definition
+        let glb_def = CreatureDefinition {
+            id: 42,
+            name: "GlbCreature".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/test_triangle.glb".to_string()),
+            glb_scene_index: 0,
+        };
+
+        // Pre-populate the cache with a fake handle for the GLB path
+        let mut cache = GlbHandleCache::default();
+        let fake_handle: Handle<WorldAsset> = Handle::default();
+        cache
+            .scenes
+            .insert("assets/meshes/test_triangle.glb".to_string(), fake_handle);
+
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut meshes: ResMut<Assets<Mesh>>,
+                      mut materials: ResMut<Assets<StandardMaterial>>| {
+                    let _entity = spawn_creature(
+                        &mut commands,
+                        &glb_def,
+                        &mut meshes,
+                        &mut materials,
+                        Vec3::ZERO,
+                        None,
+                        None,
+                        None,
+                        Some(&cache),
+                    );
+                },
+            )
+            .unwrap();
+
+        // The spawned entity should have WorldAssetRoot (GLB path)
+        let has_world_asset_root = {
+            let w = app.world_mut();
+            let mut q = w.query::<&WorldAssetRoot>();
+            q.iter(w).next().is_some()
+        };
+        assert!(
+            has_world_asset_root,
+            "GLB creature must have WorldAssetRoot component"
+        );
+
+        // The root entity must NOT have Mesh3d (GLB children are added by Bevy async)
+        let has_mesh3d = {
+            let w = app.world_mut();
+            let mut q = w.query::<&Mesh3d>();
+            q.iter(w).next().is_some()
+        };
+        assert!(
+            !has_mesh3d,
+            "GLB creature root entity must not have a direct Mesh3d component"
+        );
+    }
+
+    /// A creature with `glb_path: None` must spawn child entities with `Mesh3d`
+    /// components via the RON rendering path.
+    #[test]
+    fn test_spawn_creature_without_glb_path_uses_mesh_bundle() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+
+        let ron_def = make_test_creature_def(); // has glb_path: None, one mesh
+
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut meshes: ResMut<Assets<Mesh>>,
+                      mut materials: ResMut<Assets<StandardMaterial>>| {
+                    let _entity = spawn_creature(
+                        &mut commands,
+                        &ron_def,
+                        &mut meshes,
+                        &mut materials,
+                        Vec3::ZERO,
+                        None,
+                        None,
+                        None,
+                        None, // no GLB cache needed for RON path
+                    );
+                },
+            )
+            .unwrap();
+
+        // At least one entity must have Mesh3d (the mesh child)
+        let has_mesh3d = {
+            let w = app.world_mut();
+            let mut q = w.query::<&Mesh3d>();
+            q.iter(w).next().is_some()
+        };
+        assert!(
+            has_mesh3d,
+            "RON creature must spawn child entities with Mesh3d component"
+        );
+
+        // No WorldAssetRoot should be present for the RON path
+        let has_world_asset_root = {
+            let w = app.world_mut();
+            let mut q = w.query::<&WorldAssetRoot>();
+            q.iter(w).next().is_some()
+        };
+        assert!(
+            !has_world_asset_root,
+            "RON creature must not have WorldAssetRoot"
+        );
+    }
 }

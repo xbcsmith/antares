@@ -11,6 +11,7 @@ use crate::game::components::creature::{CreatureVisual, LodState};
 use crate::game::components::furniture::{FurnitureEntity, Interactable, InteractionType};
 use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
+use crate::game::resources::GlbHandleCache;
 use crate::game::resources::GlobalState;
 use crate::game::resources::TerrainMaterialCache;
 use crate::game::resources::WindConfig;
@@ -21,6 +22,7 @@ use crate::game::systems::creature_meshes::{
 };
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::furniture_rendering::resolve_furniture_fields;
+use crate::game::systems::glb_scene_loader::glb_scene_loader_system;
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use crate::game::systems::{advanced_trees, procedural_meshes, vegetation_placement};
 
@@ -637,6 +639,7 @@ impl Plugin for MapRenderingPlugin {
             .init_resource::<crate::game::resources::GrassQualitySettings>()
             .init_resource::<crate::game::resources::VegetationQualitySettings>()
             .init_resource::<super::advanced_grass::GrassAssetCache>()
+            .init_resource::<GlbHandleCache>()
             .init_resource::<super::advanced_grass::GrassRenderConfig>()
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
             // GPU instancing plugin — must be added before the material
@@ -656,6 +659,7 @@ impl Plugin for MapRenderingPlugin {
                     super::terrain_materials::load_terrain_materials_system,
                     register_sprite_sheets_system,
                     super::advanced_grass::setup_wind_noise_texture_system,
+                    glb_scene_loader_system,
                     spawn_map_system,
                 )
                     .chain(),
@@ -702,6 +706,7 @@ fn spawn_map_system(
     wind_config: Option<Res<WindConfig>>,
     wind_noise: Option<Res<WindNoiseTexture>>,
     render_mode: Option<Res<super::grass_instancing::GrassRenderMode>>,
+    glb_cache: Res<GlbHandleCache>,
 ) {
     let wind_uniform = wind_config
         .as_deref()
@@ -730,6 +735,7 @@ fn spawn_map_system(
         &terrain_cache,
         &mut cache,
         effective_render_mode,
+        &glb_cache,
     );
 }
 
@@ -927,6 +933,7 @@ fn spawn_map_markers(
     wind_config: Option<Res<WindConfig>>,
     wind_noise: Option<Res<WindNoiseTexture>>,
     render_mode: Option<Res<super::grass_instancing::GrassRenderMode>>,
+    glb_cache: Option<Res<GlbHandleCache>>,
 ) {
     let current = global_state.0.world.current_map;
 
@@ -995,6 +1002,8 @@ fn spawn_map_markers(
             .unwrap_or_default();
         grass_cache.set_wind(wind_uniform, noise_handle);
         let effective_render_mode = render_mode.as_deref().copied().unwrap_or_default();
+        let default_glb_cache = GlbHandleCache::default();
+        let glb_cache_ref: &GlbHandleCache = glb_cache.as_deref().unwrap_or(&default_glb_cache);
         spawn_map(
             commands,
             meshes,
@@ -1014,6 +1023,7 @@ fn spawn_map_markers(
             cache_ref,
             &mut procedural_cache,
             effective_render_mode,
+            glb_cache_ref,
         );
     } else {
         // Current map id is set to an unknown map - leave the world empty
@@ -1106,6 +1116,7 @@ fn try_spawn_terrain_tree_as_landscape_mesh(
     anchor: vegetation_placement::VegetationAnchor,
     landscape: &world::LandscapeDatabase,
     object_meshes: &world::ObjectMeshDatabase,
+    glb_cache: &GlbHandleCache,
 ) -> bool {
     let Some(definition) = find_landscape_definition_for_tree_type(tree_type, landscape) else {
         warn!(
@@ -1164,6 +1175,7 @@ fn try_spawn_terrain_tree_as_landscape_mesh(
         definition,
         mesh_id,
         mesh_def,
+        glb_cache,
     );
     true
 }
@@ -1177,6 +1189,7 @@ fn spawn_landscape_placements(
     map: &world::Map,
     landscape: &world::LandscapeDatabase,
     object_meshes: &world::ObjectMeshDatabase,
+    glb_cache: &GlbHandleCache,
 ) {
     for (placement_index, placement) in map.landscape_placements.iter().enumerate() {
         if !map.is_valid_position(placement.position) {
@@ -1212,6 +1225,7 @@ fn spawn_landscape_placements(
                     definition,
                     mesh_id,
                     mesh_def,
+                    glb_cache,
                 );
                 continue;
             }
@@ -1280,6 +1294,7 @@ pub(crate) fn spawn_imported_furniture_mesh(
     tint: Option<[f32; 3]>,
     resolved_type: world::FurnitureType,
     flags: &world::FurnitureFlags,
+    glb_cache: &GlbHandleCache,
 ) -> Entity {
     let root = commands
         .spawn((
@@ -1298,54 +1313,67 @@ pub(crate) fn spawn_imported_furniture_mesh(
         ))
         .id();
 
-    for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
-        let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
-        // landscape_material resolves texture_path via the asset server;
-        // it is the same path used by landscape placements and event meshes.
-        let material_handle = materials.add(landscape_material(mesh_def, tint, asset_server));
-
-        let transform = creature_def
-            .mesh_transforms
-            .get(mesh_index)
-            .map(|mt| {
-                Transform::from_translation(Vec3::from(mt.translation))
-                    .with_rotation(Quat::from_euler(
-                        EulerRot::XYZ,
-                        mt.rotation[0],
-                        mt.rotation[1],
-                        mt.rotation[2],
-                    ))
-                    .with_scale(Vec3::from(mt.scale))
-            })
-            .unwrap_or_default();
-
-        let mut lod_mesh_handles = vec![mesh_handle.clone()];
-        let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
-            for lod_mesh_def in lod_levels {
-                lod_mesh_handles.push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
-            }
-            mesh_def.lod_distances.clone()
+    // GLB rendering path: add WorldAssetRoot when glb_path is set.
+    if let Some(glb_path) = creature_def.glb_path.as_deref() {
+        if let Some(handle) = glb_cache.scenes.get(glb_path) {
+            commands.entity(root).insert(WorldAssetRoot(handle.clone()));
         } else {
-            None
-        };
-
-        let mut child_entity = commands.spawn((
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
-            transform,
-            GlobalTransform::default(),
-            Visibility::default(),
-            InheritedVisibility::default(),
-            ViewVisibility::default(),
-            Name::new(format!("FurnitureMesh Part {}", mesh_index)),
-        ));
-
-        if let Some(distances) = lod_distances {
-            child_entity.insert(LodState::new(lod_mesh_handles, distances));
+            warn!(
+                "Furniture GLB path '{}' not found in GlbHandleCache; \
+                 mesh loop will produce no visible geometry for GLB-only definition",
+                glb_path
+            );
         }
+    } else {
+        for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+            let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
+            // landscape_material resolves texture_path via the asset server;
+            // it is the same path used by landscape placements and event meshes.
+            let material_handle = materials.add(landscape_material(mesh_def, tint, asset_server));
 
-        let child = child_entity.id();
-        commands.entity(root).add_child(child);
+            let transform = creature_def
+                .mesh_transforms
+                .get(mesh_index)
+                .map(|mt| {
+                    Transform::from_translation(Vec3::from(mt.translation))
+                        .with_rotation(Quat::from_euler(
+                            EulerRot::XYZ,
+                            mt.rotation[0],
+                            mt.rotation[1],
+                            mt.rotation[2],
+                        ))
+                        .with_scale(Vec3::from(mt.scale))
+                })
+                .unwrap_or_default();
+
+            let mut lod_mesh_handles = vec![mesh_handle.clone()];
+            let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
+                for lod_mesh_def in lod_levels {
+                    lod_mesh_handles.push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
+                }
+                mesh_def.lod_distances.clone()
+            } else {
+                None
+            };
+
+            let mut child_entity = commands.spawn((
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material_handle),
+                transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                Name::new(format!("FurnitureMesh Part {}", mesh_index)),
+            ));
+
+            if let Some(distances) = lod_distances {
+                child_entity.insert(LodState::new(lod_mesh_handles, distances));
+            }
+
+            let child = child_entity.id();
+            commands.entity(root).add_child(child);
+        }
     }
 
     // Attach interaction components identical to the procedural path so the
@@ -1404,6 +1432,7 @@ fn spawn_event_meshes(
     asset_server: &AssetServer,
     map: &world::Map,
     object_meshes: &world::ObjectMeshDatabase,
+    glb_cache: &GlbHandleCache,
 ) {
     for (position, event) in map.events.iter() {
         let mesh_id_str: &str = match event {
@@ -1437,75 +1466,112 @@ fn spawn_event_meshes(
             let ground_y = creature_def.foot_ground_offset();
             let world_pos = Vec3::new(x + TILE_CENTER_OFFSET, ground_y, y + TILE_CENTER_OFFSET);
 
-            let root = commands
-                .spawn((
-                    Name::new(format!("EventMesh: {}", mesh_id_str)),
-                    Transform::from_translation(world_pos)
-                        .with_scale(Vec3::splat(creature_def.scale)),
-                    GlobalTransform::default(),
-                    Visibility::default(),
-                    InheritedVisibility::default(),
-                    ViewVisibility::default(),
-                ))
-                .id();
-
-            for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
-                let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
-                // Use landscape_material so texture_path is loaded via the asset
-                // server. spawn_creature only called material_definition_to_bevy /
-                // create_material_from_color, both of which ignore texture_path,
-                // which is why imported object meshes were rendering without textures.
-                // landscape_material expects an RGB tint ([f32; 3]); strip the alpha
-                // channel from the creature definition's RGBA color_tint.
-                let tint_rgb = creature_def.color_tint.map(|[r, g, b, _a]| [r, g, b]);
-                let material_handle =
-                    materials.add(landscape_material(mesh_def, tint_rgb, asset_server));
-
-                let transform = creature_def
-                    .mesh_transforms
-                    .get(mesh_index)
-                    .map(|mt| {
-                        Transform::from_translation(Vec3::from(mt.translation))
-                            .with_rotation(Quat::from_euler(
-                                EulerRot::XYZ,
-                                mt.rotation[0],
-                                mt.rotation[1],
-                                mt.rotation[2],
-                            ))
-                            .with_scale(Vec3::from(mt.scale))
-                    })
-                    .unwrap_or_default();
-
-                let mut lod_mesh_handles = vec![mesh_handle.clone()];
-                let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
-                    for lod_mesh_def in lod_levels {
-                        lod_mesh_handles.push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
-                    }
-                    mesh_def.lod_distances.clone()
+            // GLB rendering path: use WorldAssetRoot when glb_path is set.
+            if let Some(glb_path) = creature_def.glb_path.as_deref() {
+                if let Some(handle) = glb_cache.scenes.get(glb_path) {
+                    commands
+                        .spawn((
+                            Name::new(format!("EventMesh: {}", mesh_id_str)),
+                            Transform::from_translation(world_pos)
+                                .with_scale(Vec3::splat(creature_def.scale)),
+                            GlobalTransform::default(),
+                            Visibility::default(),
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
+                            WorldAssetRoot(handle.clone()),
+                        ))
+                        .id()
                 } else {
-                    None
-                };
+                    warn!(
+                        mesh_id = mesh_id_str,
+                        glb_path,
+                        "EventMesh GLB path not found in GlbHandleCache; spawning invisible root"
+                    );
+                    commands
+                        .spawn((
+                            Name::new(format!("EventMesh: {}", mesh_id_str)),
+                            Transform::from_translation(world_pos)
+                                .with_scale(Vec3::splat(creature_def.scale)),
+                            GlobalTransform::default(),
+                            Visibility::default(),
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
+                        ))
+                        .id()
+                }
+            } else {
+                // RON rendering path: existing code unchanged.
+                let root = commands
+                    .spawn((
+                        Name::new(format!("EventMesh: {}", mesh_id_str)),
+                        Transform::from_translation(world_pos)
+                            .with_scale(Vec3::splat(creature_def.scale)),
+                        GlobalTransform::default(),
+                        Visibility::default(),
+                        InheritedVisibility::default(),
+                        ViewVisibility::default(),
+                    ))
+                    .id();
 
-                let mut child_entity = commands.spawn((
-                    Mesh3d(mesh_handle),
-                    MeshMaterial3d(material_handle),
-                    transform,
-                    GlobalTransform::default(),
-                    Visibility::default(),
-                    InheritedVisibility::default(),
-                    ViewVisibility::default(),
-                    Name::new(format!("EventMesh Part {}", mesh_index)),
-                ));
+                for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+                    let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
+                    // Use landscape_material so texture_path is loaded via the asset
+                    // server. spawn_creature only called material_definition_to_bevy /
+                    // create_material_from_color, both of which ignore texture_path,
+                    // which is why imported object meshes were rendering without textures.
+                    // landscape_material expects an RGB tint ([f32; 3]); strip the alpha
+                    // channel from the creature definition's RGBA color_tint.
+                    let tint_rgb = creature_def.color_tint.map(|[r, g, b, _a]| [r, g, b]);
+                    let material_handle =
+                        materials.add(landscape_material(mesh_def, tint_rgb, asset_server));
 
-                if let Some(distances) = lod_distances {
-                    child_entity.insert(LodState::new(lod_mesh_handles, distances));
+                    let transform = creature_def
+                        .mesh_transforms
+                        .get(mesh_index)
+                        .map(|mt| {
+                            Transform::from_translation(Vec3::from(mt.translation))
+                                .with_rotation(Quat::from_euler(
+                                    EulerRot::XYZ,
+                                    mt.rotation[0],
+                                    mt.rotation[1],
+                                    mt.rotation[2],
+                                ))
+                                .with_scale(Vec3::from(mt.scale))
+                        })
+                        .unwrap_or_default();
+
+                    let mut lod_mesh_handles = vec![mesh_handle.clone()];
+                    let lod_distances = if let Some(lod_levels) = &mesh_def.lod_levels {
+                        for lod_mesh_def in lod_levels {
+                            lod_mesh_handles
+                                .push(meshes.add(mesh_definition_to_bevy(lod_mesh_def)));
+                        }
+                        mesh_def.lod_distances.clone()
+                    } else {
+                        None
+                    };
+
+                    let mut child_entity = commands.spawn((
+                        Mesh3d(mesh_handle),
+                        MeshMaterial3d(material_handle),
+                        transform,
+                        GlobalTransform::default(),
+                        Visibility::default(),
+                        InheritedVisibility::default(),
+                        ViewVisibility::default(),
+                        Name::new(format!("EventMesh Part {}", mesh_index)),
+                    ));
+
+                    if let Some(distances) = lod_distances {
+                        child_entity.insert(LodState::new(lod_mesh_handles, distances));
+                    }
+
+                    let child = child_entity.id();
+                    commands.entity(root).add_child(child);
                 }
 
-                let child = child_entity.id();
-                commands.entity(root).add_child(child);
+                root
             }
-
-            root
         } else {
             if !mesh_id_str.is_empty() {
                 warn!(
@@ -1561,6 +1627,7 @@ fn spawn_imported_landscape_mesh(
     definition: &world::LandscapeDefinition,
     mesh_id: types::LandscapeMeshId,
     creature_def: &crate::domain::visual::CreatureDefinition,
+    glb_cache: &GlbHandleCache,
 ) -> Entity {
     let root_transform = landscape_root_transform(placement, definition, creature_def.scale);
     let root = commands
@@ -1583,6 +1650,20 @@ fn spawn_imported_landscape_mesh(
         ))
         .id();
 
+    // GLB rendering path: add WorldAssetRoot when glb_path is set.
+    if let Some(glb_path) = creature_def.glb_path.as_deref() {
+        if let Some(handle) = glb_cache.scenes.get(glb_path) {
+            commands.entity(root).insert(WorldAssetRoot(handle.clone()));
+            return root;
+        }
+        warn!(
+            landscape_id = placement.landscape_id,
+            glb_path,
+            "Landscape GLB path not found in GlbHandleCache; falling through to mesh loop \
+             (GLB-only definition will produce no visible geometry)"
+        );
+    }
+    // RON rendering path: existing mesh loop unchanged.
     let tint = placement.color_tint.or(definition.color_tint);
     for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
         let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
@@ -1829,6 +1910,7 @@ fn spawn_map(
     terrain_cache: &TerrainMaterialCache,
     procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
     render_mode: super::grass_instancing::GrassRenderMode,
+    glb_cache: &GlbHandleCache,
 ) {
     debug!("spawn_map system called");
     let game_state = &global_state.0;
@@ -2036,6 +2118,7 @@ fn spawn_map(
                                                 shrub_anchor,
                                                 &content.0.landscape,
                                                 &content.0.object_meshes,
+                                                glb_cache,
                                             );
                                             if !spawned {
                                                 let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -2068,6 +2151,7 @@ fn spawn_map(
                                             tree_anchor,
                                             &content.0.landscape,
                                             &content.0.object_meshes,
+                                            glb_cache,
                                         );
                                         if !spawned {
                                             let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -2102,6 +2186,7 @@ fn spawn_map(
                                             tree_anchor,
                                             &content.0.landscape,
                                             &content.0.object_meshes,
+                                            glb_cache,
                                         );
                                         if !spawned {
                                             let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -2145,6 +2230,7 @@ fn spawn_map(
                                         shrub_anchor,
                                         &content.0.landscape,
                                         &content.0.object_meshes,
+                                        glb_cache,
                                     );
                                     if !spawned {
                                         let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -2357,6 +2443,7 @@ fn spawn_map(
             map,
             &content.0.landscape,
             &content.0.object_meshes,
+            glb_cache,
         );
 
         // Spawn mesh visuals for any map event that carries a mesh_id field.
@@ -2369,6 +2456,7 @@ fn spawn_map(
             &asset_server,
             map,
             &content.0.object_meshes,
+            glb_cache,
         );
 
         // Also spawn lightweight event trigger entities for any map events (so the
@@ -2494,6 +2582,7 @@ fn spawn_map(
                             .get(&resolved_npc.npc_id)
                             .copied()
                             .or(resolved_npc.facing),
+                        Some(glb_cache),
                     );
 
                     commands.entity(entity).insert((
@@ -2705,6 +2794,7 @@ fn spawn_map(
                                 resolved_tint,
                                 resolved_type,
                                 &resolved_flags,
+                                glb_cache,
                             );
                         })
                         .is_some();
@@ -2759,6 +2849,7 @@ fn spawn_map(
                                 None,
                                 None,
                                 *facing, // wire Encounter.facing
+                                Some(glb_cache),
                             );
 
                             commands.entity(entity).insert((
@@ -2834,6 +2925,7 @@ fn spawn_map(
                                 None,
                                 None,
                                 *facing, // wire RecruitableCharacter.facing
+                                Some(glb_cache),
                             );
 
                             commands.entity(entity).insert((
@@ -4671,6 +4763,9 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(bevy::asset::AssetPlugin::default());
         app.init_asset::<bevy::prelude::Image>();
+        // WorldAsset must be registered before glb_scene_loader_system calls
+        // asset_server.load::<WorldAsset>(), which runs via MapRenderingPlugin.
+        app.init_asset::<WorldAsset>();
         app.add_plugins(MapRenderingPlugin);
         app.insert_resource(crate::application::resources::GameContent::new(db));
         app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());

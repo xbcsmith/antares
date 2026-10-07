@@ -4,7 +4,7 @@
 use crate::application::resources::GameContent;
 use crate::domain::world::EventResult;
 use crate::domain::world::MapEvent;
-use crate::game::resources::{GlobalState, LockInteractionPending};
+use crate::game::resources::{GlbHandleCache, GlobalState, LockInteractionPending};
 use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
 use crate::game::systems::furniture_rendering::{
     resolve_furniture_fields, spawn_furniture_with_rendering,
@@ -791,6 +791,8 @@ fn handle_events(
                         let z = trigger.position.y as f32;
                         let world_pos =
                             Vec3::new(x + 0.5, creature_def.foot_ground_offset(), z + 0.5);
+                        let default_glb_cache = GlbHandleCache::default();
+                        let effective_glb_cache = &default_glb_cache;
                         spawn_imported_furniture_mesh(
                             commands,
                             meshes_res,
@@ -805,6 +807,7 @@ fn handle_events(
                             resolved_tint,
                             resolved_type,
                             &resolved_flags,
+                            effective_glb_cache,
                         );
                     })
                     .is_some();
