@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+(
+    id: 999,
+    name: "TestTriangleGlb",
+    meshes: [],
+    mesh_transforms: [],
+    scale: 1.0,
+    color_tint: None,
+    glb_path: Some("assets/meshes/test_triangle.glb"),
+    glb_scene_index: 0,
+)

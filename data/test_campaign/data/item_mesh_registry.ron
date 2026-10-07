@@ -9,4 +9,9 @@
         name: "ItemMeshPotion",
         filepath: "assets/items/potion.ron",
     ),
+    /*[2]*/ (
+        id: 9999,
+        name: "TestTriangleGlb",
+        filepath: "assets/creatures/test_triangle_glb.ron",
+    ),
 ]

@@ -37,4 +37,9 @@
         name: "Barred Passage",
         filepath: "assets/meshes/objects/barred_door.ron",
     ),
+    (
+        id: 12099,
+        name: "Test Triangle GLB",
+        filepath: "assets/meshes/objects/test_triangle_glb.ron",
+    ),
 ]

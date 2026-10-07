@@ -462,6 +462,26 @@ impl ItemMeshDatabase {
     ) -> Result<(), crate::domain::visual::creature_database::CreatureDatabaseError> {
         self.inner.validate()
     }
+
+    /// Returns an iterator over the GLB path of every item mesh entry
+    /// that has a `glb_path` set.
+    ///
+    /// Used by the Phase 3 `GlbHandleCache` pre-loader to discover all GLB
+    /// assets that need to be queued for loading at campaign startup.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::database::ItemMeshDatabase;
+    ///
+    /// let db = ItemMeshDatabase::new();
+    /// assert_eq!(db.glb_paths().count(), 0);
+    /// ```
+    pub fn glb_paths(&self) -> impl Iterator<Item = &str> {
+        self.inner
+            .all_creatures()
+            .filter_map(|def| def.glb_path.as_deref())
+    }
 }
 
 #[cfg(test)]
@@ -985,5 +1005,29 @@ mod tests {
             }
             other => panic!("Expected Consumable item_type, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_item_mesh_database_glb_paths_returns_glb_entries() {
+        use crate::domain::visual::CreatureDefinition;
+
+        let mut db = ItemMeshDatabase::new();
+
+        // Add a GLB-only creature via the inner database
+        let glb_creature = CreatureDefinition {
+            id: 9999,
+            name: "GlbItem".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/items/test_item.glb".to_string()),
+            glb_scene_index: 0,
+        };
+        db.inner.add_creature(glb_creature).unwrap();
+
+        let paths: Vec<&str> = db.glb_paths().collect();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], "assets/meshes/items/test_item.glb");
     }
 }

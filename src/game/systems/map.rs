@@ -4135,6 +4135,8 @@ mod tests {
             mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         db.creatures
             .add_creature(creature)
@@ -4226,6 +4228,8 @@ mod tests {
             mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         db.creatures
             .add_creature(creature)
@@ -4320,6 +4324,8 @@ mod tests {
             mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         db.creatures
             .add_creature(creature)
@@ -4654,6 +4660,8 @@ mod tests {
             mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 

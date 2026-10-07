@@ -351,6 +351,8 @@ impl CreaturesEditorState {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 
@@ -2480,6 +2482,8 @@ impl CreaturesEditorState {
     ///     mesh_transforms: vec![],
     ///     scale: 1.0,
     ///     color_tint: None,
+    ///     glb_path: None,
+    ///     glb_scene_index: 0,
     /// };
     /// let creatures = vec![creature];
     /// state.open_for_editing(&creatures, 0, "goblin.ron");
@@ -3142,6 +3146,8 @@ mod tests {
                 mesh_transforms: vec![],
                 scale: 1.0,
                 color_tint: None,
+                glb_path: None,
+                glb_scene_index: 0,
             },
             CreatureDefinition {
                 id: 2,
@@ -3150,6 +3156,8 @@ mod tests {
                 mesh_transforms: vec![],
                 scale: 1.0,
                 color_tint: None,
+                glb_path: None,
+                glb_scene_index: 0,
             },
             CreatureDefinition {
                 id: 1051,
@@ -3158,6 +3166,8 @@ mod tests {
                 mesh_transforms: vec![],
                 scale: 1.0,
                 color_tint: None,
+                glb_path: None,
+                glb_scene_index: 0,
             },
         ];
         let (monsters, npcs, templates, variants, custom) = state.count_by_category(&creatures);
@@ -3186,6 +3196,8 @@ mod tests {
                 mesh_transforms: vec![],
                 scale: 1.0,
                 color_tint: None,
+                glb_path: None,
+                glb_scene_index: 0,
             },
             CreatureDefinition {
                 id: 5,
@@ -3194,6 +3206,8 @@ mod tests {
                 mesh_transforms: vec![],
                 scale: 1.0,
                 color_tint: None,
+                glb_path: None,
+                glb_scene_index: 0,
             },
         ];
         assert_eq!(state.next_available_id(&creatures), 6);
@@ -3330,6 +3344,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 

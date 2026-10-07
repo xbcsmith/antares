@@ -79,6 +79,8 @@ pub fn generate_humanoid_template(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -164,6 +166,8 @@ pub fn generate_humanoid_fighter(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -241,6 +245,8 @@ pub fn generate_humanoid_mage(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -322,6 +328,8 @@ pub fn generate_humanoid_cleric(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -407,6 +415,8 @@ pub fn generate_humanoid_rogue(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -484,6 +494,8 @@ pub fn generate_humanoid_archer(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -554,6 +566,8 @@ pub fn generate_quadruped_template(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -639,6 +653,8 @@ pub fn generate_quadruped_wolf(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -705,6 +721,8 @@ pub fn generate_flying_template(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -785,6 +803,8 @@ pub fn generate_spider_basic(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -860,6 +880,8 @@ pub fn generate_snake_basic(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -910,6 +932,8 @@ pub fn generate_slime_template(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: Some([0.2, 0.9, 0.3, 0.9]),
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1004,6 +1028,8 @@ pub fn generate_dragon_template(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1075,6 +1101,8 @@ pub fn generate_skeleton_basic(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1151,6 +1179,8 @@ pub fn generate_zombie_basic(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1227,6 +1257,8 @@ pub fn generate_ghost_basic(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: Some([0.85, 0.9, 1.0, 0.65]),
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1302,6 +1334,8 @@ pub fn generate_robot_basic(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1403,6 +1437,8 @@ pub fn generate_robot_advanced(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1500,6 +1536,8 @@ pub fn generate_robot_flying(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1543,6 +1581,8 @@ pub fn generate_primitive_cube(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1582,6 +1622,8 @@ pub fn generate_primitive_sphere(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1621,6 +1663,8 @@ pub fn generate_primitive_cylinder(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1660,6 +1704,8 @@ pub fn generate_primitive_cone(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 
@@ -1699,6 +1745,8 @@ pub fn generate_primitive_pyramid(name: &str, id: u32) -> CreatureDefinition {
         mesh_transforms: transforms,
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     }
 }
 

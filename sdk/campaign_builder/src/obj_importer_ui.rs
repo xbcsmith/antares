@@ -1883,6 +1883,8 @@ fn build_creature_definition(
         meshes,
         scale: state.scale,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     })
 }
 
@@ -4806,6 +4808,8 @@ mod tests {
                 mesh_transforms: vec![],
                 scale: 1.0,
                 color_tint: None,
+                glb_path: None,
+                glb_scene_index: 0,
             };
             manager.save_creature(&creature).unwrap();
         }

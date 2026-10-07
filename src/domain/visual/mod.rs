@@ -49,6 +49,8 @@
 //!     mesh_transforms: vec![MeshTransform::identity()],
 //!     scale: 1.0,
 //!     color_tint: None,
+//!     glb_path: None,
+//!     glb_scene_index: 0,
 //! };
 //! ```
 
@@ -404,6 +406,8 @@ impl Default for MeshTransform {
 ///     ],
 ///     scale: 1.0,
 ///     color_tint: None,
+///     glb_path: None,
+///     glb_scene_index: 0,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -430,6 +434,17 @@ pub struct CreatureDefinition {
     /// If None, meshes use their own colors.
     #[serde(default)]
     pub color_tint: Option<[f32; 4]>,
+
+    /// Campaign-relative path to a GLB file (e.g. `"assets/meshes/creatures/foo.glb"`).
+    /// When set, the runtime uses Bevy's GLTF loader instead of inline mesh data.
+    /// Must start with `"assets/"`. Mutually exclusive with non-empty `meshes`.
+    #[serde(default)]
+    pub glb_path: Option<String>,
+
+    /// Index of the GLTF scene within the GLB file to load (default: 0).
+    /// Allows multi-scene GLB files.
+    #[serde(default)]
+    pub glb_scene_index: usize,
 }
 
 impl Default for CreatureDefinition {
@@ -441,6 +456,8 @@ impl Default for CreatureDefinition {
             mesh_transforms: Vec::new(),
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 }
@@ -449,10 +466,10 @@ impl CreatureDefinition {
     /// Validates that the creature definition is well-formed
     ///
     /// Checks:
-    /// - At least one mesh
-    /// - mesh_transforms length matches meshes length
-    /// - scale is positive
-    /// - Each mesh is valid
+    /// - `glb_path` and inline `meshes` are mutually exclusive
+    /// - GLB-only path: scale is positive
+    /// - Inline mesh path: at least one mesh, mesh_transforms length matches meshes length,
+    ///   scale is positive, each mesh is valid
     ///
     /// # Errors
     ///
@@ -483,11 +500,33 @@ impl CreatureDefinition {
     ///     mesh_transforms: vec![MeshTransform::identity()],
     ///     scale: 1.0,
     ///     color_tint: None,
+    ///     glb_path: None,
+    ///     glb_scene_index: 0,
     /// };
     ///
     /// assert!(creature.validate().is_ok());
     /// ```
     pub fn validate(&self) -> Result<(), ValidationError> {
+        // Mutually exclusive: cannot have both glb_path and inline meshes
+        if self.glb_path.is_some() && !self.meshes.is_empty() {
+            return Err(ValidationError::Structural(
+                "CreatureDefinition has both glb_path and inline meshes; use one or the other"
+                    .to_string(),
+            ));
+        }
+
+        // GLB-only path: just validate scale, no inline mesh requirements
+        if self.glb_path.is_some() {
+            if self.scale <= 0.0 {
+                return Err(ValidationError::OutOfRange(format!(
+                    "Scale must be positive, got {}",
+                    self.scale
+                )));
+            }
+            return Ok(());
+        }
+
+        // RON inline mesh path: require at least one mesh
         if self.meshes.is_empty() {
             return Err(ValidationError::EmptyField(
                 "Creature must have at least one mesh".to_string(),
@@ -734,6 +773,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert_eq!(creature.id, 1);
@@ -751,6 +792,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert!(creature.validate().is_ok());
@@ -765,6 +808,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert!(creature.validate().is_err());
@@ -785,6 +830,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()], // Only 1 transform for 2 meshes
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert!(creature.validate().is_err());
@@ -805,6 +852,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: -1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert!(creature.validate().is_err());
@@ -827,6 +876,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity(), MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert_eq!(creature.total_vertices(), 6);
@@ -844,6 +895,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity(), MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert_eq!(creature.total_triangles(), 2);
@@ -859,6 +912,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: Some([0.5, 0.5, 1.0, 1.0]), // Blue tint
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert!(creature.color_tint.is_some());
@@ -892,6 +947,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 0.72,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         // min_y = -0.6, scale = 0.72  →  offset = 0.6 × 0.72 = 0.432
         let offset = creature.foot_ground_offset();
@@ -923,6 +980,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         // All vertices at Y >= 0 → no lift needed
         assert_eq!(creature.foot_ground_offset(), 0.0);
@@ -950,6 +1009,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 2.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         assert_eq!(creature.foot_ground_offset(), 0.0);
     }
@@ -981,6 +1042,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         // min_y = -1.0, scale = 1.0  →  offset = 1.0
         let offset = creature.foot_ground_offset();
@@ -1021,6 +1084,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity(), MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         // min_y = -0.8, scale = 1.0  →  offset = 0.8
         let offset = creature.foot_ground_offset();
@@ -1055,6 +1120,8 @@ mod tests {
             mesh_transforms: vec![shifted_transform],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         // min_y (in parent space) = -0.2 * 1.0 + (-0.4) = -0.6; scale = 1.0  →  offset = 0.6
         let offset = creature.foot_ground_offset();
@@ -1080,6 +1147,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         let serialized = ron::to_string(&creature).expect("Failed to serialize");
@@ -1087,5 +1156,53 @@ mod tests {
             ron::from_str(&serialized).expect("Failed to deserialize");
         assert_eq!(creature.id, deserialized.id);
         assert_eq!(creature.name, deserialized.name);
+    }
+
+    #[test]
+    fn test_creature_definition_glb_path_only_is_valid() {
+        let creature = CreatureDefinition {
+            id: 100,
+            name: "GlbOnly".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/test.glb".to_string()),
+            glb_scene_index: 0,
+        };
+        assert!(creature.validate().is_ok());
+    }
+
+    #[test]
+    fn test_creature_definition_glb_and_meshes_both_set_returns_error() {
+        let mesh = create_test_triangle_mesh();
+        let creature = CreatureDefinition {
+            id: 101,
+            name: "Ambiguous".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/test.glb".to_string()),
+            glb_scene_index: 0,
+        };
+        let err = creature.validate().unwrap_err();
+        assert!(matches!(err, ValidationError::Structural(_)));
+    }
+
+    #[test]
+    fn test_creature_definition_no_glb_no_meshes_returns_error() {
+        let creature = CreatureDefinition {
+            id: 102,
+            name: "Neither".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
+        };
+        let err = creature.validate().unwrap_err();
+        assert!(matches!(err, ValidationError::EmptyField(_)));
     }
 }

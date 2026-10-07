@@ -105,6 +105,8 @@ use bevy::prelude::*;
 ///         mesh_transforms: vec![MeshTransform::identity()],
 ///         scale: 1.0,
 ///         color_tint: None,
+///         glb_path: None,
+///         glb_scene_index: 0,
 ///     };
 ///
 ///     // Spawn facing South
@@ -283,6 +285,8 @@ mod tests {
             mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 
@@ -406,6 +410,8 @@ mod tests {
             mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         // Verify creature definition is valid
@@ -446,6 +452,8 @@ mod tests {
             mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         assert!(creature_def.validate().is_ok());

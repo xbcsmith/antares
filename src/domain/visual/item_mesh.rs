@@ -1045,6 +1045,8 @@ impl ItemMeshDescriptor {
             mesh_transforms: transforms,
             scale: self.scale,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 

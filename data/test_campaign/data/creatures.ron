@@ -174,4 +174,9 @@
         name: "EvilLich",
         filepath: "assets/creatures/evillich.ron",
     ),
+    /*[32]*/ (
+        id: 999,
+        name: "TestTriangleGlb",
+        filepath: "assets/creatures/test_triangle_glb.ron",
+    ),
 ]

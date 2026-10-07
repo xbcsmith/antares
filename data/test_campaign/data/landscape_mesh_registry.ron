@@ -24,4 +24,9 @@
         name: "BrushShrub",
         filepath: "assets/meshes/landscape/brush.ron",
     ),
+    (
+        id: 11099,
+        name: "TestTriangleGlb",
+        filepath: "assets/creatures/test_triangle_glb.ron",
+    ),
 ]

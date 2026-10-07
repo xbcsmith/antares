@@ -715,6 +715,27 @@ impl ObjectMeshDatabase {
         }
         Ok(())
     }
+
+    /// Returns an iterator over the GLB path of every entry in this database
+    /// that has a `glb_path` set.
+    ///
+    /// Only entries in the primary `meshes` map are walked; legacy fallback
+    /// registries use lazy loading and are not included here (the Phase 3
+    /// pre-loader handles them separately).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::object_mesh::ObjectMeshDatabase;
+    ///
+    /// let db = ObjectMeshDatabase::new();
+    /// assert_eq!(db.glb_paths().count(), 0);
+    /// ```
+    pub fn glb_paths(&self) -> impl Iterator<Item = &str> {
+        self.meshes
+            .values()
+            .filter_map(|def| def.glb_path.as_deref())
+    }
 }
 
 #[cfg(test)]
@@ -981,8 +1002,8 @@ mod tests {
         let loaded = ObjectMeshRegistryFile::load(&fixture_path).unwrap();
         assert_eq!(
             loaded.entries.len(),
-            6,
-            "expected 6 entries in test campaign fixture"
+            7,
+            "expected 7 entries in test campaign fixture"
         );
         assert_eq!(
             loaded.entries[0].id, 12001,
@@ -1101,5 +1122,87 @@ mod tests {
         let (id, name) = &pairs[0];
         assert_eq!(id, "12001");
         assert_eq!(name, "Ironbound Treasure Chest");
+    }
+
+    #[test]
+    fn test_object_mesh_database_glb_paths_returns_glb_entries() {
+        use crate::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
+
+        let mut db = ObjectMeshDatabase::new();
+
+        // Insert a GLB entry directly into the meshes map (accessible from mod tests)
+        let glb_def = CreatureDefinition {
+            id: 1,
+            name: "GlbMesh".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/test.glb".to_string()),
+            glb_scene_index: 0,
+        };
+        db.meshes.insert("glb_key".to_string(), glb_def);
+
+        // Insert a RON entry (no glb_path)
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let ron_def = CreatureDefinition {
+            id: 2,
+            name: "RonMesh".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
+        };
+        db.meshes.insert("ron_key".to_string(), ron_def);
+
+        let paths: Vec<&str> = db.glb_paths().collect();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], "assets/meshes/test.glb");
+    }
+
+    #[test]
+    fn test_object_mesh_database_glb_paths_empty_for_all_ron() {
+        use crate::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
+
+        let mut db = ObjectMeshDatabase::new();
+
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let ron_def = CreatureDefinition {
+            id: 1,
+            name: "RonMesh".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
+        };
+        db.meshes.insert("ron_key".to_string(), ron_def);
+
+        assert_eq!(db.glb_paths().count(), 0);
     }
 }

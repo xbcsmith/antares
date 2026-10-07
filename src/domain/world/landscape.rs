@@ -1270,6 +1270,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         let mesh_path = mesh_dir.join("fixture.ron");
         fs::write(
@@ -1848,11 +1850,15 @@ mod tests {
         let registry_path = root.join("data/landscape_mesh_registry.ron");
         let db = LandscapeMeshDatabase::load_from_registry(&registry_path, &root).unwrap();
 
-        assert_eq!(db.count(), 5);
+        assert_eq!(db.count(), 6);
         db.validate_texture_paths(Some(&root)).unwrap();
 
         let mut mesh_count = 0;
         for creature in db.as_creature_database().all_creatures() {
+            // GLB-only entries have no inline meshes — skip inline mesh checks for them
+            if creature.glb_path.is_some() {
+                continue;
+            }
             assert!(
                 !creature.meshes.is_empty(),
                 "{} has no meshes",

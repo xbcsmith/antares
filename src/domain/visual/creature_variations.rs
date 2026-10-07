@@ -36,6 +36,8 @@
 //!     mesh_transforms: vec![MeshTransform::identity()],
 //!     scale: 1.0,
 //!     color_tint: None,
+//!     glb_path: None,
+//!     glb_scene_index: 0,
 //! };
 //!
 //! // Create a red color variation
@@ -252,6 +254,8 @@ impl CreatureVariation {
     ///     mesh_transforms: vec![MeshTransform::identity()],
     ///     scale: 1.0,
     ///     color_tint: None,
+    ///     glb_path: None,
+    ///     glb_scene_index: 0,
     /// };
     ///
     /// let variation = CreatureVariation::new(1, "Variant");
@@ -349,6 +353,8 @@ impl CreatureVariation {
 ///     mesh_transforms: vec![MeshTransform::identity()],
 ///     scale: 1.0,
 ///     color_tint: None,
+///     glb_path: None,
+///     glb_scene_index: 0,
 /// };
 ///
 /// let mut variation = CreatureVariation::new(1, "Varied");
@@ -427,6 +433,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity(), MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 

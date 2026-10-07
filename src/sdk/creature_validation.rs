@@ -640,6 +640,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         let result = validate_creature_topology(&creature);
@@ -668,6 +670,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         let result = validate_creature_topology(&creature);

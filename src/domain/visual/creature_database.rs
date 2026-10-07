@@ -34,6 +34,8 @@
 //!     mesh_transforms: vec![MeshTransform::identity()],
 //!     scale: 1.0,
 //!     color_tint: None,
+//!     glb_path: None,
+//!     glb_scene_index: 0,
 //! };
 //!
 //! db.add_creature(creature).expect("Failed to add creature");
@@ -73,6 +75,16 @@ pub enum CreatureDatabaseError {
     /// Validation error
     #[error("Validation error for creature {0}: {1}")]
     ValidationError(CreatureId, String),
+
+    /// Creature has both `glb_path` set and non-empty `meshes` — ambiguous source.
+    #[error(
+        "Ambiguous mesh source for creature {0}: glb_path and inline meshes are mutually exclusive"
+    )]
+    AmbiguousMeshSource(CreatureId),
+
+    /// The `glb_path` value failed path-security validation.
+    #[error("Invalid GLB path for creature {0}: {1}")]
+    GlbPathError(CreatureId, String),
 }
 
 /// Database for storing and managing creature definitions
@@ -202,6 +214,8 @@ impl CreatureDatabase {
     ///     mesh_transforms: vec![MeshTransform::identity()],
     ///     scale: 1.0,
     ///     color_tint: None,
+    ///     glb_path: None,
+    ///     glb_scene_index: 0,
     /// };
     ///
     /// assert!(db.add_creature(creature).is_ok());
@@ -400,6 +414,8 @@ impl CreatureDatabase {
     ///     mesh_transforms: vec![MeshTransform::identity()],
     ///     scale: 1.0,
     ///     color_tint: None,
+    ///     glb_path: None,
+    ///     glb_scene_index: 0,
     /// };
     ///
     /// db.add_creature(creature).unwrap();
@@ -665,6 +681,19 @@ impl CreatureDatabase {
     /// ```
     pub fn validate(&self) -> Result<(), CreatureDatabaseError> {
         for creature in self.creatures.values() {
+            // DB-level check: ambiguous mesh source (both glb_path and inline meshes)
+            if creature.glb_path.is_some() && !creature.meshes.is_empty() {
+                return Err(CreatureDatabaseError::AmbiguousMeshSource(creature.id));
+            }
+            // DB-level check: glb_path must start with "assets/"
+            if let Some(ref path) = creature.glb_path {
+                if !path.starts_with("assets/") {
+                    return Err(CreatureDatabaseError::GlbPathError(
+                        creature.id,
+                        format!("GLB path '{}' must start with 'assets/'", path),
+                    ));
+                }
+            }
             creature
                 .validate()
                 .map_err(|e| CreatureDatabaseError::ValidationError(creature.id, e.to_string()))?;
@@ -699,6 +728,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 
@@ -831,6 +862,8 @@ mod tests {
             mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         let creatures_vec = vec![creature];
@@ -886,6 +919,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         let result = db.add_creature(invalid_creature);
@@ -1381,5 +1416,64 @@ mod tests {
         assert_eq!(db.count(), 2);
         assert_eq!(db.get_creature(4).unwrap().name, "DireWolf");
         assert_eq!(db.get_creature(12).unwrap().name, "Wolf");
+    }
+
+    #[test]
+    fn test_creature_database_glb_path_only_is_valid() {
+        let mut db = CreatureDatabase::new();
+        let creature = CreatureDefinition {
+            id: 200,
+            name: "GlbOnlyCreature".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/test.glb".to_string()),
+            glb_scene_index: 0,
+        };
+        assert!(db.add_creature(creature).is_ok());
+        assert!(db.validate().is_ok());
+    }
+
+    #[test]
+    fn test_creature_database_glb_and_meshes_both_set_returns_ambiguous_error() {
+        let mut db = CreatureDatabase::new();
+        // Add a valid RON-mesh creature through the normal API
+        let ron_creature = create_test_creature(201);
+        db.add_creature(ron_creature).unwrap();
+        // Mutate it via get_creature_mut() to also set a glb_path, creating the ambiguous state
+        db.get_creature_mut(201).unwrap().glb_path = Some("assets/meshes/test.glb".to_string());
+        // Now db.validate() should catch the ambiguous state at the DB level
+        let result = db.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CreatureDatabaseError::AmbiguousMeshSource(201)
+        ));
+    }
+
+    #[test]
+    fn test_creature_database_glb_path_must_start_with_assets_prefix() {
+        let mut db = CreatureDatabase::new();
+        let creature = CreatureDefinition {
+            id: 202,
+            name: "BadPath".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("meshes/foo.glb".to_string()), // missing "assets/" prefix
+            glb_scene_index: 0,
+        };
+        // add_creature() calls CreatureDefinition::validate(), which only checks
+        // mutual exclusivity, not the prefix. So this succeeds.
+        assert!(db.add_creature(creature).is_ok());
+        // db.validate() checks the prefix at the DB level.
+        let result = db.validate();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CreatureDatabaseError::GlbPathError(202, _)
+        ));
     }
 }
