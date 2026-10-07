@@ -102,6 +102,117 @@ Every explicit `CreatureDefinition { ... }` literal across the codebase had
 
 ---
 
+## GLTF 2.0 Support — Phase 2: SDK Raw GLB Export Mode
+
+Added a `RawGlb` export mode to the Campaign Builder importer. When selected, the
+source `.glb` is copied directly into `assets/meshes/{type}/` with a companion
+`CreatureDefinition` `.ron` file whose `glb_path` is set and `meshes` is empty.
+The preview panel now loads and shows geometry for GLB-only creatures.
+
+### 2.1 `GlbExportMode` enum (`sdk/campaign_builder/src/obj_importer.rs`)
+
+- Added `pub enum GlbExportMode { ConvertToRon (default), RawGlb }` with
+  `#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]`.
+- Added `pub glb_export_mode: GlbExportMode` field to `ObjImporterState`.
+- `clear()` resets to `ConvertToRon` via `..Self::default()` (not in the
+  preserved-fields list).
+- Tests: `test_glb_export_mode_default_is_convert_to_ron`,
+  `test_glb_export_mode_resets_on_clear`.
+
+### 2.2 Raw GLB export path (`sdk/campaign_builder/src/obj_importer_ui.rs`)
+
+- Added `GlbCopy(String)` variant to `ObjImporterExportError`.
+- New private `export_raw_glb(state, campaign_dir, landscape_file)` function:
+  - Copies source `.glb` to `assets/meshes/{type}/{category?}/{stem}.glb`
+  - Writes companion `.ron` (same path, `.ron` extension) with `meshes: []`
+    and `glb_path: Some("assets/meshes/.../{stem}.glb")`
+  - Updates registry files for all five `ExportType` variants
+  - Does **not** call `ground_meshes_to_y_zero` or serialize any `MeshDefinition`
+- `export_state_to_campaign_with_landscape_file` dispatches to `export_raw_glb`
+  when `glb_export_mode == RawGlb && source_format == Glb`; OBJ sources always
+  fall through to the existing RON conversion path.
+- Import `GlbExportMode` from `crate::obj_importer`.
+- Tests: `test_raw_glb_export_copies_file_to_campaign_assets`,
+  `test_raw_glb_export_registry_entry_has_glb_path_and_empty_meshes`,
+  `test_raw_glb_export_not_available_for_obj_source`,
+  `test_raw_glb_creature_export_writes_registry_entry`.
+
+### 2.3 Export Format UI (`sdk/campaign_builder/src/obj_importer_ui.rs`)
+
+- Added "Export Format" radio button row in `render_loaded_mode` grid,
+  shown only when `source_format == ImportSourceFormat::Glb`.
+  Options: `RON Mesh (convert geometry)` / `Raw GLB (copy file, preserve full PBR)`.
+- Export button label is now dynamic: `"Export GLB"` in `RawGlb` mode,
+  `"Export RON"` otherwise.
+- `export_enabled` guard extended: Raw GLB with a source path is enabled even
+  when `meshes` is empty (i.e., the GLB was loaded but no meshes are listed).
+
+### 2.4 Packager verification (`src/sdk/campaign_packager.rs`)
+
+`CampaignPackager::add_directory_to_archive()` recursively walks the campaign
+directory and adds every file it finds. The only exclusions are hidden files
+(`.` prefix), `target/`, and `node_modules/` — no extension filtering exists.
+`.glb` files placed under `assets/meshes/` are therefore included in campaign
+packages with **no code change required**.
+
+### 2.5 GLB preview in `CreaturesEditorState`
+
+- `sdk/campaign_builder/src/creatures_editor/mod.rs`: Added private
+  `glb_preview_cache: HashMap<String, Vec<MeshDefinition>>` field (initialized
+  as `HashMap::new()`). Caches parsed preview geometry keyed by `glb_path`
+  string to avoid re-parsing on every repaint.
+- `sdk/campaign_builder/src/creatures_editor/preview_panel.rs`:
+  - Added `ensure_glb_preview_cache(&mut self, path_str: &str)` helper — resolves
+    campaign-relative path via `last_campaign_dir`, calls
+    `import_glb_scene_from_file`, stores `Vec<MeshDefinition>` in cache
+    (or empty `Vec` + error message on failure).
+  - Updated `sync_preview_renderer_from_edit_buffer` to detect GLB-only
+    creatures (`glb_path.is_some() && meshes.is_empty()`), load/cache geometry,
+    and substitute it into `preview_creature` before passing to the renderer.
+  - No changes to `show_preview_panel`, `show_preview_fallback`, or
+    `build_preview_statistics`.
+- Landscape editor (`landscape_editor.rs`): the `show_landscape_preview` function
+  is text-only (shows ID, category, scale metadata) — no 3D renderer is present,
+  so no changes were needed.
+- Tests: `test_preview_panel_glb_path_returns_imported_geometry` (uses
+  `data/test_campaign/assets/meshes/test_triangle.glb` fixture),
+  `test_preview_panel_glb_missing_file_displays_error_string`.
+
+### 2.6 Pre-existing struct literal call-site fixes (Phase 1 missed)
+
+Phase 1 missed several SDK files; Phase 2 added `glb_path: None, glb_scene_index: 0`
+to struct literals in:
+
+- `sdk/campaign_builder/src/creature_undo_redo.rs` (2 sites)
+- `sdk/campaign_builder/src/creatures_workflow.rs` (1 site)
+- `sdk/campaign_builder/src/objects_editor.rs` (2 sites)
+- `sdk/campaign_builder/src/preview_renderer.rs` (3 sites)
+- `sdk/campaign_builder/src/template_metadata.rs` (1 site)
+- `sdk/campaign_builder/src/variation_editor.rs` (1 site)
+- `sdk/campaign_builder/tests/creature_asset_editor_tests.rs` (10 sites)
+- `sdk/campaign_builder/tests/creature_preview_integration_test.rs` (2 sites)
+- `sdk/campaign_builder/tests/creature_workflow_tests.rs` (1 site)
+
+### 2.7 Pre-existing clippy warning fixes
+
+Several pre-existing clippy lints were tripped by the newer toolchain:
+
+- `campaign_io.rs`, `lib.rs`: `let_underscore_must_use` → `.ok()` call
+- `lib.rs`: `needless_range_loop` → `.iter().enumerate()`
+- `characters_editor.rs`: `manual_repeat_n` → `std::iter::repeat_n()`
+- `creatures_editor/mod.rs`, `monsters_editor.rs`: `field_reassign_with_default`
+  → `#[allow]` on test functions
+- `map_editor.rs`: `too_many_arguments` → `#[allow]` on `fn show_list`
+
+### Quality gates (final run)
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — zero errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings.
+- `cargo nextest run --all-features` — **2566 passed, 0 failed** (SDK).
+
+---
+
 ## Audio
 
 ### Audio Manager (Phases 1–3 + SDK layout compliance)

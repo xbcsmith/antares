@@ -473,6 +473,8 @@ mod reorder_tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         for name in names {
             c.meshes.push(MeshDefinition {
@@ -608,6 +610,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 

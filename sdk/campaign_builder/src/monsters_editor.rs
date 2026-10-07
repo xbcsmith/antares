@@ -2129,6 +2129,7 @@ mod tests {
 
     /// `apply_selected_creature_id` must close the picker and update the
     /// edit buffer and the string buffer simultaneously.
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn test_apply_selected_creature_id_closes_picker() {
         let mut state = MonstersEditorState::default();

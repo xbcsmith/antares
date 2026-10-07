@@ -2002,7 +2002,7 @@ impl CampaignBuilderApp {
             let mut db = antares::domain::world::terrain::builtin_terrain_db();
             let mut campaign_db = antares::domain::world::terrain::TerrainDatabase::new();
             for def in &self.campaign_data.terrain_definitions {
-                let _ = campaign_db.add(def.clone());
+                campaign_db.add(def.clone()).ok();
             }
             db.merge(campaign_db);
             self.campaign_data.terrain_db = db;

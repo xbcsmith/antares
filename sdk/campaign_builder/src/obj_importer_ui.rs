@@ -37,8 +37,9 @@ use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
 use crate::creature_id_manager::CreatureCategory;
 use crate::logging::{category, Logger};
 use crate::obj_importer::{
-    ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMesh, ImportedMeshColorSource,
-    ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
+    ExportType, GlbExportMode, ImportSourceFormat, ImportedMaterialSwatch, ImportedMesh,
+    ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
+    ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::items::{
@@ -175,6 +176,10 @@ enum ObjImporterExportError {
 
     #[error("Cannot create a new item: all {} item IDs are in use", u8::MAX as u16 + 1)]
     ItemIdSpaceExhausted,
+
+    /// The source GLB file could not be copied to the campaign asset directory.
+    #[error("Failed to copy GLB file to campaign assets: {0}")]
+    GlbCopy(String),
 }
 
 /// Renders the OBJ importer tab and returns a signal when export completes.
@@ -858,6 +863,33 @@ fn render_loaded_mode(
             });
             ui.end_row();
 
+            if state.source_format == ImportSourceFormat::Glb {
+                ui.label("Export Format:");
+                ui.horizontal(|ui| {
+                    if ui
+                        .radio_value(
+                            &mut state.glb_export_mode,
+                            GlbExportMode::ConvertToRon,
+                            "RON Mesh (convert geometry)",
+                        )
+                        .changed()
+                    {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui
+                        .radio_value(
+                            &mut state.glb_export_mode,
+                            GlbExportMode::RawGlb,
+                            "Raw GLB (copy file, preserve full PBR)",
+                        )
+                        .changed()
+                    {
+                        ui.ctx().request_repaint();
+                    }
+                });
+                ui.end_row();
+            }
+
             if state.export_type != ExportType::ObjectMesh {
                 ui.label("Category:");
                 render_export_category_control(
@@ -1059,9 +1091,17 @@ fn render_loaded_mode(
             ui.ctx().request_repaint();
         }
 
-        let export_enabled = campaign_dir.is_some() && !state.meshes.is_empty();
+        let is_raw_glb = state.glb_export_mode == GlbExportMode::RawGlb
+            && state.source_format == ImportSourceFormat::Glb;
+        let export_enabled = campaign_dir.is_some()
+            && (!state.meshes.is_empty() || (is_raw_glb && state.source_path.is_some()));
+        let export_button_label = if is_raw_glb {
+            "Export GLB"
+        } else {
+            "Export RON"
+        };
         if ui
-            .add_enabled(export_enabled, egui::Button::new("Export RON"))
+            .add_enabled(export_enabled, egui::Button::new(export_button_label))
             .clicked()
         {
             state.mode = ImporterMode::Exporting;
@@ -1888,6 +1928,201 @@ fn build_creature_definition(
     })
 }
 
+/// Export a source `.glb` file directly into the campaign asset tree without
+/// converting geometry to RON vertex data.
+///
+/// Copies `state.source_path` to `assets/meshes/{type}/{name}.glb` and writes a
+/// companion `CreatureDefinition` `.ron` file (with `meshes: []` and `glb_path`
+/// set to the campaign-relative GLB path) at the same location with a `.ron`
+/// extension.  Registry entries are updated the same way as the ConvertToRon path.
+///
+/// # Errors
+///
+/// Returns [`ObjImporterExportError::MissingName`] when the creature name is empty.
+/// Returns [`ObjImporterExportError::GlbCopy`] when the source path is absent or
+/// the file copy fails.
+fn export_raw_glb(
+    state: &ObjImporterState,
+    campaign_dir: &Path,
+    landscape_file: &str,
+) -> Result<ExportOutcome, ObjImporterExportError> {
+    let name = state.creature_name.trim();
+    if name.is_empty() {
+        return Err(ObjImporterExportError::MissingName);
+    }
+
+    let source_glb = state
+        .source_path
+        .as_ref()
+        .ok_or_else(|| ObjImporterExportError::GlbCopy("No source GLB path set".to_string()))?;
+
+    // Determine the numeric ID used by this export type.
+    let export_id = match state.export_type {
+        ExportType::Furniture => state.furniture_id,
+        ExportType::Landscape => state.landscape_mesh_id,
+        ExportType::Creature | ExportType::Item | ExportType::ObjectMesh => state.creature_id,
+    };
+
+    let file_stem = sanitized_export_stem(name, export_id, state.export_type);
+    let category_path = sanitize_category_path(&state.category);
+
+    // Compute campaign-relative GLB destination and absolute destination path.
+    let (glb_relative, glb_absolute) = match state.export_type {
+        ExportType::Creature => {
+            let rel = format!("assets/meshes/creatures/{}.glb", file_stem);
+            let abs = campaign_dir
+                .join("assets/meshes/creatures")
+                .join(format!("{}.glb", file_stem));
+            (rel, abs)
+        }
+        ExportType::Item => {
+            if category_path.is_empty() {
+                let rel = format!("assets/meshes/items/{}.glb", file_stem);
+                let abs = campaign_dir
+                    .join("assets/meshes/items")
+                    .join(format!("{}.glb", file_stem));
+                (rel, abs)
+            } else {
+                let rel = format!("assets/meshes/items/{}/{}.glb", category_path, file_stem);
+                let abs = campaign_dir
+                    .join("assets/meshes/items")
+                    .join(&category_path)
+                    .join(format!("{}.glb", file_stem));
+                (rel, abs)
+            }
+        }
+        ExportType::Furniture => {
+            if category_path.is_empty() {
+                let rel = format!("assets/meshes/furniture/{}.glb", file_stem);
+                let abs = campaign_dir
+                    .join("assets/meshes/furniture")
+                    .join(format!("{}.glb", file_stem));
+                (rel, abs)
+            } else {
+                let rel = format!(
+                    "assets/meshes/furniture/{}/{}.glb",
+                    category_path, file_stem
+                );
+                let abs = campaign_dir
+                    .join("assets/meshes/furniture")
+                    .join(&category_path)
+                    .join(format!("{}.glb", file_stem));
+                (rel, abs)
+            }
+        }
+        ExportType::Landscape => {
+            if category_path.is_empty() {
+                let rel = format!("assets/meshes/landscape/{}.glb", file_stem);
+                let abs = campaign_dir
+                    .join("assets/meshes/landscape")
+                    .join(format!("{}.glb", file_stem));
+                (rel, abs)
+            } else {
+                let rel = format!(
+                    "assets/meshes/landscape/{}/{}.glb",
+                    category_path, file_stem
+                );
+                let abs = campaign_dir
+                    .join("assets/meshes/landscape")
+                    .join(&category_path)
+                    .join(format!("{}.glb", file_stem));
+                (rel, abs)
+            }
+        }
+        ExportType::ObjectMesh => {
+            let rel = format!("assets/meshes/objects/{}.glb", file_stem);
+            let abs = campaign_dir
+                .join("assets/meshes/objects")
+                .join(format!("{}.glb", file_stem));
+            (rel, abs)
+        }
+    };
+
+    // Companion .ron file lives at the same path but with a .ron extension.
+    let ron_relative = glb_relative.replace(".glb", ".ron");
+    let ron_absolute = campaign_dir.join(&ron_relative);
+
+    // Create destination directory (same for both .glb and .ron).
+    if let Some(parent) = glb_absolute.parent() {
+        fs::create_dir_all(parent).map_err(|e| ObjImporterExportError::GlbCopy(e.to_string()))?;
+    }
+
+    // Copy source .glb to campaign assets.
+    fs::copy(source_glb, &glb_absolute)
+        .map_err(|e| ObjImporterExportError::GlbCopy(format!("copy failed: {}", e)))?;
+
+    // Build a GLB-only CreatureDefinition (no inline vertex data).
+    let creature = CreatureDefinition {
+        id: export_id,
+        name: name.to_string(),
+        meshes: vec![],
+        mesh_transforms: vec![],
+        scale: state.scale,
+        color_tint: None,
+        glb_path: Some(glb_relative.clone()),
+        glb_scene_index: 0,
+    };
+
+    // Write companion .ron file.
+    if let Some(parent) = ron_absolute.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let ron_contents = ron::ser::to_string_pretty(&creature, ron::ser::PrettyConfig::new())?;
+    fs::write(&ron_absolute, ron_contents)?;
+
+    // Update registries (same logic as the RON export path).
+    match state.export_type {
+        ExportType::Creature => {
+            let manager = CreatureAssetManager::new(campaign_dir.to_path_buf());
+            manager.save_creature_at_path(&ron_relative, &creature)?;
+        }
+        ExportType::Item => {
+            upsert_mesh_registry_entry(
+                campaign_dir,
+                "data/item_mesh_registry.ron",
+                creature.id,
+                &creature.name,
+                &ron_relative,
+            )?;
+            upsert_item_definition(campaign_dir, state, &creature)?;
+        }
+        ExportType::Furniture => {
+            upsert_mesh_registry_entry(
+                campaign_dir,
+                "data/furniture_mesh_registry.ron",
+                creature.id,
+                &creature.name,
+                &ron_relative,
+            )?;
+            upsert_furniture_definition(campaign_dir, state, &creature)?;
+        }
+        ExportType::Landscape => {
+            upsert_mesh_registry_entry(
+                campaign_dir,
+                "data/landscape_mesh_registry.ron",
+                creature.id,
+                &creature.name,
+                &ron_relative,
+            )?;
+            upsert_landscape_definition(campaign_dir, landscape_file, state, &creature)?;
+        }
+        ExportType::ObjectMesh => {
+            upsert_object_mesh_registry_entry(campaign_dir, &creature.name, &ron_relative)?;
+        }
+    }
+
+    Ok(ExportOutcome {
+        export_type: state.export_type,
+        absolute_path: ron_absolute,
+        status_message: format!(
+            "Exported Raw GLB '{}' to {} (companion .ron at {})",
+            creature.name,
+            glb_absolute.display(),
+            ron_relative
+        ),
+    })
+}
+
 #[cfg(test)]
 fn export_state_to_campaign(
     state: &ObjImporterState,
@@ -1908,6 +2143,14 @@ fn export_state_to_campaign_with_landscape_file(
             id: state.landscape_mesh_id,
             min: LANDSCAPE_MESH_ID_MIN,
         });
+    }
+
+    // Raw GLB export: bypass RON geometry conversion, copy file directly.
+    // Only available when the source is actually a GLB file; OBJ sources fall through.
+    if state.glb_export_mode == GlbExportMode::RawGlb
+        && state.source_format == ImportSourceFormat::Glb
+    {
+        return export_raw_glb(state, campaign_dir, landscape_file);
     }
 
     let mut creature = build_creature_definition(state)?;
@@ -2820,8 +3063,9 @@ mod tests {
     use crate::creature_id_manager::CreatureCategory;
     use crate::logging::Logger;
     use crate::obj_importer::{
-        ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
-        ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
+        ExportType, GlbExportMode, ImportSourceFormat, ImportedMaterialSwatch,
+        ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
+        ObjImporterState,
     };
     use antares::domain::items::{Item, ItemType};
     use antares::domain::types::{LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN};
@@ -4920,6 +5164,162 @@ mod tests {
         assert_eq!(
             state.creature_id, 1,
             "no monsters in campaign, so ID must be 1"
+        );
+    }
+
+    // ─── Phase 2 Raw GLB export tests ────────────────────────────────────────
+
+    /// Raw GLB export copies the source .glb file to the expected destination
+    /// under `assets/meshes/landscape/`.
+    #[test]
+    fn test_raw_glb_export_copies_file_to_campaign_assets() {
+        let campaign = tempdir().unwrap();
+        let glb_bytes = build_minimal_triangle_glb();
+
+        // Write source GLB to a temp file.
+        let src_dir = tempdir().unwrap();
+        let src_path = src_dir.path().join("source.glb");
+        fs::write(&src_path, &glb_bytes).unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.source_format = ImportSourceFormat::Glb;
+        state.glb_export_mode = GlbExportMode::RawGlb;
+        state.export_type = ExportType::Landscape;
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN;
+        state.creature_name = "test_mesh".to_string();
+        state.source_path = Some(src_path);
+
+        let result = export_state_to_campaign_with_landscape_file(
+            &state,
+            Some(campaign.path()),
+            "data/landscape.ron",
+        );
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+
+        let expected_glb = campaign
+            .path()
+            .join("assets/meshes/landscape/test_mesh.glb");
+        assert!(expected_glb.exists(), "Expected GLB at {:?}", expected_glb);
+    }
+
+    /// The companion .ron written during Raw GLB export must have `glb_path` set
+    /// and `meshes` empty.
+    #[test]
+    fn test_raw_glb_export_registry_entry_has_glb_path_and_empty_meshes() {
+        let campaign = tempdir().unwrap();
+        let glb_bytes = build_minimal_triangle_glb();
+
+        let src_dir = tempdir().unwrap();
+        let src_path = src_dir.path().join("dragon.glb");
+        fs::write(&src_path, &glb_bytes).unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.source_format = ImportSourceFormat::Glb;
+        state.glb_export_mode = GlbExportMode::RawGlb;
+        state.export_type = ExportType::Landscape;
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN;
+        state.creature_name = "dragon".to_string();
+        state.source_path = Some(src_path);
+
+        let result = export_state_to_campaign_with_landscape_file(
+            &state,
+            Some(campaign.path()),
+            "data/landscape.ron",
+        );
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+
+        // Read and parse the companion .ron.
+        let ron_path = campaign.path().join("assets/meshes/landscape/dragon.ron");
+        assert!(
+            ron_path.exists(),
+            "Companion .ron must exist at {:?}",
+            ron_path
+        );
+
+        let ron_contents = fs::read_to_string(&ron_path).unwrap();
+        let creature: CreatureDefinition = ron::from_str(&ron_contents).unwrap();
+
+        assert!(
+            creature.meshes.is_empty(),
+            "Raw GLB registry entry must have empty meshes"
+        );
+        assert_eq!(
+            creature.glb_path,
+            Some("assets/meshes/landscape/dragon.glb".to_string()),
+            "Registry entry must have glb_path set to the campaign-relative GLB path"
+        );
+    }
+
+    /// When `source_format` is `Obj`, the `RawGlb` export mode is ignored and
+    /// the export falls through to the standard RON path (which requires non-empty meshes).
+    #[test]
+    fn test_raw_glb_export_not_available_for_obj_source() {
+        let campaign = tempdir().unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.source_format = ImportSourceFormat::Obj; // NOT Glb
+        state.glb_export_mode = GlbExportMode::RawGlb;
+        state.export_type = ExportType::Creature;
+        state.creature_name = "test_creature".to_string();
+        // No meshes loaded — the RON path requires them.
+
+        let result = export_state_to_campaign_with_landscape_file(
+            &state,
+            Some(campaign.path()),
+            "data/landscape.ron",
+        );
+
+        // Must fall through to the RON path which requires non-empty meshes.
+        assert!(
+            matches!(result, Err(ObjImporterExportError::NoMeshesLoaded)),
+            "OBJ source with RawGlb mode must fall through to RON path; got: {:?}",
+            result
+        );
+    }
+
+    /// Raw GLB creature export writes the companion .ron to
+    /// `assets/meshes/creatures/` and updates `data/creatures.ron` registry.
+    #[test]
+    fn test_raw_glb_creature_export_writes_registry_entry() {
+        let campaign = tempdir().unwrap();
+        let glb_bytes = build_minimal_triangle_glb();
+
+        let src_dir = tempdir().unwrap();
+        let src_path = src_dir.path().join("goblin.glb");
+        fs::write(&src_path, &glb_bytes).unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.source_format = ImportSourceFormat::Glb;
+        state.glb_export_mode = GlbExportMode::RawGlb;
+        state.export_type = ExportType::Creature;
+        state.creature_id = 4001;
+        state.creature_name = "goblin".to_string();
+        state.source_path = Some(src_path);
+
+        let result = export_state_to_campaign_with_landscape_file(
+            &state,
+            Some(campaign.path()),
+            "data/landscape.ron",
+        );
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+
+        // The creatures registry must be updated.
+        let registry_path = campaign.path().join("data/creatures.ron");
+        assert!(registry_path.exists(), "creatures.ron must exist");
+        let registry_contents = fs::read_to_string(&registry_path).unwrap();
+        assert!(
+            registry_contents.contains("goblin"),
+            "creatures.ron must contain the exported creature name"
+        );
+
+        // The companion .ron must have glb_path set.
+        let ron_path = campaign.path().join("assets/meshes/creatures/goblin.ron");
+        let ron_contents = fs::read_to_string(&ron_path).unwrap();
+        let creature: CreatureDefinition = ron::from_str(&ron_contents).unwrap();
+        assert!(creature.meshes.is_empty());
+        assert_eq!(
+            creature.glb_path,
+            Some("assets/meshes/creatures/goblin.glb".to_string())
         );
     }
 }

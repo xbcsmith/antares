@@ -6,7 +6,9 @@
 //! Extracted from the main creatures editor module for maintainability.
 
 use super::{CreatureEditorError, CreaturesEditorState};
+use crate::mesh_glb_io::{import_glb_scene_from_file, GlbImportOptions};
 use crate::preview_features::PreviewStatistics;
+use antares::domain::visual::MeshTransform;
 use eframe::egui;
 
 impl CreaturesEditorState {
@@ -191,14 +193,66 @@ impl CreaturesEditorState {
         );
     }
 
+    /// Loads and caches preview mesh geometry for a GLB-only creature entry.
+    ///
+    /// If `path_str` is already in the cache (including an empty-Vec failure
+    /// record), this is a no-op.  Otherwise, the method resolves the path
+    /// relative to [`CreaturesEditorState::last_campaign_dir`] and calls
+    /// [`import_glb_scene_from_file`].  On success the mesh definitions are
+    /// stored; on failure an empty `Vec` is stored and `self.preview_error` is
+    /// set with the error message.
+    pub(super) fn ensure_glb_preview_cache(&mut self, path_str: &str) {
+        if self.glb_preview_cache.contains_key(path_str) {
+            return;
+        }
+
+        let glb_path = if let Some(campaign_dir) = &self.last_campaign_dir {
+            campaign_dir.join(path_str)
+        } else {
+            std::path::PathBuf::from(path_str)
+        };
+
+        match import_glb_scene_from_file(&glb_path, &GlbImportOptions::default()) {
+            Ok(scene) => {
+                let meshes: Vec<_> = scene.meshes.into_iter().map(|m| m.mesh_def).collect();
+                self.glb_preview_cache.insert(path_str.to_string(), meshes);
+            }
+            Err(e) => {
+                self.preview_error = Some(format!("GLB preview failed: {}", e));
+                self.glb_preview_cache.insert(path_str.to_string(), vec![]);
+            }
+        }
+    }
+
     /// Synchronise the preview renderer state from the current edit buffer.
+    ///
+    /// For GLB-only entries (`glb_path.is_some()` and `meshes.is_empty()`),
+    /// preview geometry is loaded from the GLB file (cached after the first
+    /// load) and substituted into the preview creature so the renderer shows
+    /// actual 3-D content instead of a blank canvas.
     ///
     /// Always renders all meshes visible with no selection highlight,
     /// since interactive mesh editing has been removed.
     pub(super) fn sync_preview_renderer_from_edit_buffer(
         &mut self,
     ) -> Result<(), CreatureEditorError> {
-        let preview_creature = self.edit_buffer.clone();
+        let mut preview_creature = self.edit_buffer.clone();
+
+        // For GLB-only entries, load/cache preview geometry and substitute it
+        // so the renderer shows the actual model rather than nothing.
+        if preview_creature.glb_path.is_some() && preview_creature.meshes.is_empty() {
+            if let Some(path_str) = preview_creature.glb_path.clone() {
+                self.ensure_glb_preview_cache(&path_str);
+                if let Some(cached) = self.glb_preview_cache.get(&path_str) {
+                    if !cached.is_empty() {
+                        preview_creature.mesh_transforms =
+                            vec![MeshTransform::identity(); cached.len()];
+                        preview_creature.meshes = cached.clone();
+                    }
+                }
+            }
+        }
+
         let stats = self.build_preview_statistics();
 
         let renderer = self

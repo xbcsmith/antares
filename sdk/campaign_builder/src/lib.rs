@@ -1448,7 +1448,7 @@ impl eframe::App for CampaignBuilderApp {
                 let mut campaign_db =
                     antares::domain::world::terrain::TerrainDatabase::new();
                 for def in &self.campaign_data.terrain_definitions {
-                    let _ = campaign_db.add(def.clone());
+                    campaign_db.add(def.clone()).ok();
                 }
                 db.merge(campaign_db);
                 self.campaign_data.terrain_db = db;
@@ -2797,8 +2797,7 @@ impl CampaignBuilderApp {
                                 .weak(),
                         );
                     } else {
-                        for idx in 0..file_count {
-                            let name = &imported_files[idx];
+                        for (idx, name) in imported_files.iter().enumerate() {
                             let ext = std::path::Path::new(name)
                                 .extension()
                                 .and_then(|e| e.to_str())

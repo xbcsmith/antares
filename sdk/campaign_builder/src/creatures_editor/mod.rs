@@ -16,9 +16,9 @@ use crate::ui_helpers::{
     StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::types::CreatureId;
-use antares::domain::visual::{CreatureDefinition, CreatureReference};
+use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshDefinition};
 use eframe::egui;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -215,6 +215,14 @@ pub struct CreaturesEditorState {
     preview_renderer: Option<PreviewRenderer>,
     /// Last preview subsystem error shown in fallback UI.
     preview_error: Option<String>,
+    /// Cached GLB preview geometry, keyed by the `glb_path` string from a
+    /// `CreatureDefinition`.
+    ///
+    /// Populated lazily in `sync_preview_renderer_from_edit_buffer` when the
+    /// edit buffer is a GLB-only creature (`glb_path.is_some()` and
+    /// `meshes.is_empty()`). An empty `Vec` in the cache means the file was
+    /// tried but failed (error stored in `preview_error`).
+    glb_preview_cache: HashMap<String, Vec<MeshDefinition>>,
 }
 
 /// Sort order for registry list
@@ -334,6 +342,7 @@ impl Default for CreaturesEditorState {
             preview_state,
             preview_renderer,
             preview_error,
+            glb_preview_cache: HashMap::new(),
         }
     }
 }
@@ -2694,6 +2703,7 @@ mod tests {
 
     /// `registry_dirty` is set to `true` by the add/edit/delete paths so
     /// the parent can persist the change and invalidate editor caches.
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn test_registry_dirty_set_after_mutation() {
         let mut state = CreaturesEditorState::default();
@@ -4086,5 +4096,93 @@ mod tests {
         let unsaved = true;
         assert!(unsaved);
         assert_eq!(state.edit_buffer.meshes[0].texture_path, Some(new_path));
+    }
+
+    // ─── Phase 2: GLB preview cache tests ────────────────────────────────────
+
+    /// When the edit buffer is a GLB-only creature pointing at the Phase-1
+    /// `test_triangle.glb` fixture, `sync_preview_renderer_from_edit_buffer`
+    /// must populate `glb_preview_cache` with non-empty geometry.
+    #[test]
+    fn test_preview_panel_glb_path_returns_imported_geometry() {
+        let project_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let campaign_dir = project_root.join("data/test_campaign");
+        let glb_fixture = campaign_dir.join("assets/meshes/test_triangle.glb");
+
+        assert!(
+            glb_fixture.exists(),
+            "Phase-1 GLB fixture missing at {:?}; it must be created by Phase 1",
+            glb_fixture
+        );
+
+        let mut state = CreaturesEditorState::new();
+        state.last_campaign_dir = Some(campaign_dir);
+        state.edit_buffer = CreatureDefinition {
+            id: 9001,
+            name: "GLB Preview Test".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/test_triangle.glb".to_string()),
+            glb_scene_index: 0,
+        };
+
+        // Calling sync populates the cache before touching the renderer.
+        let _ = state.sync_preview_renderer_from_edit_buffer();
+
+        assert!(
+            state
+                .glb_preview_cache
+                .contains_key("assets/meshes/test_triangle.glb"),
+            "glb_preview_cache must have an entry for the GLB path after sync"
+        );
+        let cached = &state.glb_preview_cache["assets/meshes/test_triangle.glb"];
+        assert!(
+            !cached.is_empty(),
+            "cached geometry must be non-empty for a valid GLB file"
+        );
+    }
+
+    /// When the GLB path points at a non-existent file, `sync_preview_renderer_from_edit_buffer`
+    /// must store an error in `preview_error` and must not panic.
+    #[test]
+    fn test_preview_panel_glb_missing_file_displays_error_string() {
+        let mut state = CreaturesEditorState::new();
+        // Use a path that definitely does not exist.
+        state.last_campaign_dir = Some(std::path::PathBuf::from("/tmp"));
+        state.edit_buffer = CreatureDefinition {
+            id: 9002,
+            name: "Missing GLB".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+            glb_path: Some("assets/meshes/totally_nonexistent_glb_file.glb".to_string()),
+            glb_scene_index: 0,
+        };
+
+        // Must not panic; error should be stored in preview_error.
+        let _ = state.sync_preview_renderer_from_edit_buffer();
+
+        assert!(
+            state.preview_error.is_some(),
+            "preview_error must be set when GLB file is missing"
+        );
+        let err_msg = state.preview_error.as_ref().unwrap();
+        assert!(
+            err_msg.contains("GLB preview failed"),
+            "error message must mention 'GLB preview failed', got: {err_msg}"
+        );
+
+        // The cache entry must exist (empty Vec as failure marker).
+        assert!(
+            state
+                .glb_preview_cache
+                .contains_key("assets/meshes/totally_nonexistent_glb_file.glb"),
+            "glb_preview_cache must have a (empty) entry even on failure"
+        );
     }
 }

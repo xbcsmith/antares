@@ -887,6 +887,8 @@ mod tests {
                 mesh_transforms: Vec::new(),
                 scale: 1.0,
                 color_tint: None,
+                glb_path: None,
+                glb_scene_index: 0,
             },
         }
     }
@@ -1349,6 +1351,8 @@ mod tests {
             mesh_transforms: Vec::new(),
             scale: 2.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         write_object_definition(
             tmp.path(),

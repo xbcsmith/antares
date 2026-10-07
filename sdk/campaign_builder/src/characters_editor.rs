@@ -3460,8 +3460,7 @@ mod tests {
     #[test]
     fn test_starting_items_stacking_groups_duplicates() {
         // 15 food rations (ID 53) plus 1 healing potion (ID 10)
-        let ids: Vec<u8> = std::iter::repeat(53u8)
-            .take(15)
+        let ids: Vec<u8> = std::iter::repeat_n(53u8, 15)
             .chain(std::iter::once(10u8))
             .collect();
 

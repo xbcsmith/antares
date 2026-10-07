@@ -32,6 +32,8 @@ fn test_load_creature_asset() {
         mesh_transforms: vec![MeshTransform::identity()],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     state.edit_buffer = creature.clone();
@@ -54,6 +56,8 @@ fn test_add_mesh_to_creature() {
         mesh_transforms: vec![MeshTransform::identity()],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     let initial_count = state.edit_buffer.meshes.len();
@@ -93,6 +97,8 @@ fn test_remove_mesh_from_creature() {
         ],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     let initial_count = state.edit_buffer.meshes.len();
@@ -125,6 +131,8 @@ fn test_duplicate_mesh() {
         mesh_transforms: vec![transform],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     // Duplicate the mesh
@@ -172,6 +180,8 @@ fn test_reorder_meshes() {
         ],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     // Swap first and last mesh
@@ -194,6 +204,8 @@ fn test_update_mesh_transform() {
         mesh_transforms: vec![MeshTransform::identity()],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     // Update transform
@@ -226,6 +238,8 @@ fn test_update_mesh_color() {
         mesh_transforms: vec![MeshTransform::identity()],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     let original_color = state.edit_buffer.meshes[0].color;
@@ -249,6 +263,8 @@ fn test_creature_scale_multiplier() {
         mesh_transforms: vec![MeshTransform::identity()],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     assert_eq!(state.edit_buffer.scale, 1.0);
@@ -277,6 +293,8 @@ fn test_save_asset_to_file() {
         mesh_transforms: vec![MeshTransform::identity()],
         scale: 1.5,
         color_tint: Some([1.0, 1.0, 1.0, 1.0]),
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     // Save creature
@@ -346,6 +364,8 @@ fn test_creature_color_tint_optional() {
         mesh_transforms: vec![MeshTransform::identity()],
         scale: 1.0,
         color_tint: None,
+        glb_path: None,
+        glb_scene_index: 0,
     };
 
     assert!(state.edit_buffer.color_tint.is_none());

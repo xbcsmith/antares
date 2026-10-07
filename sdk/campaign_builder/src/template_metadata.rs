@@ -487,6 +487,8 @@ mod tests {
             mesh_transforms: transforms,
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         }
     }
 

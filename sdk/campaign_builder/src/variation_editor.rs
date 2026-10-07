@@ -430,6 +430,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.5,
             color_tint: Some([1.0, 0.0, 0.0, 1.0]),
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         let buffer = VariationCreateBuffer::from_creature(&creature);

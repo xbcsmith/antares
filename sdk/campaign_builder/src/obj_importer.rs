@@ -13,7 +13,9 @@
 //! and `obj_importer_ui.rs` renders and exports that state.
 //!
 //! Both OBJ and GLB sources converge into the same [`ObjImporterState`] and export
-//! code paths.  The active source format is recorded in
+//! code paths.  GLB sources additionally support [`GlbExportMode::RawGlb`] which
+//! copies the source `.glb` file into the campaign asset tree instead of baking
+//! mesh vertex data into RON.  The active source format is recorded in
 //! [`ObjImporterState::source_format`] and each imported mesh carries a generalized
 //! [`ImportedTexturePayload`] that covers both OBJ filesystem texture paths and GLB
 //! embedded image bytes.
@@ -118,6 +120,30 @@ pub enum ImportSourceFormat {
     Obj,
     /// Source was a binary glTF (`.glb`) file.
     Glb,
+}
+
+/// Controls whether a GLB source file is baked into RON vertex data or copied
+/// directly into the campaign asset tree.
+///
+/// Only meaningful when `source_format == ImportSourceFormat::Glb`. OBJ sources
+/// always use the `ConvertToRon` path regardless of this setting.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::obj_importer::GlbExportMode;
+///
+/// let mode = GlbExportMode::default();
+/// assert_eq!(mode, GlbExportMode::ConvertToRon);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GlbExportMode {
+    /// Convert GLB geometry into RON `MeshDefinition` vertex data (existing behaviour).
+    #[default]
+    ConvertToRon,
+    /// Copy the source `.glb` file directly to the campaign asset tree and write
+    /// `glb_path` in the registry entry instead of inline vertex data.
+    RawGlb,
 }
 
 /// Temporary imported-material swatch surfaced in the importer UI for the current session.
@@ -249,6 +275,11 @@ pub struct ObjImporterState {
     /// the UI renders it in red. When `false`, it is an informational message
     /// rendered in italic text.
     pub is_error: bool,
+    /// Whether to bake mesh geometry into RON or copy the `.glb` file directly.
+    ///
+    /// Only applies when `source_format == ImportSourceFormat::Glb`.
+    /// OBJ sources use `ConvertToRon` regardless of this setting.
+    pub glb_export_mode: GlbExportMode,
 }
 
 /// Errors that can occur while preparing importer state.
@@ -507,6 +538,7 @@ impl Default for ObjImporterState {
             new_custom_color: [0.8, 0.8, 0.8, 1.0],
             open_after_export: false,
             is_error: false,
+            glb_export_mode: GlbExportMode::ConvertToRon,
         }
     }
 }
@@ -823,7 +855,7 @@ impl ObjImporterState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ground_meshes_to_y_zero, ExportType, ImportSourceFormat, ImportedMesh,
+        ground_meshes_to_y_zero, ExportType, GlbExportMode, ImportSourceFormat, ImportedMesh,
         ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
         ObjImporterState,
     };
@@ -1784,6 +1816,28 @@ mod tests {
         assert_eq!(
             state.creature_id, 4000,
             "default creature_id must be 4000 (first Custom-range ID)"
+        );
+    }
+
+    /// `ObjImporterState::new()` must default to `GlbExportMode::ConvertToRon` so
+    /// existing OBJ and GLB conversion imports are unaffected by default.
+    #[test]
+    fn test_glb_export_mode_default_is_convert_to_ron() {
+        let state = ObjImporterState::new();
+        assert_eq!(state.glb_export_mode, GlbExportMode::ConvertToRon);
+    }
+
+    /// `ObjImporterState::clear()` must reset `glb_export_mode` to the default
+    /// (`ConvertToRon`) since it is not in the preserved-fields list.
+    #[test]
+    fn test_glb_export_mode_resets_on_clear() {
+        let mut state = ObjImporterState::new();
+        state.glb_export_mode = GlbExportMode::RawGlb;
+        state.clear();
+        assert_eq!(
+            state.glb_export_mode,
+            GlbExportMode::ConvertToRon,
+            "clear() must reset glb_export_mode to ConvertToRon"
         );
     }
 }

@@ -952,6 +952,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         renderer.update_creature(Some(creature.clone()));
@@ -1055,6 +1057,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
 
         renderer.update_creature(Some(creature));
@@ -1216,6 +1220,8 @@ mod tests {
             mesh_transforms: vec![],
             scale: 1.0,
             color_tint: None,
+            glb_path: None,
+            glb_scene_index: 0,
         };
         renderer.update_creature(Some(creature));
 

@@ -4824,6 +4824,7 @@ impl MapsEditorState {
     }
 
     /// Show the list view with map previews
+    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
