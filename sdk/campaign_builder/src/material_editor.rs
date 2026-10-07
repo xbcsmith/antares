@@ -599,6 +599,7 @@ mod tests {
             roughness: 0.5,
             emissive: None,
             alpha_mode: AlphaMode::Opaque,
+            ..Default::default()
         };
 
         // Metal preset

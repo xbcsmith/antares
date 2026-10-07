@@ -14,7 +14,7 @@
 //!
 //! # Examples
 //!
-//! ```
+//! ```no_run
 //! use antares::game::systems::creature_spawning::spawn_creature;
 //! use antares::domain::visual::CreatureDefinition;
 //! use antares::domain::types::Direction;
@@ -25,12 +25,14 @@
 //!     creature_def: &CreatureDefinition,
 //!     mut meshes: ResMut<Assets<Mesh>>,
 //!     mut materials: ResMut<Assets<StandardMaterial>>,
+//!     asset_server: Res<AssetServer>,
 //! ) {
 //!     let entity = spawn_creature(
 //!         &mut commands,
 //!         creature_def,
 //!         &mut meshes,
 //!         &mut materials,
+//!         &asset_server,
 //!         Vec3::new(10.0, 0.0, 5.0),
 //!         None,
 //!         None,
@@ -79,7 +81,7 @@ use bevy::prelude::*;
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use antares::game::systems::creature_spawning::spawn_creature;
 /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 /// use antares::domain::types::Direction;
@@ -89,6 +91,7 @@ use bevy::prelude::*;
 ///     mut commands: Commands,
 ///     mut meshes: ResMut<Assets<Mesh>>,
 ///     mut materials: ResMut<Assets<StandardMaterial>>,
+///     asset_server: Res<AssetServer>,
 /// ) {
 ///     let creature_def = CreatureDefinition {
 ///         id: 1,
@@ -120,6 +123,7 @@ use bevy::prelude::*;
 ///         &creature_def,
 ///         &mut meshes,
 ///         &mut materials,
+///         &asset_server,
 ///         Vec3::ZERO,
 ///         None,
 ///         None,
@@ -134,6 +138,7 @@ pub fn spawn_creature(
     creature_def: &CreatureDefinition,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
     position: Vec3,
     scale_override: Option<f32>,
     animation: Option<AnimationDefinition>,
@@ -195,7 +200,7 @@ pub fn spawn_creature(
 
         // Create material - use MaterialDefinition if provided, otherwise use color
         let material = if let Some(ref material_def) = mesh_def.material {
-            material_definition_to_bevy(material_def)
+            material_definition_to_bevy(material_def, asset_server)
         } else {
             create_material_from_color(mesh_def.color)
         };
@@ -579,6 +584,7 @@ mod tests {
             roughness: 0.2,
             emissive: None,
             alpha_mode: AlphaMode::Opaque,
+            ..Default::default()
         };
 
         let mesh_with_material = MeshDefinition {
@@ -656,12 +662,14 @@ mod tests {
             .run_system_once(
                 move |mut commands: Commands,
                       mut meshes: ResMut<Assets<Mesh>>,
-                      mut materials: ResMut<Assets<StandardMaterial>>| {
+                      mut materials: ResMut<Assets<StandardMaterial>>,
+                      asset_server: Res<AssetServer>| {
                     let _entity = spawn_creature(
                         &mut commands,
                         &glb_def,
                         &mut meshes,
                         &mut materials,
+                        &asset_server,
                         Vec3::ZERO,
                         None,
                         None,
@@ -711,12 +719,14 @@ mod tests {
             .run_system_once(
                 move |mut commands: Commands,
                       mut meshes: ResMut<Assets<Mesh>>,
-                      mut materials: ResMut<Assets<StandardMaterial>>| {
+                      mut materials: ResMut<Assets<StandardMaterial>>,
+                      asset_server: Res<AssetServer>| {
                     let _entity = spawn_creature(
                         &mut commands,
                         &ron_def,
                         &mut meshes,
                         &mut materials,
+                        &asset_server,
                         Vec3::ZERO,
                         None,
                         None,

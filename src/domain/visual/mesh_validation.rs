@@ -35,6 +35,7 @@
 ///
 /// assert!(mesh_validation::validate_mesh_definition(&valid_mesh).is_ok());
 /// ```
+use super::MaterialDefinition;
 use super::MeshDefinition;
 use crate::domain::validation::ValidationError;
 
@@ -80,6 +81,51 @@ pub fn validate_mesh_definition(mesh: &MeshDefinition) -> Result<(), ValidationE
 
     validate_color(&mesh.color)?;
 
+    if let Some(ref mat) = mesh.material {
+        validate_material_texture_paths(mat)?;
+    }
+
+    Ok(())
+}
+
+/// Validates the texture path fields on a [`MaterialDefinition`].
+///
+/// Each `Option<String>` path field, when `Some`, must start with `"assets/"`.
+///
+/// # Errors
+///
+/// Returns `Err(ValidationError::Structural(...))` for any path that does not
+/// start with `"assets/"`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::{MaterialDefinition, mesh_validation};
+///
+/// let mat = MaterialDefinition {
+///     normal_map_path: Some("assets/textures/normal.png".to_string()),
+///     ..Default::default()
+/// };
+/// assert!(mesh_validation::validate_material_texture_paths(&mat).is_ok());
+/// ```
+pub fn validate_material_texture_paths(mat: &MaterialDefinition) -> Result<(), ValidationError> {
+    for (field, path_opt) in [
+        ("normal_map_path", mat.normal_map_path.as_deref()),
+        ("occlusion_map_path", mat.occlusion_map_path.as_deref()),
+        (
+            "metallic_roughness_map_path",
+            mat.metallic_roughness_map_path.as_deref(),
+        ),
+        ("emissive_map_path", mat.emissive_map_path.as_deref()),
+    ] {
+        if let Some(path) = path_opt {
+            if !path.starts_with("assets/") {
+                return Err(ValidationError::Structural(format!(
+                    "MaterialDefinition {field} '{path}' must start with 'assets/'"
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -586,5 +632,35 @@ mod tests {
         };
 
         assert!(validate_mesh_definition(&cube).is_ok());
+    }
+
+    #[test]
+    fn test_validate_material_texture_paths_valid() {
+        let mat = MaterialDefinition {
+            normal_map_path: Some("assets/textures/normal.png".to_string()),
+            occlusion_map_path: Some("assets/textures/occlusion.png".to_string()),
+            metallic_roughness_map_path: Some("assets/textures/metallic_roughness.png".to_string()),
+            emissive_map_path: Some("assets/textures/emissive.png".to_string()),
+            ..Default::default()
+        };
+        assert!(validate_material_texture_paths(&mat).is_ok());
+    }
+
+    #[test]
+    fn test_validate_material_texture_paths_invalid_prefix() {
+        let mat = MaterialDefinition {
+            normal_map_path: Some("textures/normal.png".to_string()), // missing "assets/" prefix
+            ..Default::default()
+        };
+        let result = validate_material_texture_paths(&mat);
+        assert!(
+            result.is_err(),
+            "should fail for path without 'assets/' prefix"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("normal_map_path"),
+            "error should mention the field name"
+        );
     }
 }

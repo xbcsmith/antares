@@ -1856,6 +1856,7 @@ fn landscape_material(
             create_material_with_texture(
                 crate::game::systems::creature_meshes::load_texture(asset_server, texture_path),
                 mesh_def.material.as_ref(),
+                asset_server,
             )
         } else {
             warn!(
@@ -1864,13 +1865,13 @@ fn landscape_material(
                 "Landscape mesh texture path must start with 'assets/'; using material/color fallback"
             );
             if let Some(material_def) = &mesh_def.material {
-                material_definition_to_bevy(material_def)
+                material_definition_to_bevy(material_def, asset_server)
             } else {
                 create_material_from_color(mesh_def.color)
             }
         }
     } else if let Some(material_def) = &mesh_def.material {
-        material_definition_to_bevy(material_def)
+        material_definition_to_bevy(material_def, asset_server)
     } else {
         create_material_from_color(mesh_def.color)
     };
@@ -2570,6 +2571,7 @@ fn spawn_map(
                         creature_def,
                         &mut meshes,
                         &mut materials,
+                        &asset_server,
                         Vec3::new(
                             x + TILE_CENTER_OFFSET,
                             creature_def.foot_ground_offset(),
@@ -2841,6 +2843,7 @@ fn spawn_map(
                                 creature_def,
                                 &mut meshes,
                                 &mut materials,
+                                &asset_server,
                                 Vec3::new(
                                     x + TILE_CENTER_OFFSET,
                                     creature_def.foot_ground_offset(),
@@ -2917,6 +2920,7 @@ fn spawn_map(
                                 creature_def,
                                 &mut meshes,
                                 &mut materials,
+                                &asset_server,
                                 Vec3::new(
                                     x + TILE_CENTER_OFFSET,
                                     creature_def.foot_ground_offset(),

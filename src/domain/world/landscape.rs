@@ -1260,6 +1260,7 @@ mod tests {
                 roughness: 0.8,
                 emissive: None,
                 alpha_mode: AlphaMode::Mask,
+                ..Default::default()
             }),
             texture_path: Some(texture_path.to_string()),
         };

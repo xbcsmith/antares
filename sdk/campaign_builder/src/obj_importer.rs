@@ -32,7 +32,7 @@
 
 use crate::color_palette::{suggest_color_for_mesh, CustomPalette, PaletteError};
 use crate::mesh_glb_io::{
-    import_glb_scene_from_file, GlbImportError, GlbImportOptions, ImportedGlbScene,
+    import_glb_scene_from_file, GlbImportError, GlbImportOptions, ImportedGlbScene, TextureKind,
 };
 use crate::mesh_obj_io::{
     import_obj_scene_for_importer_from_obj_file_with_options, ImportedObjMaterialSwatch,
@@ -197,12 +197,11 @@ pub struct ImportedMesh {
     pub selected: bool,
     /// Backing mesh definition used for export.
     pub mesh_def: MeshDefinition,
-    /// Generalized texture source used at export time.
+    /// All PBR texture payloads for this mesh, keyed by [`TextureKind`].
     ///
-    /// Replaces the OBJ-only `texture_source_path` field.  For OBJ imports the
-    /// inner `source_path` field contains the filesystem path; for GLB imports
-    /// the inner `bytes` field contains embedded image bytes.
-    pub texture_payload: Option<ImportedTexturePayload>,
+    /// Empty when the mesh has no embedded textures.
+    /// The base-colour texture, if any, is stored with key [`TextureKind::BaseColor`].
+    pub texture_payloads: Vec<(TextureKind, ImportedTexturePayload)>,
 }
 
 /// State owned by the OBJ importer tab.
@@ -318,24 +317,28 @@ impl ImportedMesh {
             ImportedObjMeshColorSource::HeuristicFallback => ImportedMeshColorSource::AutoAssigned,
         };
 
-        let texture_payload = imported_mesh.texture_source_path.map(|source_path| {
-            let file_name_hint = source_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("texture.png")
-                .to_string();
-            ImportedTexturePayload {
-                source_label: file_name_hint.clone(),
-                file_name_hint,
-                bytes: None,
-                source_path: Some(source_path),
-                mime_type: None,
-            }
-        });
+        let texture_payloads = imported_mesh
+            .texture_source_path
+            .map(|source_path| {
+                let file_name_hint = source_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("texture.png")
+                    .to_string();
+                let payload = ImportedTexturePayload {
+                    source_label: file_name_hint.clone(),
+                    file_name_hint,
+                    bytes: None,
+                    source_path: Some(source_path),
+                    mime_type: None,
+                };
+                vec![(TextureKind::BaseColor, payload)]
+            })
+            .unwrap_or_default();
 
         Self::from_mesh_definition_with_color_source_and_texture_source(
             imported_mesh.mesh_def,
-            texture_payload,
+            texture_payloads,
             color_source,
         )
     }
@@ -346,14 +349,14 @@ impl ImportedMesh {
     ) -> Self {
         Self::from_mesh_definition_with_color_source_and_texture_source(
             mesh_def,
-            None::<ImportedTexturePayload>,
+            vec![],
             color_source,
         )
     }
 
     fn from_mesh_definition_with_color_source_and_texture_source(
         mut mesh_def: MeshDefinition,
-        texture_payload: Option<ImportedTexturePayload>,
+        texture_payloads: Vec<(TextureKind, ImportedTexturePayload)>,
         color_source: ImportedMeshColorSource,
     ) -> Self {
         let name = mesh_def.name.clone().unwrap_or_else(|| "mesh".to_string());
@@ -374,7 +377,7 @@ impl ImportedMesh {
             color_source,
             selected: true,
             mesh_def,
-            texture_payload,
+            texture_payloads,
         }
     }
 
@@ -403,9 +406,13 @@ impl ImportedMesh {
     fn from_imported_glb_mesh(
         index: usize,
         mut mesh_def: MeshDefinition,
-        payload: Option<ImportedTexturePayload>,
+        texture_payloads: Vec<(TextureKind, ImportedTexturePayload)>,
     ) -> Self {
-        let is_texture_backed = is_texture_backed_mesh(&mesh_def, payload.as_ref());
+        let base_color_payload = texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::BaseColor)
+            .map(|(_, p)| p);
+        let is_texture_backed = is_texture_backed_mesh(&mesh_def, base_color_payload);
         let color = if is_texture_backed {
             [1.0, 1.0, 1.0, 1.0]
         } else {
@@ -432,7 +439,7 @@ impl ImportedMesh {
             color_source,
             selected: false,
             mesh_def,
-            texture_payload: payload,
+            texture_payloads,
         }
     }
 }
@@ -507,9 +514,9 @@ fn has_imported_material_color(mesh_def: &MeshDefinition) -> bool {
 
 fn is_texture_backed_mesh(
     mesh_def: &MeshDefinition,
-    texture_payload: Option<&ImportedTexturePayload>,
+    base_color_payload: Option<&ImportedTexturePayload>,
 ) -> bool {
-    mesh_def.texture_path.is_some() || texture_payload.is_some()
+    mesh_def.texture_path.is_some() || base_color_payload.is_some()
 }
 
 impl Default for ObjImporterState {
@@ -702,8 +709,8 @@ impl ObjImporterState {
     /// After a successful load `state.mode` will be [`ImporterMode::Loaded`] and
     /// `state.source_format` will be [`ImportSourceFormat::Glb`].
     ///
-    /// Embedded base-color texture bytes are preserved in each mesh's
-    /// [`ImportedMesh::texture_payload`] for export-time processing.
+    /// Embedded PBR texture bytes are preserved in each mesh's
+    /// [`ImportedMesh::texture_payloads`] for export-time processing.
     ///
     /// # Errors
     ///
@@ -732,14 +739,23 @@ impl ObjImporterState {
             .into_iter()
             .enumerate()
             .map(|(i, glb_mesh)| {
-                let payload = glb_mesh.texture_payload.map(|p| ImportedTexturePayload {
-                    source_label: p.source_label,
-                    file_name_hint: p.file_name_hint,
-                    bytes: Some(p.bytes),
-                    source_path: None,
-                    mime_type: p.mime_type,
-                });
-                ImportedMesh::from_imported_glb_mesh(i, glb_mesh.mesh_def, payload)
+                let texture_payloads: Vec<(TextureKind, ImportedTexturePayload)> = glb_mesh
+                    .texture_payloads
+                    .into_iter()
+                    .map(|(kind, p)| {
+                        (
+                            kind,
+                            ImportedTexturePayload {
+                                source_label: p.source_label,
+                                file_name_hint: p.file_name_hint,
+                                bytes: Some(p.bytes),
+                                source_path: None,
+                                mime_type: p.mime_type,
+                            },
+                        )
+                    })
+                    .collect();
+                ImportedMesh::from_imported_glb_mesh(i, glb_mesh.mesh_def, texture_payloads)
             })
             .collect();
 
@@ -761,13 +777,6 @@ impl ObjImporterState {
             status_parts.push("Skinning/animations present but not imported.".to_string());
         }
 
-        if scene.has_unsupported_pbr_channels {
-            status_parts.push(
-                "Unsupported PBR channels (normal/occlusion/metallic-roughness) ignored."
-                    .to_string(),
-            );
-        }
-
         let glb_metadata_summary = status_parts.join(" ");
 
         self.load_imported_mesh_rows(
@@ -786,10 +795,15 @@ impl ObjImporterState {
     /// Re-runs automatic built-in color assignment for every loaded mesh.
     pub fn auto_assign_colors(&mut self) {
         for mesh in &mut self.meshes {
-            if self.source_format == ImportSourceFormat::Glb
-                && is_texture_backed_mesh(&mesh.mesh_def, mesh.texture_payload.as_ref())
-            {
-                continue;
+            if self.source_format == ImportSourceFormat::Glb {
+                let base_color_payload = mesh
+                    .texture_payloads
+                    .iter()
+                    .find(|(k, _)| *k == TextureKind::BaseColor)
+                    .map(|(_, p)| p);
+                if is_texture_backed_mesh(&mesh.mesh_def, base_color_payload) {
+                    continue;
+                }
             }
             mesh.reapply_auto_color();
         }
@@ -859,6 +873,7 @@ mod tests {
         ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
         ObjImporterState,
     };
+    use crate::mesh_glb_io::TextureKind;
     use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
     use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
     use std::fs;
@@ -900,6 +915,7 @@ mod tests {
             roughness: 0.9,
             emissive: None,
             alpha_mode: AlphaMode::Blend,
+            ..Default::default()
         });
 
         let mesh = ImportedMesh::from_mesh_definition(mesh_def);
@@ -918,6 +934,7 @@ mod tests {
             roughness: 0.9,
             emissive: None,
             alpha_mode: AlphaMode::Opaque,
+            ..Default::default()
         });
 
         let mut mesh = ImportedMesh::from_mesh_definition(mesh_def);
@@ -945,6 +962,7 @@ mod tests {
             roughness: 0.8,
             emissive: None,
             alpha_mode: AlphaMode::Opaque,
+            ..Default::default()
         });
         let payload = ImportedTexturePayload {
             source_label: "albedo".to_string(),
@@ -954,7 +972,11 @@ mod tests {
             mime_type: Some("image/png".to_string()),
         };
 
-        let mesh = ImportedMesh::from_imported_glb_mesh(0, mesh_def, Some(payload));
+        let mesh = ImportedMesh::from_imported_glb_mesh(
+            0,
+            mesh_def,
+            vec![(TextureKind::BaseColor, payload)],
+        );
 
         assert_eq!(mesh.color, [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(mesh.mesh_def.color, [1.0, 1.0, 1.0, 1.0]);
@@ -1136,7 +1158,7 @@ mod tests {
     fn test_obj_importer_state_auto_assign_colors_skips_textured_glb_meshes() {
         let mut mesh_def = named_triangle("EM3D_Base_Body");
         mesh_def.texture_path = Some("__glb_texture_0_0".to_string());
-        let mesh = ImportedMesh::from_imported_glb_mesh(0, mesh_def, None);
+        let mesh = ImportedMesh::from_imported_glb_mesh(0, mesh_def, vec![]);
         let mut state = ObjImporterState::new();
         state.source_format = ImportSourceFormat::Glb;
         state.meshes = vec![mesh];
@@ -1160,6 +1182,7 @@ mod tests {
             roughness: 0.9,
             emissive: None,
             alpha_mode: AlphaMode::Blend,
+            ..Default::default()
         });
         let mut state = ObjImporterState::new();
         state.load_mesh_definitions(None, vec![mesh_def]);
@@ -1433,11 +1456,13 @@ mod tests {
         assert!(!state.meshes.is_empty(), "expected at least one mesh");
         let mesh = &state.meshes[0];
 
-        // texture_payload must be present and hold embedded bytes
+        // texture_payloads must contain a BaseColor entry with embedded bytes
         let payload = mesh
-            .texture_payload
-            .as_ref()
-            .expect("texture_payload must be Some for textured GLB");
+            .texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::BaseColor)
+            .map(|(_, p)| p)
+            .expect("texture_payloads must have a BaseColor entry for textured GLB");
         assert!(
             payload.bytes.is_some(),
             "GLB texture payload must have embedded bytes"
@@ -1546,10 +1571,10 @@ mod tests {
         );
         assert_eq!(state.meshes.len(), 1);
         assert_eq!(state.meshes[0].name, "Triangle");
-        // texture_payload should be None for an OBJ with no material texture
+        // texture_payloads should be empty for an OBJ with no material texture
         assert!(
-            state.meshes[0].texture_payload.is_none(),
-            "no MTL texture means texture_payload must be None"
+            state.meshes[0].texture_payloads.is_empty(),
+            "no MTL texture means texture_payloads must be empty"
         );
     }
 
@@ -1586,7 +1611,7 @@ mod tests {
                     material: None,
                     texture_path: None,
                 },
-                texture_payload: None,
+                texture_payloads: vec![],
                 node_name: None,
                 material_name: None,
                 node_transform: None,
@@ -1633,7 +1658,7 @@ mod tests {
                     material: None,
                     texture_path: None,
                 },
-                texture_payload: None,
+                texture_payloads: vec![],
                 node_name: None,
                 material_name: None,
                 node_transform: None,

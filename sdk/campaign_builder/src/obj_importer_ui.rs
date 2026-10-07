@@ -36,6 +36,7 @@ use crate::color_palette::{palette_entries, PaletteEntry};
 use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
 use crate::creature_id_manager::CreatureCategory;
 use crate::logging::{category, Logger};
+use crate::mesh_glb_io::TextureKind;
 use crate::obj_importer::{
     ExportType, GlbExportMode, ImportSourceFormat, ImportedMaterialSwatch, ImportedMesh,
     ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
@@ -1817,7 +1818,11 @@ fn has_texture_backed_glb_meshes(state: &ObjImporterState) -> bool {
 }
 
 fn is_texture_backed_importer_mesh(mesh: &ImportedMesh) -> bool {
-    mesh.mesh_def.texture_path.is_some() || mesh.texture_payload.is_some()
+    mesh.mesh_def.texture_path.is_some()
+        || mesh
+            .texture_payloads
+            .iter()
+            .any(|(k, _)| *k == TextureKind::BaseColor)
 }
 
 fn imported_swatch_hover_text(swatch: &ImportedMaterialSwatch) -> String {
@@ -2680,10 +2685,12 @@ fn copy_imported_textures_into_campaign(
                     let hint = if !file_name_hint.is_empty() {
                         file_name_hint
                     } else {
-                        let payload = state
-                            .meshes
-                            .get(mesh_index)
-                            .and_then(|m| m.texture_payload.as_ref());
+                        let payload = state.meshes.get(mesh_index).and_then(|m| {
+                            m.texture_payloads
+                                .iter()
+                                .find(|(k, _)| *k == TextureKind::BaseColor)
+                                .map(|(_, p)| p)
+                        });
                         embedded_texture_file_name(payload, mesh_index)
                     };
                     let dest_relative = unique_texture_destination_by_hint(
@@ -2703,6 +2710,56 @@ fn copy_imported_textures_into_campaign(
             }
             ResolvedTextureSource::Missing => {
                 return Err(ObjImporterExportError::MissingTexture { mesh_name });
+            }
+        }
+    }
+
+    // ── Write additional PBR texture payloads (normal, occlusion, metallic_roughness, emissive) ──
+    for (mesh_index, mesh_def) in creature.meshes.iter_mut().enumerate() {
+        let state_mesh = match state.meshes.get(mesh_index) {
+            Some(m) => m,
+            None => continue,
+        };
+
+        for (kind, payload) in state_mesh
+            .texture_payloads
+            .iter()
+            .filter(|(k, _)| *k != TextureKind::BaseColor)
+        {
+            let Some(bytes) = payload.bytes.as_ref() else {
+                continue;
+            };
+            let kind_prefix = match kind {
+                TextureKind::NormalMap => "normal",
+                TextureKind::OcclusionMap => "occlusion",
+                TextureKind::MetallicRoughness => "metallic_roughness",
+                TextureKind::Emissive => "emissive",
+                TextureKind::BaseColor => unreachable!(),
+            };
+            let hint = format!("{}_{}", kind_prefix, payload.file_name_hint);
+            let hash = compute_content_hash(bytes);
+            let dest_str = if let Some(existing) = content_hash_to_dest.get(&hash) {
+                existing.clone()
+            } else {
+                let dest_relative =
+                    unique_texture_destination_by_hint(&texture_dir, &hint, &mut used_destinations);
+                let dest_absolute = campaign_dir.join(&dest_relative);
+                if let Some(parent) = dest_absolute.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&dest_absolute, bytes)?;
+                let dest_str = dest_relative.to_string_lossy().replace('\\', "/");
+                content_hash_to_dest.insert(hash, dest_str.clone());
+                dest_str
+            };
+
+            let mat = mesh_def.material.get_or_insert_with(Default::default);
+            match kind {
+                TextureKind::NormalMap => mat.normal_map_path = Some(dest_str),
+                TextureKind::OcclusionMap => mat.occlusion_map_path = Some(dest_str),
+                TextureKind::MetallicRoughness => mat.metallic_roughness_map_path = Some(dest_str),
+                TextureKind::Emissive => mat.emissive_map_path = Some(dest_str),
+                TextureKind::BaseColor => unreachable!(),
             }
         }
     }
@@ -2732,11 +2789,12 @@ fn resolve_imported_texture_source(
     }
 
     // 2. Embedded GLB bytes take priority over filesystem paths.
-    if let Some(payload) = state
-        .meshes
-        .get(mesh_index)
-        .and_then(|mesh| mesh.texture_payload.as_ref())
-    {
+    if let Some(payload) = state.meshes.get(mesh_index).and_then(|mesh| {
+        mesh.texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::BaseColor)
+            .map(|(_, p)| p)
+    }) {
         if let Some(bytes) = payload.bytes.clone() {
             return ResolvedTextureSource::EmbeddedBytes {
                 bytes,
@@ -3062,6 +3120,7 @@ mod tests {
     };
     use crate::creature_id_manager::CreatureCategory;
     use crate::logging::Logger;
+    use crate::mesh_glb_io::TextureKind;
     use crate::obj_importer::{
         ExportType, GlbExportMode, ImportSourceFormat, ImportedMaterialSwatch,
         ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
@@ -3145,6 +3204,7 @@ mod tests {
             roughness: 0.7,
             emissive: None,
             alpha_mode: AlphaMode::Opaque,
+            ..Default::default()
         });
         state.meshes[0].set_color([0.25, 0.5, 0.75, 0.5]);
 
@@ -3233,24 +3293,30 @@ mod tests {
 
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("textures/body.png".to_string());
-        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
-            source_label: "Body Texture.PNG".to_string(),
-            file_name_hint: "Body Texture.PNG".to_string(),
-            bytes: None,
-            source_path: Some(body_texture.clone()),
-            mime_type: None,
-        });
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            ImportedTexturePayload {
+                source_label: "Body Texture.PNG".to_string(),
+                file_name_hint: "Body Texture.PNG".to_string(),
+                bytes: None,
+                source_path: Some(body_texture.clone()),
+                mime_type: None,
+            },
+        )];
         let mut second_mesh = state.meshes[0].clone();
         second_mesh.name = "wing".to_string();
         second_mesh.mesh_def.name = Some("wing".to_string());
         second_mesh.mesh_def.texture_path = Some("textures/wing.jpg".to_string());
-        second_mesh.texture_payload = Some(ImportedTexturePayload {
-            source_label: "wing-diffuse.jpg".to_string(),
-            file_name_hint: "wing-diffuse.jpg".to_string(),
-            bytes: None,
-            source_path: Some(wing_texture.clone()),
-            mime_type: None,
-        });
+        second_mesh.texture_payloads = vec![(
+            TextureKind::BaseColor,
+            ImportedTexturePayload {
+                source_label: "wing-diffuse.jpg".to_string(),
+                file_name_hint: "wing-diffuse.jpg".to_string(),
+                bytes: None,
+                source_path: Some(wing_texture.clone()),
+                mime_type: None,
+            },
+        )];
         state.meshes.push(second_mesh);
 
         let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
@@ -3271,13 +3337,16 @@ mod tests {
         let campaign_dir = tempdir().unwrap();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("textures/missing.png".to_string());
-        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
-            source_label: "missing.png".to_string(),
-            file_name_hint: "missing.png".to_string(),
-            bytes: None,
-            source_path: Some(campaign_dir.path().join("missing.png")),
-            mime_type: None,
-        });
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            ImportedTexturePayload {
+                source_label: "missing.png".to_string(),
+                file_name_hint: "missing.png".to_string(),
+                bytes: None,
+                source_path: Some(campaign_dir.path().join("missing.png")),
+                mime_type: None,
+            },
+        )];
 
         let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
         assert!(matches!(
@@ -3584,8 +3653,10 @@ mod tests {
         let texture_bytes = b"PNG_FAKE_BYTES_FOR_TEST".to_vec();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
-        state.meshes[0].texture_payload =
-            Some(glb_embedded_payload("texture_0.png", texture_bytes.clone()));
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            glb_embedded_payload("texture_0.png", texture_bytes.clone()),
+        )];
 
         let _outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
 
@@ -3607,10 +3678,10 @@ mod tests {
         let campaign_dir = tempdir().unwrap();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
-        state.meshes[0].texture_payload = Some(glb_embedded_payload(
-            "texture_0.png",
-            b"fake_png_data".to_vec(),
-        ));
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            glb_embedded_payload("texture_0.png", b"fake_png_data".to_vec()),
+        )];
 
         let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
         let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
@@ -3630,19 +3701,19 @@ mod tests {
         let campaign_dir = tempdir().unwrap();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
-        state.meshes[0].texture_payload = Some(glb_embedded_payload(
-            "texture_0.png",
-            b"body_bytes".to_vec(),
-        ));
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            glb_embedded_payload("texture_0.png", b"body_bytes".to_vec()),
+        )];
 
         let mut wing = state.meshes[0].clone();
         wing.name = "wing".to_string();
         wing.mesh_def.name = Some("wing".to_string());
         wing.mesh_def.texture_path = Some("__glb_embedded_1".to_string());
-        wing.texture_payload = Some(glb_embedded_payload(
-            "texture_1.png",
-            b"wing_bytes".to_vec(),
-        ));
+        wing.texture_payloads = vec![(
+            TextureKind::BaseColor,
+            glb_embedded_payload("texture_1.png", b"wing_bytes".to_vec()),
+        )];
         state.meshes.push(wing);
 
         let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
@@ -3673,14 +3744,19 @@ mod tests {
         let shared_bytes = b"shared_texture_data".to_vec();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
-        state.meshes[0].texture_payload =
-            Some(glb_embedded_payload("texture_0.png", shared_bytes.clone()));
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            glb_embedded_payload("texture_0.png", shared_bytes.clone()),
+        )];
 
         let mut second = state.meshes[0].clone();
         second.name = "detail".to_string();
         second.mesh_def.name = Some("detail".to_string());
         second.mesh_def.texture_path = Some("__glb_embedded_1".to_string());
-        second.texture_payload = Some(glb_embedded_payload("texture_0.png", shared_bytes));
+        second.texture_payloads = vec![(
+            TextureKind::BaseColor,
+            glb_embedded_payload("texture_0.png", shared_bytes),
+        )];
         state.meshes.push(second);
 
         let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
@@ -3712,13 +3788,16 @@ mod tests {
         let campaign_dir = tempdir().unwrap();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
-        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
-            source_label: "missing".to_string(),
-            file_name_hint: "texture_0.png".to_string(),
-            bytes: None,       // No embedded bytes
-            source_path: None, // No filesystem path
-            mime_type: Some("image/png".to_string()),
-        });
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            ImportedTexturePayload {
+                source_label: "missing".to_string(),
+                file_name_hint: "texture_0.png".to_string(),
+                bytes: None,       // No embedded bytes
+                source_path: None, // No filesystem path
+                mime_type: Some("image/png".to_string()),
+            },
+        )];
 
         let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
 
@@ -3738,13 +3817,16 @@ mod tests {
         let campaign_dir = tempdir().unwrap();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
-        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
-            source_label: "Mystery Texture".to_string(),
-            file_name_hint: "mystery_texture.bin".to_string(),
-            bytes: Some(b"unknown_mime_texture".to_vec()),
-            source_path: None,
-            mime_type: Some("image/webp".to_string()),
-        });
+        state.meshes[0].texture_payloads = vec![(
+            TextureKind::BaseColor,
+            ImportedTexturePayload {
+                source_label: "Mystery Texture".to_string(),
+                file_name_hint: "mystery_texture.bin".to_string(),
+                bytes: Some(b"unknown_mime_texture".to_vec()),
+                source_path: None,
+                mime_type: Some("image/webp".to_string()),
+            },
+        )];
 
         let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
         let exported = fs::read_to_string(&outcome.absolute_path).unwrap();

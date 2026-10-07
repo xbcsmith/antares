@@ -1190,6 +1190,7 @@ fn resolve_imported_material(material: &ParsedMtlMaterial) -> Option<ResolvedImp
             roughness,
             emissive,
             alpha_mode,
+            ..Default::default()
         },
         texture_path,
         texture_source_path,

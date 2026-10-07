@@ -1138,6 +1138,7 @@ impl ItemMeshDescriptor {
                 roughness: 1.0,
                 emissive: None,
                 alpha_mode: AlphaMode::Blend,
+                ..Default::default()
             }),
             texture_path: None,
         }
@@ -1193,6 +1194,7 @@ impl ItemMeshDescriptor {
                 roughness: 0.1,
                 emissive,
                 alpha_mode: AlphaMode::Opaque,
+                ..Default::default()
             }),
             texture_path: None,
         }
@@ -1796,6 +1798,7 @@ impl ItemMeshDescriptor {
             roughness,
             emissive,
             alpha_mode: AlphaMode::Opaque,
+            ..Default::default()
         }
     }
 }

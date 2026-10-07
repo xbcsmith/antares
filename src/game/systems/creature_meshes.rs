@@ -291,21 +291,25 @@ pub fn create_material_from_color(color: [f32; 4]) -> StandardMaterial {
 ///
 /// # Examples
 ///
-/// ```
-/// use antares::game::systems::creature_meshes::material_definition_to_bevy;
-/// use antares::domain::visual::{MaterialDefinition, AlphaMode};
-///
+/// ```no_run
+/// # use bevy::prelude::*;
+/// # use antares::game::systems::creature_meshes::material_definition_to_bevy;
+/// # use antares::domain::visual::{MaterialDefinition, AlphaMode};
+/// # let asset_server: AssetServer = unimplemented!();
 /// let material_def = MaterialDefinition {
 ///     base_color: [0.8, 0.8, 0.8, 1.0],
 ///     metallic: 1.0,
 ///     roughness: 0.2,
 ///     emissive: None,
 ///     alpha_mode: AlphaMode::Opaque,
+///     ..Default::default()
 /// };
-///
-/// let bevy_material = material_definition_to_bevy(&material_def);
+/// let bevy_material = material_definition_to_bevy(&material_def, &asset_server);
 /// ```
-pub fn material_definition_to_bevy(material_def: &MaterialDefinition) -> StandardMaterial {
+pub fn material_definition_to_bevy(
+    material_def: &MaterialDefinition,
+    asset_server: &AssetServer,
+) -> StandardMaterial {
     let base_color = Color::srgba(
         material_def.base_color[0],
         material_def.base_color[1],
@@ -331,6 +335,22 @@ pub fn material_definition_to_bevy(material_def: &MaterialDefinition) -> Standar
         perceptual_roughness: material_def.roughness,
         emissive,
         alpha_mode,
+        normal_map_texture: material_def
+            .normal_map_path
+            .as_ref()
+            .map(|p| asset_server.load(p.clone())),
+        occlusion_texture: material_def
+            .occlusion_map_path
+            .as_ref()
+            .map(|p| asset_server.load(p.clone())),
+        metallic_roughness_texture: material_def
+            .metallic_roughness_map_path
+            .as_ref()
+            .map(|p| asset_server.load(p.clone())),
+        emissive_texture: material_def
+            .emissive_map_path
+            .as_ref()
+            .map(|p| asset_server.load(p.clone())),
         ..Default::default()
     }
 }
@@ -352,24 +372,26 @@ pub fn material_definition_to_bevy(material_def: &MaterialDefinition) -> Standar
 ///
 /// # Examples
 ///
-/// ```
-/// use antares::game::systems::creature_meshes::create_material_with_texture;
-/// use antares::domain::visual::MaterialDefinition;
-/// use bevy::prelude::*;
-///
+/// ```no_run
+/// # use bevy::prelude::*;
+/// # use antares::game::systems::creature_meshes::create_material_with_texture;
+/// # use antares::domain::visual::MaterialDefinition;
+/// # let asset_server: AssetServer = unimplemented!();
 /// fn apply_texture(
 ///     texture_handle: Handle<Image>,
 ///     material_def: Option<&MaterialDefinition>,
+///     asset_server: &AssetServer,
 /// ) -> StandardMaterial {
-///     create_material_with_texture(texture_handle, material_def)
+///     create_material_with_texture(texture_handle, material_def, asset_server)
 /// }
 /// ```
 pub fn create_material_with_texture(
     texture: Handle<Image>,
     material_def: Option<&MaterialDefinition>,
+    asset_server: &AssetServer,
 ) -> StandardMaterial {
     let mut material = if let Some(def) = material_def {
-        material_definition_to_bevy(def)
+        material_definition_to_bevy(def, asset_server)
     } else {
         StandardMaterial {
             perceptual_roughness: 0.8,
@@ -485,13 +507,14 @@ pub fn texture_loading_system(
                         let material = create_material_with_texture(
                             texture_handle,
                             mesh_def.material.as_ref(),
+                            &asset_server,
                         );
 
                         // Update the material handle
                         material_handle.0 = materials.add(material);
                     } else if let Some(ref material_def) = mesh_def.material {
                         // No texture, but has material definition - apply PBR properties
-                        let material = material_definition_to_bevy(material_def);
+                        let material = material_definition_to_bevy(material_def, &asset_server);
                         material_handle.0 = materials.add(material);
                     }
                 } else {
@@ -713,15 +736,23 @@ mod tests {
 
     #[test]
     fn test_material_definition_to_bevy_basic() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+
         let material_def = MaterialDefinition {
             base_color: [0.5, 0.5, 0.5, 1.0],
             metallic: 0.8,
             roughness: 0.3,
             emissive: None,
             alpha_mode: DomainAlphaMode::Opaque,
+            ..Default::default()
         };
 
-        let bevy_material = material_definition_to_bevy(&material_def);
+        let bevy_material = {
+            let asset_server = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&material_def, asset_server)
+        };
 
         assert_eq!(bevy_material.metallic, 0.8);
         assert_eq!(bevy_material.perceptual_roughness, 0.3);
@@ -729,15 +760,23 @@ mod tests {
 
     #[test]
     fn test_material_definition_to_bevy_with_emissive() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+
         let material_def = MaterialDefinition {
             base_color: [1.0, 1.0, 1.0, 1.0],
             metallic: 0.0,
             roughness: 0.9,
             emissive: Some([1.0, 0.5, 0.0]),
             alpha_mode: DomainAlphaMode::Opaque,
+            ..Default::default()
         };
 
-        let bevy_material = material_definition_to_bevy(&material_def);
+        let bevy_material = {
+            let asset_server = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&material_def, asset_server)
+        };
 
         assert_eq!(bevy_material.emissive.red, 1.0);
         assert_eq!(bevy_material.emissive.green, 0.5);
@@ -746,12 +785,17 @@ mod tests {
 
     #[test]
     fn test_material_definition_to_bevy_alpha_modes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+
         let opaque = MaterialDefinition {
             base_color: [1.0, 1.0, 1.0, 1.0],
             metallic: 0.0,
             roughness: 0.5,
             emissive: None,
             alpha_mode: DomainAlphaMode::Opaque,
+            ..Default::default()
         };
 
         let blend = MaterialDefinition {
@@ -760,6 +804,7 @@ mod tests {
             roughness: 0.5,
             emissive: None,
             alpha_mode: DomainAlphaMode::Blend,
+            ..Default::default()
         };
 
         let mask = MaterialDefinition {
@@ -768,39 +813,117 @@ mod tests {
             roughness: 0.5,
             emissive: None,
             alpha_mode: DomainAlphaMode::Mask,
+            ..Default::default()
         };
 
+        let opaque_mat = {
+            let as_ref = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&opaque, as_ref)
+        };
+        let blend_mat = {
+            let as_ref = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&blend, as_ref)
+        };
+        let mask_mat = {
+            let as_ref = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&mask, as_ref)
+        };
         assert!(matches!(
-            material_definition_to_bevy(&opaque).alpha_mode,
+            opaque_mat.alpha_mode,
             bevy::prelude::AlphaMode::Opaque
         ));
         assert!(matches!(
-            material_definition_to_bevy(&blend).alpha_mode,
+            blend_mat.alpha_mode,
             bevy::prelude::AlphaMode::Blend
         ));
         assert!(matches!(
-            material_definition_to_bevy(&mask).alpha_mode,
+            mask_mat.alpha_mode,
             bevy::prelude::AlphaMode::Mask(_)
         ));
     }
 
     #[test]
     fn test_material_definition_to_bevy_base_color() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+
         let material_def = MaterialDefinition {
             base_color: [0.2, 0.4, 0.6, 0.8],
             metallic: 0.0,
             roughness: 0.5,
             emissive: None,
             alpha_mode: DomainAlphaMode::Opaque,
+            ..Default::default()
         };
 
-        let bevy_material = material_definition_to_bevy(&material_def);
+        let bevy_material = {
+            let asset_server = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&material_def, asset_server)
+        };
         let color = bevy_material.base_color.to_srgba();
 
         assert!((color.red - 0.2).abs() < 0.01);
         assert!((color.green - 0.4).abs() < 0.01);
         assert!((color.blue - 0.6).abs() < 0.01);
         assert!((color.alpha - 0.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_material_definition_normal_map_sets_bevy_normal_map_texture() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Image>();
+
+        let material_def = MaterialDefinition {
+            normal_map_path: Some("assets/textures/normal.png".to_string()),
+            ..Default::default()
+        };
+
+        let bevy_material = {
+            let asset_server = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&material_def, asset_server)
+        };
+
+        assert!(
+            bevy_material.normal_map_texture.is_some(),
+            "normal_map_texture should be Some when normal_map_path is set"
+        );
+    }
+
+    #[test]
+    fn test_material_definition_no_normal_map_leaves_field_none() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Image>();
+
+        let material_def = MaterialDefinition {
+            ..Default::default()
+        };
+
+        let bevy_material = {
+            let asset_server = app.world().resource::<AssetServer>();
+            material_definition_to_bevy(&material_def, asset_server)
+        };
+
+        assert!(
+            bevy_material.normal_map_texture.is_none(),
+            "normal_map_texture should be None when normal_map_path is not set"
+        );
+        assert!(
+            bevy_material.occlusion_texture.is_none(),
+            "occlusion_texture should be None"
+        );
+        assert!(
+            bevy_material.metallic_roughness_texture.is_none(),
+            "metallic_roughness_texture should be None"
+        );
+        assert!(
+            bevy_material.emissive_texture.is_none(),
+            "emissive_texture should be None"
+        );
     }
 
     #[test]

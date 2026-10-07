@@ -288,6 +288,7 @@ pub fn spawn_dropped_item_system(
     mut events: MessageReader<ItemDroppedEvent>,
     content: Option<Res<GameContent>>,
     global_state: Option<Res<GlobalState>>,
+    asset_server: Res<AssetServer>,
     glb_cache: Option<Res<GlbHandleCache>>,
 ) {
     let Some(content) = content else {
@@ -448,6 +449,7 @@ pub fn spawn_dropped_item_system(
             &creature_def,
             &mut meshes,
             &mut materials,
+            &asset_server,
             world_pos,
             None, // use creature definition scale
             None, // no animation

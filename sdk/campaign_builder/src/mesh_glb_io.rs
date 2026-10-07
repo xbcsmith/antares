@@ -51,6 +51,24 @@ use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+/// Identifies which PBR channel a texture payload belongs to.
+///
+/// Used in `ImportedGlbMesh::texture_payloads` to associate each extracted
+/// texture with the PBR channel it encodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextureKind {
+    /// sRGB base-color / albedo texture.
+    BaseColor,
+    /// Tangent-space normal map.
+    NormalMap,
+    /// Ambient-occlusion map.
+    OcclusionMap,
+    /// Combined metallic (B) / roughness (G) texture.
+    MetallicRoughness,
+    /// Emissive colour texture.
+    Emissive,
+}
+
 const TEXTURED_GLB_NEUTRAL_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 const TEXTURED_GLB_DEFAULT_METALLIC: f32 = 0.0;
 const TEXTURED_GLB_DEFAULT_ROUGHNESS: f32 = 0.8;
@@ -179,13 +197,11 @@ pub struct ImportedGlbScene {
     /// `true` if the document contains any animation clip definitions.
     pub has_animations: bool,
 
-    /// `true` if any material in the document uses PBR texture channels that
-    /// Antares does not support: `normalTexture`, `occlusionTexture`, or
-    /// `pbrMetallicRoughness.metallicRoughnessTexture`.
+    /// Always `false` as of Phase 4: all standard PBR texture channels
+    /// (`normalTexture`, `occlusionTexture`, `pbrMetallicRoughness.metallicRoughnessTexture`,
+    /// `emissiveTexture`) are now fully extracted into [`ImportedGlbMesh::texture_payloads`].
     ///
-    /// These channels are detected but **not** imported — their texture data is
-    /// silently ignored.  The importer UI surfaces this flag in the metadata
-    /// status message so users know what was skipped.
+    /// Retained for API stability; may be removed in a future cleanup phase.
     pub has_unsupported_pbr_channels: bool,
 }
 
@@ -198,9 +214,12 @@ pub struct ImportedGlbMesh {
     /// Converted mesh geometry and material ready for Antares use.
     pub mesh_def: MeshDefinition,
 
-    /// Embedded base-color texture payload, or `None` when the primitive has no
-    /// base-color texture.
-    pub texture_payload: Option<ImportedGlbTexturePayload>,
+    /// PBR texture payloads extracted from this primitive's material.
+    ///
+    /// Contains entries for each PBR channel that has an embedded texture in the
+    /// GLB (base colour, normal map, ambient occlusion, metallic-roughness,
+    /// emissive). Empty when the primitive's material has no embedded textures.
+    pub texture_payloads: Vec<(TextureKind, ImportedGlbTexturePayload)>,
 
     /// Name of the glTF node that owns this mesh, if present.
     pub node_name: Option<String>,
@@ -356,15 +375,8 @@ pub(crate) fn import_glb_scene_from_bytes(
     let embedded_image_count = gltf.document.images().count();
     let has_skinning = gltf.document.skins().count() > 0;
     let has_animations = gltf.document.animations().count() > 0;
-    // Detect unsupported PBR texture channels across all materials.
-    // normalTexture, occlusionTexture, and metallicRoughnessTexture are not
-    // mapped to Antares domain fields; set a flag so the UI can warn the user.
-    let has_unsupported_pbr_channels = gltf.document.materials().any(|mat| {
-        let pbr = mat.pbr_metallic_roughness();
-        mat.normal_texture().is_some()
-            || mat.occlusion_texture().is_some()
-            || pbr.metallic_roughness_texture().is_some()
-    });
+    // All standard PBR channels are now extracted — flag is always false.
+    let has_unsupported_pbr_channels = false;
 
     // ── Step 5: depth-first node traversal ───────────────────────────────
     let mut imported_meshes: Vec<ImportedGlbMesh> = Vec::new();
@@ -395,11 +407,54 @@ pub(crate) fn import_glb_scene_from_bytes(
                     prim_index,
                 )?;
 
-                let texture_payload = extract_base_color_texture_payload(&primitive, blob)?;
+                let mut texture_payloads: Vec<(TextureKind, ImportedGlbTexturePayload)> =
+                    Vec::new();
+
+                // Base colour
+                if let Some(payload) = extract_base_color_texture_payload(&primitive, blob)? {
+                    texture_payloads.push((TextureKind::BaseColor, payload));
+                }
+
+                // Normal map
+                let mat_ref = primitive.material();
+                if let Some(normal_tex) = mat_ref.normal_texture() {
+                    if let Some(payload) =
+                        extract_image_payload(normal_tex.texture().source(), blob)?
+                    {
+                        texture_payloads.push((TextureKind::NormalMap, payload));
+                    }
+                }
+
+                // Occlusion
+                if let Some(occlusion_tex) = mat_ref.occlusion_texture() {
+                    if let Some(payload) =
+                        extract_image_payload(occlusion_tex.texture().source(), blob)?
+                    {
+                        texture_payloads.push((TextureKind::OcclusionMap, payload));
+                    }
+                }
+
+                // Metallic-roughness
+                let pbr_ref = mat_ref.pbr_metallic_roughness();
+                if let Some(mr_info) = pbr_ref.metallic_roughness_texture() {
+                    if let Some(payload) = extract_image_payload(mr_info.texture().source(), blob)?
+                    {
+                        texture_payloads.push((TextureKind::MetallicRoughness, payload));
+                    }
+                }
+
+                // Emissive
+                if let Some(emissive_info) = mat_ref.emissive_texture() {
+                    if let Some(payload) =
+                        extract_image_payload(emissive_info.texture().source(), blob)?
+                    {
+                        texture_payloads.push((TextureKind::Emissive, payload));
+                    }
+                }
 
                 imported_meshes.push(ImportedGlbMesh {
                     mesh_def,
-                    texture_payload,
+                    texture_payloads,
                     node_name: node_name.clone(),
                     material_name,
                     node_transform,
@@ -606,6 +661,60 @@ fn extract_base_color_texture_payload<'doc>(
     }
 }
 
+/// Extracts a texture payload from a glTF image, reading from the GLB blob.
+///
+/// Returns `None` when `image_opt` is `None`. Returns an error for external
+/// URI image sources (which should already have been rejected during
+/// pre-validation).
+fn extract_image_payload<'doc>(
+    image: gltf::image::Image<'doc>,
+    blob: &'doc [u8],
+) -> Result<Option<ImportedGlbTexturePayload>, GlbImportError> {
+    let image_index = image.index();
+    let source_label = image
+        .name()
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("image_{image_index}"));
+
+    match image.source() {
+        gltf::image::Source::View { view, mime_type } => {
+            if view.buffer().index() != 0 {
+                return Err(GlbImportError::MissingBuffer {
+                    detail: format!(
+                        "image {image_index} references buffer {} but only buffer 0 \
+                         (GLB blob) is supported",
+                        view.buffer().index()
+                    ),
+                });
+            }
+            let start = view.offset();
+            let end = start + view.length();
+            let raw_bytes = blob
+                .get(start..end)
+                .ok_or_else(|| GlbImportError::MissingBuffer {
+                    detail: format!(
+                        "image {image_index} buffer view [{start}..{end}] is out of \
+                         bounds (blob length {})",
+                        blob.len()
+                    ),
+                })?;
+            let file_name_hint = sanitize_glb_file_name(&source_label, Some(mime_type));
+            Ok(Some(ImportedGlbTexturePayload {
+                source_label,
+                file_name_hint,
+                bytes: raw_bytes.to_vec(),
+                mime_type: Some(mime_type.to_string()),
+            }))
+        }
+        gltf::image::Source::Uri { uri, .. } => Err(GlbImportError::MissingBuffer {
+            detail: format!(
+                "Embedded textures required; external URI textures are not \
+                 supported (found URI: {uri})"
+            ),
+        }),
+    }
+}
+
 /// Map a glTF material's PBR fields to a [`MaterialDefinition`].
 ///
 /// Mapped fields:
@@ -665,6 +774,7 @@ fn convert_gltf_material(
         },
         emissive: emissive_opt,
         alpha_mode,
+        ..Default::default()
     }
 }
 
@@ -1223,9 +1333,11 @@ mod tests {
         assert_eq!(scene.embedded_image_count, 1);
         let mesh = &scene.meshes[0];
         let payload = mesh
-            .texture_payload
-            .as_ref()
-            .expect("texture_payload must be Some");
+            .texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::BaseColor)
+            .map(|(_, p)| p)
+            .expect("texture_payloads must contain a BaseColor entry");
 
         assert_eq!(
             payload.bytes, FAKE_IMAGE_BYTES,
@@ -1282,17 +1394,17 @@ mod tests {
         );
 
         let label_0 = scene.meshes[0]
-            .texture_payload
-            .as_ref()
-            .expect("primitive 0 must have texture_payload")
-            .source_label
-            .clone();
+            .texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::BaseColor)
+            .map(|(_, p)| p.source_label.clone())
+            .expect("primitive 0 must have BaseColor texture_payload");
         let label_1 = scene.meshes[1]
-            .texture_payload
-            .as_ref()
-            .expect("primitive 1 must have texture_payload")
-            .source_label
-            .clone();
+            .texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::BaseColor)
+            .map(|(_, p)| p.source_label.clone())
+            .expect("primitive 1 must have BaseColor texture_payload");
 
         assert_ne!(
             label_0, label_1,
@@ -1325,8 +1437,8 @@ mod tests {
 
         let mesh = &scene.meshes[0];
         assert!(
-            mesh.texture_payload.is_none(),
-            "texture_payload should be None when no base-color texture is present"
+            mesh.texture_payloads.is_empty(),
+            "texture_payloads should be empty when no base-color texture is present"
         );
         assert!(
             mesh.mesh_def.texture_path.is_none(),
@@ -1477,18 +1589,18 @@ mod tests {
         );
     }
 
-    /// A GLB whose material has `normalTexture` must set
-    /// `ImportedGlbScene::has_unsupported_pbr_channels = true` and geometry
+    /// After Phase 4, a GLB with `normalTexture` must NOT set
+    /// `has_unsupported_pbr_channels` (it is always `false`), and geometry
     /// must still import normally.
     #[test]
-    fn test_glb_normal_texture_sets_unsupported_pbr_channels_flag() {
+    fn test_glb_normal_texture_pbr_channels_flag_is_false() {
         let glb = build_normal_texture_glb();
         let scene =
             import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
 
         assert!(
-            scene.has_unsupported_pbr_channels,
-            "normalTexture must set has_unsupported_pbr_channels=true"
+            !scene.has_unsupported_pbr_channels,
+            "normalTexture must not set has_unsupported_pbr_channels (always false in Phase 4)"
         );
         assert_eq!(
             scene.meshes.len(),
@@ -1497,7 +1609,8 @@ mod tests {
         );
     }
 
-    /// A GLB whose material has `occlusionTexture` must also set the flag.
+    /// After Phase 4, a GLB with `occlusionTexture` must NOT set the flag
+    /// (it is always `false`). Geometry must still import normally.
     #[test]
     fn test_glb_occlusion_texture_sets_unsupported_pbr_channels_flag() {
         let glb = build_occlusion_texture_glb();
@@ -1505,8 +1618,8 @@ mod tests {
             import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
 
         assert!(
-            scene.has_unsupported_pbr_channels,
-            "occlusionTexture must set has_unsupported_pbr_channels=true"
+            !scene.has_unsupported_pbr_channels,
+            "occlusionTexture must not set has_unsupported_pbr_channels (always false in Phase 4)"
         );
         assert_eq!(
             scene.meshes.len(),
@@ -1527,6 +1640,56 @@ mod tests {
             !scene.has_unsupported_pbr_channels,
             "a material with only color/metallic/roughness scalars must leave \
              has_unsupported_pbr_channels=false"
+        );
+    }
+
+    /// After Phase 4, a GLB with `normalTexture` must have its payload extracted
+    /// into `texture_payloads` as a `NormalMap` entry.
+    #[test]
+    fn test_import_glb_normal_texture_extracted_as_payload() {
+        let glb = build_normal_texture_glb();
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        assert_eq!(scene.meshes.len(), 1, "geometry must import with one mesh");
+        let normal_payload = scene.meshes[0]
+            .texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::NormalMap)
+            .map(|(_, p)| p);
+        assert!(
+            normal_payload.is_some(),
+            "texture_payloads must contain a NormalMap entry for a GLB with normalTexture"
+        );
+        let payload = normal_payload.unwrap();
+        assert!(
+            !payload.bytes.is_empty(),
+            "NormalMap payload must have non-empty bytes"
+        );
+    }
+
+    /// After Phase 4, a GLB with `occlusionTexture` must have its payload extracted
+    /// into `texture_payloads` as an `OcclusionMap` entry.
+    #[test]
+    fn test_import_glb_occlusion_texture_extracted_as_payload() {
+        let glb = build_occlusion_texture_glb();
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        assert_eq!(scene.meshes.len(), 1, "geometry must import with one mesh");
+        let occlusion_payload = scene.meshes[0]
+            .texture_payloads
+            .iter()
+            .find(|(k, _)| *k == TextureKind::OcclusionMap)
+            .map(|(_, p)| p);
+        assert!(
+            occlusion_payload.is_some(),
+            "texture_payloads must contain an OcclusionMap entry for a GLB with occlusionTexture"
+        );
+        let payload = occlusion_payload.unwrap();
+        assert!(
+            !payload.bytes.is_empty(),
+            "OcclusionMap payload must have non-empty bytes"
         );
     }
 

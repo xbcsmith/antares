@@ -208,6 +208,7 @@ impl Default for MeshDefinition {
 ///     roughness: 0.2,
 ///     emissive: None,
 ///     alpha_mode: AlphaMode::Opaque,
+///     ..Default::default()
 /// };
 ///
 /// // Glowing emissive material
@@ -217,6 +218,7 @@ impl Default for MeshDefinition {
 ///     roughness: 0.9,
 ///     emissive: Some([1.0, 0.5, 0.0]),
 ///     alpha_mode: AlphaMode::Opaque,
+///     ..Default::default()
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -241,6 +243,30 @@ pub struct MaterialDefinition {
     /// Alpha blending mode
     #[serde(default)]
     pub alpha_mode: AlphaMode,
+
+    /// Campaign-relative path to a tangent-space normal map texture.
+    ///
+    /// Must start with `"assets/"` when `Some`.
+    #[serde(default)]
+    pub normal_map_path: Option<String>,
+
+    /// Campaign-relative path to an ambient-occlusion texture.
+    ///
+    /// Must start with `"assets/"` when `Some`.
+    #[serde(default)]
+    pub occlusion_map_path: Option<String>,
+
+    /// Campaign-relative path to a combined metallic (B channel) / roughness (G channel) texture.
+    ///
+    /// Must start with `"assets/"` when `Some`.
+    #[serde(default)]
+    pub metallic_roughness_map_path: Option<String>,
+
+    /// Campaign-relative path to an emissive texture.
+    ///
+    /// Must start with `"assets/"` when `Some`.
+    #[serde(default)]
+    pub emissive_map_path: Option<String>,
 }
 
 impl Default for MaterialDefinition {
@@ -251,6 +277,10 @@ impl Default for MaterialDefinition {
             roughness: default_roughness(),
             emissive: None,
             alpha_mode: AlphaMode::Opaque,
+            normal_map_path: None,
+            occlusion_map_path: None,
+            metallic_roughness_map_path: None,
+            emissive_map_path: None,
         }
     }
 }

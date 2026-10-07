@@ -198,10 +198,172 @@ spawner attaches the GLB child hierarchy asynchronously.
 
 ---
 
-Added a `RawGlb` export mode to the Campaign Builder importer. When selected, the
-source `.glb` is copied directly into `assets/meshes/{type}/` with a companion
-`CreatureDefinition` `.ron` file whose `glb_path` is set and `meshes` is empty.
-The preview panel now loads and shows geometry for GLB-only creatures.
+## GLTF 2.0 Support — Phase 4: Full PBR Material Pipeline
+
+Extended `MaterialDefinition` with four optional texture-map path fields and
+threaded `AssetServer` through the material-creation call stack so those paths
+are resolved into Bevy `Handle<Image>` values at spawn time.
+
+### 4.1 `MaterialDefinition` struct extension (`src/domain/visual/mod.rs`)
+
+- Added four `#[serde(default)] pub … : Option<String>` fields:
+  - `normal_map_path` — tangent-space normal map
+  - `occlusion_map_path` — ambient-occlusion map
+  - `metallic_roughness_map_path` — combined metallic (B) / roughness (G) map
+  - `emissive_map_path` — emissive texture
+- Updated `Default` impl to set all four to `None`.
+- Fixed the two doc-examples in the struct comment to use `..Default::default()`
+  so they remain compilable as new fields are added.
+
+### 4.2 Texture-path validation (`src/domain/visual/mesh_validation.rs`)
+
+- Added `use super::MaterialDefinition;` import.
+- Added `pub fn validate_material_texture_paths(mat: &MaterialDefinition)`:
+  iterates the four path fields and returns `ValidationError::Structural` for
+  any path that does not start with `"assets/"`.
+- Called from `validate_mesh_definition()` when `mesh.material` is `Some`.
+- New tests: `test_validate_material_texture_paths_valid`,
+  `test_validate_material_texture_paths_invalid_prefix`.
+
+### 4.3 PBR texture binding (`src/game/systems/creature_meshes.rs`)
+
+- `material_definition_to_bevy()` gains `asset_server: &AssetServer` parameter.
+  Calls `asset_server.load(p.clone())` for each `Some` path field to produce the
+  four `Option<Handle<Image>>` fields on `StandardMaterial`:
+  `normal_map_texture`, `occlusion_texture`, `metallic_roughness_texture`,
+  `emissive_texture`.
+- `create_material_with_texture()` gains the same `asset_server: &AssetServer`
+  parameter; forwards it to `material_definition_to_bevy()`.
+- `texture_loading_system()` call-sites updated to pass `&asset_server`.
+- Doc-examples converted to `no_run` (they require a live `AssetServer`).
+- Existing 4 `test_material_definition_to_bevy_*` tests updated to use a
+  `MinimalPlugins + AssetPlugin` app and call `app.world().resource::<AssetServer>()`.
+- New tests (also require `init_asset::<Image>()`):
+  `test_material_definition_normal_map_sets_bevy_normal_map_texture`,
+  `test_material_definition_no_normal_map_leaves_field_none`.
+
+### 4.4 `spawn_creature()` signature update (`src/game/systems/creature_spawning.rs`)
+
+- Added `asset_server: &AssetServer` after `materials: &mut Assets<StandardMaterial>`.
+- Module-level and function-level doc-examples converted to `no_run`;
+  `asset_server: Res<AssetServer>` shown in the example signature.
+- Integration tests (`test_spawn_creature_with_glb_path_uses_scene_root`,
+  `test_spawn_creature_without_glb_path_uses_mesh_bundle`) updated to add
+  `asset_server: Res<AssetServer>` to `run_system_once` closures.
+- `test_spawn_creature_with_material` test: added `..Default::default()` to
+  `MaterialDefinition` literal.
+
+### 4.5 `landscape_material()` and `spawn_map()` call-sites (`src/game/systems/map.rs`)
+
+- `landscape_material()` already had `asset_server: &AssetServer`; its
+  `create_material_with_texture` and `material_definition_to_bevy` calls updated
+  to pass `asset_server`.
+- All three `spawn_creature()` call-sites in `spawn_map()` updated to pass
+  `&asset_server` (NPC, encounter, recruitable-character paths).
+
+### 4.6 `spawn_dropped_item_system()` (`src/game/systems/item_world_events.rs`)
+
+- Added `asset_server: Res<AssetServer>` system parameter.
+- `spawn_creature()` call updated to pass `&asset_server`.
+
+### 4.7 Exhaustive-struct-literal fixes
+
+- `src/domain/visual/item_mesh.rs` (3 sites): `build_shadow_quad`,
+  `build_charge_gem`, `make_material`.
+- `src/domain/world/landscape.rs` (1 site): test fixture `write_mesh_registry_fixture`.
+
+### Quality gates (final run)
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — zero errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings.
+- `cargo nextest run --all-features` — **5622 passed, 8 skipped, 0 failed**.
+
+---
+
+## GLTF 2.0 Support — Phase 4 SDK: Full PBR Material Pipeline (Import Pipeline)
+
+Extended the SDK importer to extract and export all five standard PBR texture
+channels from embedded GLB materials: base-colour, normal map, ambient-occlusion,
+metallic-roughness, and emissive. All changes are confined to `sdk/`.
+
+### 4-SDK.1 `TextureKind` enum (`sdk/campaign_builder/src/mesh_glb_io.rs`)
+
+- Added `pub enum TextureKind { BaseColor, NormalMap, OcclusionMap, MetallicRoughness, Emissive }`.
+- Identifies which PBR channel a payload belongs to in `ImportedGlbMesh::texture_payloads`.
+
+### 4-SDK.2 `ImportedGlbMesh::texture_payloads` field rename
+
+- Renamed `texture_payload: Option<ImportedGlbTexturePayload>` to
+  `texture_payloads: Vec<(TextureKind, ImportedGlbTexturePayload)>`.
+- Allows multiple PBR channels per primitive.
+
+### 4-SDK.3 `extract_image_payload` helper
+
+- New private `fn extract_image_payload<'doc>(image, blob) -> Result<Option<ImportedGlbTexturePayload>, GlbImportError>`.
+- Reusable extraction logic for any glTF image source, shared by all PBR channels.
+
+### 4-SDK.4 Multi-channel extraction in `import_glb_scene_from_bytes`
+
+- Replaced single `extract_base_color_texture_payload` call with a five-channel
+  extraction loop (base-colour, normal, occlusion, metallic-roughness, emissive).
+- `has_unsupported_pbr_channels` is now always `false`; the detection block removed.
+- `ImportedGlbScene::has_unsupported_pbr_channels` doc updated accordingly.
+
+### 4-SDK.5 `ImportedMesh::texture_payloads` in `obj_importer.rs`
+
+- Renamed `ImportedMesh::texture_payload: Option<ImportedTexturePayload>` to
+  `texture_payloads: Vec<(TextureKind, ImportedTexturePayload)>`.
+- Updated `from_mesh_definition_with_color_source_and_texture_source`,
+  `from_mesh_definition_with_color_source`, `from_imported_obj_mesh`,
+  `from_imported_glb_mesh`, `is_texture_backed_mesh`, `auto_assign_colors`,
+  `load_imported_glb_scene` to use the new vec representation.
+- OBJ imports wrap the single base-colour payload in `vec![(TextureKind::BaseColor, …)]`.
+- GLB imports map all channels from `ImportedGlbMesh::texture_payloads` via
+  `into_iter().map(…)` preserving `TextureKind` keys.
+- Removed the `has_unsupported_pbr_channels` status branch from `load_imported_glb_scene`.
+
+### 4-SDK.6 PBR texture export loop in `copy_imported_textures_into_campaign`
+
+- Added a second loop over `state_mesh.texture_payloads` (filtering out `BaseColor`)
+  that writes each PBR channel payload to disk and sets the corresponding
+  `MaterialDefinition` field (`normal_map_path`, `occlusion_map_path`,
+  `metallic_roughness_map_path`, `emissive_map_path`) on the exported
+  `MeshDefinition`.
+- Uses the same content-hash deduplication as the base-colour loop.
+- Prefixes each output filename with the channel name (`normal_`, `occlusion_`, etc.).
+
+### 4-SDK.7 `is_texture_backed_importer_mesh` / `resolve_imported_texture_source` updates
+
+- Both now search `texture_payloads` for a `TextureKind::BaseColor` entry instead
+  of checking the old `texture_payload: Option<…>` field.
+
+### 4-SDK.8 `..Default::default()` spread in exhaustive `MaterialDefinition` literals
+
+- Fixed all `MaterialDefinition { … }` struct literals in the SDK to add
+  `..Default::default()` so they remain compilable as new fields are added:
+  `mesh_glb_io.rs` (1 site), `mesh_obj_io.rs` (1 site), `obj_importer.rs` (4 sites),
+  `obj_importer_ui.rs` (1 site), `material_editor.rs` (1 site).
+
+### 4-SDK.9 Test updates
+
+- `test_glb_normal_texture_sets_unsupported_pbr_channels_flag` renamed to
+  `test_glb_normal_texture_pbr_channels_flag_is_false`; assertion flipped to `!`.
+- `test_glb_occlusion_texture_sets_unsupported_pbr_channels_flag`: assertion flipped to `!`.
+- All tests referencing `texture_payload` updated to use `texture_payloads`.
+- Two new tests:
+  - `test_import_glb_normal_texture_extracted_as_payload`
+  - `test_import_glb_occlusion_texture_extracted_as_payload`
+
+### Quality gates (final run)
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — zero errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings.
+- `cargo nextest run --all-features` — **5622 passed, 8 skipped, 0 failed**.
+  source `.glb` is copied directly into `assets/meshes/{type}/` with a companion
+  `CreatureDefinition` `.ron` file whose `glb_path` is set and `meshes` is empty.
+  The preview panel now loads and shows geometry for GLB-only creatures.
 
 ### 2.1 `GlbExportMode` enum (`sdk/campaign_builder/src/obj_importer.rs`)
 
