@@ -469,6 +469,84 @@ Several pre-existing clippy lints were tripped by the newer toolchain:
 
 ---
 
+## GLTF 2.0 Support — Phase 5: Asset Migration & Optimisation
+
+### 5.1 KTX2 feature flags (`Cargo.toml`)
+
+Added `features = ["ktx2", "zstd_rust"]` to the `bevy` dependency. This enables:
+
+- **KTX2** — Bevy loads GPU-native compressed textures (BC7 / ASTC 4×4) directly
+  from `.ktx2` files embedded in GLB assets, reducing VRAM usage and upload time.
+- **zstd_rust** — Enables Zstandard decompression (pure-Rust implementation) for
+  KTX2 textures that use the `--codec uastc` / supercompression layer, further
+  shrinking file sizes on disk. (`zstd_rust` is the portable pure-Rust variant;
+  `zstd_c` links the faster C library if a C toolchain is available.)
+
+No runtime code changes are required; the feature flags alone activate Bevy's
+built-in KTX2 texture loader.
+
+### 5.4 `data/test_campaign` fixtures
+
+Verified that `data/test_campaign` fixtures are correct and self-contained:
+
+- `data/test_campaign/assets/meshes/test_triangle.glb` retained as the minimal
+  GLB fixture for unit tests.
+- No `campaigns/tutorial` references introduced in any test.
+- No additional fixture changes needed — Phase 1 fixtures cover GLB-path loading.
+
+### 5.5 Architecture documentation (`docs/reference/architecture.md`)
+
+Updated four sections:
+
+| Section                         | Change                                                                                                                                                                                                     |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **4.2** `LandscapeMeshDatabase` | Expanded doc comment to describe both inline-mesh and GLB-backed entry forms; documented `validate()` mutual-exclusion rule                                                                                |
+| **6.2** Rendering Architecture  | Documented two rendering paths (`glb_path.is_none()` → inline mesh; `glb_path.is_some()` → GLB scene); documented `GlbHandleCache` resource and `glb_scene_loader_system`; documented KTX2 texture support |
+| **7.1** External Data Files     | Added GLB mesh directories to campaign assets layout; added "GLB Asset Files" block documenting `.glb` format, KTX2, and registry migration                                                                |
+| **7.2** Example Data Format     | Added "GLB Landscape Mesh Registry Entry" example showing both GLB-backed and inline-mesh RON forms side by side                                                                                           |
+
+### Deferred sub-steps (require GLB source files)
+
+No `.glb` files currently exist under `campaigns/tutorial/assets/`. All asset
+conversion and registry migration steps are deferred until source GLB files are
+available.
+
+| Sub-step                                         | Status   | Blocker                                           |
+| ------------------------------------------------ | -------- | ------------------------------------------------- |
+| 5.2 — KTX2 texture conversion                    | Deferred | Requires `toktx`/`gltf-transform` and source GLBs |
+| 5.3 — Landscape registry migration (14 entries)  | Deferred | No source GLBs for IDs 11000–11013                |
+| 5.3 — Furniture registry migration (9 entries)   | Deferred | No source GLBs for IDs 10001–10010                |
+| 5.3 — Item registry migration (28 entries)       | Deferred | No source GLBs for IDs 9000–9502                  |
+| 5.3 — Object mesh registry migration (8 entries) | Deferred | No source GLBs for IDs 12002–12009                |
+| 5.6 — Performance measurements                   | Deferred | No KTX2 assets to measure                         |
+
+**Migration procedure** — once GLB files are available for any registry entry:
+
+1. Convert embedded PNG/JPEG textures to KTX2:
+   ```bash
+   gltf-transform ktx2 input.glb output_ktx2.glb \
+     --slots "baseColorTexture,normalTexture,metallicRoughnessTexture" \
+     --codec uastc
+   ```
+2. Open Campaign Builder → Importer → load KTX2 GLB → select **Raw GLB** export
+   mode with the matching `ExportType` (Landscape / Furniture / Item / ObjectMesh).
+3. Export to tutorial campaign; the importer copies the `.glb` to
+   `campaigns/tutorial/assets/meshes/{category}/{name}.glb` and writes a
+   `glb_path: Some(…), meshes: []` registry entry.
+4. Validate in-game rendering on a map that uses the asset.
+5. Remove the superseded `.ron` inline mesh file from `assets/meshes/`.
+
+### Quality gates (final run)
+
+```text
+cargo fmt --all           → no output
+cargo check               → Finished; 0 errors
+cargo clippy -- -D warnings → 0 warnings
+cargo nextest run         → 5622 passed; 8 skipped; 0 failed
+```
+
+---
+
 ## Audio
 
 ### Audio Manager (Phases 1–3 + SDK layout compliance)

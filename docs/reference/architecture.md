@@ -362,8 +362,17 @@ pub struct LandscapeDatabase {
 pub struct LandscapeMeshDatabase {
     /// Registry loaded from `data/landscape_mesh_registry.ron` using the shared
     /// `CreatureDefinition` / `MeshDefinition` visual asset format.
-    /// Validates mesh data plus `assets/` texture paths relative to the active
-    /// campaign root when a campaign directory is available.
+    ///
+    /// Each entry may be one of two forms:
+    /// - **Inline mesh**: `meshes` is non-empty, `glb_path` is `None`. Runtime uses
+    ///   `mesh_definition_to_bevy()` to build `Mesh3d` / `MeshMaterial3d` components.
+    /// - **GLB-backed**: `glb_path` is `Some("assets/meshes/…/foo.glb")`, `meshes` is
+    ///   empty. Runtime uses `GlbHandleCache` + Bevy GLTF loader to spawn a `SceneRoot`
+    ///   with fragment key `#SceneN` (where N = `glb_scene_index`, default 0).
+    ///
+    /// `validate()` accepts either form; a `CreatureDefinition` with both
+    /// `glb_path: Some(…)` and non-empty `meshes` is rejected as an error.
+    /// Validates texture paths relative to the active campaign root for inline entries.
     inner: CreatureDatabase,
 }
 
@@ -465,7 +474,7 @@ pub enum WaterFlowDirection { Still, North, South, East, West }
 #### 4.2.2 Wind Configuration
 
 `CampaignWindConfig` is loaded from `data/wind.ron` in the active campaign
-directory.  A missing file silently defaults to `wind_system: None`.
+directory. A missing file silently defaults to `wind_system: None`.
 
 ```rust
 /// Selects the grass wind animation algorithm.
@@ -2525,12 +2534,12 @@ The menu system provides in-game access to save/load, settings, and game control
 
 #### 6.2 Rendering Architecture
 
-**Current Choice: Bevy-Based 2D Rendering**
+**Current Choice: Bevy-Based 3D Rendering**
 
 - **Component-Based**: All game entities are Bevy components
 - **System-Based**: Rendering logic in Bevy systems
 - **ECS Integration**: Clean separation from domain logic
-- **Future-Ready**: Easy to add 3D rendering or other visual upgrades
+- **Future-Ready**: Easy to add visual upgrades via GLB assets and KTX2 textures
 
 **Advantages of Bevy ECS:**
 
@@ -2539,6 +2548,48 @@ The menu system provides in-game access to save/load, settings, and game control
 - Built-in asset management and loading
 - Extensive ecosystem and active development
 - Rust-first design with excellent ergonomics
+
+**Imported Mesh Rendering Paths**
+
+Spawning any registered mesh (creature, landscape, furniture, item, object) follows
+one of two branches determined by the `CreatureDefinition.glb_path` field:
+
+| Field state          | Rendering path | Components spawned                                          |
+| -------------------- | -------------- | ----------------------------------------------------------- |
+| `glb_path.is_none()` | Inline mesh    | `Mesh3d` + `MeshMaterial3d` via `mesh_definition_to_bevy()` |
+| `glb_path.is_some()` | GLB scene      | `SceneRoot` loaded by Bevy's GLTF loader                    |
+
+**GLB rendering path details:**
+
+1. `glb_scene_loader_system` runs every frame and populates `GlbHandleCache`
+   with `Handle<WorldAsset>` entries for each unique GLB path in the scene.
+2. The asset key uses GLTF scene-fragment syntax:
+   `GltfAssetLabel::Scene(scene_index).from_asset(glb_path)` where
+   `scene_index` = `CreatureDefinition.glb_scene_index` (default 0).
+3. Spawn functions (`spawn_creature()`, `spawn_landscape_mesh()`,
+   `spawn_dropped_item_system()`, and map mesh spawners) check
+   `GlbHandleCache.scenes.get(glb_path)` and, when the handle is ready,
+   insert a `SceneRoot` component. PBR materials and animations within the
+   GLB are owned by Bevy's GLTF scene hierarchy; no manual material
+   construction is needed.
+4. KTX2-encoded textures embedded in GLB files are supported natively when
+   Bevy is compiled with `features = ["ktx2", "zstd_rust"]`. `ktx2` enables
+   GPU-native compression (BC7/ASTC); `zstd_rust` adds Zstandard decompression
+   for supercompressed KTX2 payloads. This reduces VRAM usage and load times.
+
+**`GlbHandleCache` resource** (`src/game/resources/glb_assets.rs`):
+
+```rust
+pub struct GlbHandleCache {
+    /// Maps campaign-relative GLB path → Bevy Handle<WorldAsset>.
+    /// Keys match the raw `glb_path` string from `CreatureDefinition`
+    /// (e.g. `"assets/meshes/landscape/tree/acacia.glb"`).
+    pub scenes: HashMap<String, Handle<WorldAsset>>,
+}
+```
+
+The resource is inserted by `antares.rs` during app startup and updated by
+`glb_scene_loader_system` as assets are discovered.
 
 #### 6.3 SDK Tooling
 
@@ -2594,7 +2645,13 @@ campaigns/                            # Campaign-specific content
     │   │   └── tutorial_dungeon.ron
     │   └── dialogues.ron          # Campaign dialogues
     └── assets/                      # Campaign assets
-        ├── meshes/landscape/        # Imported landscape mesh RON files
+        ├── meshes/landscape/        # Landscape mesh files (.ron inline or .glb)
+        │   ├── tree/                # Tree category GLBs (e.g. acacia.glb)
+        │   ├── rock/                # Rock category GLBs
+        │   └── brush/               # Brush/shrub category GLBs
+        ├── meshes/furniture/        # Furniture mesh files (.ron or .glb)
+        ├── meshes/items/            # Item mesh files (.ron or .glb)
+        ├── meshes/objects/          # Object mesh files (.ron or .glb)
         ├── textures/trees/          # Canonical tree/foliage texture set
         ├── textures/landscape/      # Importer-copied landscape textures
         ├── textures/                # Custom textures
@@ -2609,6 +2666,16 @@ campaigns/                            # Campaign-specific content
 - **Schema validation** through the SDK validation tools
 - **Cross-reference validation** ensures data integrity
 - **Campaign overrides** allow flexible content modification
+
+**GLB Asset Files:**
+
+- **Binary GLTF format** (`.glb`) for 3D mesh and texture assets
+- **KTX2-encoded textures** within GLB files reduce VRAM and load times
+- **Registry entries** in RON files reference GLB assets via `glb_path` field
+- **Validation** checks that `glb_path` starts with `"assets/"` and is mutually
+  exclusive with inline `meshes`
+- **Migration**: existing `.ron` inline mesh entries can be replaced with
+  `.glb` entries using the Campaign Builder Raw GLB export mode
 
 **Content Loading:**
 
@@ -2659,6 +2726,45 @@ campaigns/                            # Campaign-specific content
         scaling: Table(ranks_by_level: [0, 0, 1, 1, 2, 3, 5, 8]),
         max_rank: 40,
         is_trainable: true,
+    ),
+]
+```
+
+**GLB Landscape Mesh Registry Entry:**
+
+```ron
+// landscape_mesh_registry.ron — GLB-backed entry
+[
+    // GLB-backed entry: glb_path set, meshes empty
+    (
+        id: 11000,
+        name: "Acacia",
+        glb_path: Some("assets/meshes/landscape/tree/acacia.glb"),
+        glb_scene_index: 0,
+        meshes: [],
+        mesh_transforms: [],
+        scale: 1.0,
+        color_tint: None,
+    ),
+    // Inline-mesh entry: glb_path absent, meshes present
+    (
+        id: 11006,
+        name: "Pile of Rocks",
+        meshes: [
+            MeshDefinition(
+                vertices: [...],
+                indices: [...],
+                color: [0.6, 0.55, 0.5, 1.0],
+            ),
+        ],
+        mesh_transforms: [
+            MeshTransform(
+                translation: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0],
+                scale: 1.0,
+            ),
+        ],
+        scale: 1.0,
     ),
 ]
 ```
@@ -4130,19 +4236,19 @@ The Antares architecture has evolved significantly from its initial design:
   vertex stage; clip position recomputed after world-space displacement.
 - `GrassWindExtension` / `GrassMaterial` (`src/game/systems/advanced_grass.rs`) —
   `ExtendedMaterial<StandardMaterial, GrassWindExtension>` type alias; migrated
-  across all grass spawn, cache, and batch sites.  `WindNoiseTexture` Bevy resource
+  across all grass spawn, cache, and batch sites. `WindNoiseTexture` Bevy resource
   holds the 512×512 Perlin noise image (or 1×1 white placeholder).
-- `assets/shaders/grass_instanced.wgsl` — Instanced grass vertex shader.  Vertex
-  buffer 0: per-vertex blade geometry (position, normal, UV, color).  Vertex buffer
+- `assets/shaders/grass_instanced.wgsl` — Instanced grass vertex shader. Vertex
+  buffer 0: per-vertex blade geometry (position, normal, UV, color). Vertex buffer
   1: per-instance `GrassInstance` struct at `@location(8-12)` (world position, wind
-  phase, surface normal, scale, Y-rotation).  Wind bind group at `@group(3)`.
+  phase, surface normal, scale, Y-rotation). Wind bind group at `@group(3)`.
   Reproduces Sine/Perlin wind paths and the three-stop vertex-color gradient.
 - `src/game/systems/grass_instancing.rs` (new module) — full GPU instancing pipeline:
   `GrassRenderMode` resource (`PerEntity` / `Instanced`, default `Instanced`),
   `GrassInstanceGpu` (48-byte `repr(C)` bytemuck struct), `GrassInstancedPipeline`
   (`SpecializedMeshPipeline` wrapping `MeshPipeline`), `DrawGrassInstanced` render
-  command chain, `GrassInstancingPlugin`.  Uses `BinnedRenderPhaseType::NonMesh` to
-  bypass GPU preprocessing.  `GrassRenderWorldAvailable` marker prevents
+  command chain, `GrassInstancingPlugin`. Uses `BinnedRenderPhaseType::NonMesh` to
+  bypass GPU preprocessing. `GrassRenderWorldAvailable` marker prevents
   `SyncComponentPlugin` hook panic in MinimalPlugins test environments.
 - `bytemuck = { version = "1", features = ["derive"] }` added as direct dependency.
 - SDK `ContentDatabase.wind` field documents the per-campaign wind config alongside
