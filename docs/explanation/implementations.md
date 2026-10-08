@@ -361,9 +361,16 @@ metallic-roughness, and emissive. All changes are confined to `sdk/`.
 - `cargo check --all-targets --all-features` — zero errors.
 - `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings.
 - `cargo nextest run --all-features` — **5622 passed, 8 skipped, 0 failed**.
-  source `.glb` is copied directly into `assets/meshes/{type}/` with a companion
-  `CreatureDefinition` `.ron` file whose `glb_path` is set and `meshes` is empty.
-  The preview panel now loads and shows geometry for GLB-only creatures.
+
+---
+
+## GLTF 2.0 Support — Phase 2: SDK Raw GLB Export Mode
+
+Enables the Campaign Builder importer to copy a `.glb` file directly into the
+campaign asset tree and write a registry entry with `glb_path` set. When Raw GLB
+mode is selected, the source `.glb` is copied to `assets/meshes/{type}/` with a
+companion `CreatureDefinition` `.ron` file whose `glb_path` is set and `meshes`
+is empty. The preview panel loads and shows geometry for GLB-only creatures.
 
 ### 2.1 `GlbExportMode` enum (`sdk/campaign_builder/src/obj_importer.rs`)
 

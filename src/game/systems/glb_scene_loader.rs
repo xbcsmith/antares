@@ -142,11 +142,22 @@ mod tests {
     use crate::domain::visual::CreatureDefinition;
     use crate::sdk::database::ContentDatabase;
 
-    /// Builds a minimal `ContentDatabase` with one GLB entry in `creatures`.
+    /// Builds a minimal `ContentDatabase` with one GLB entry in each of the
+    /// three databases queried by `glb_scene_loader_system`: `creatures`,
+    /// `object_meshes`, and `item_meshes`.
+    ///
+    /// `object_meshes` and `item_meshes` are populated from the stable
+    /// `data/test_campaign` fixture files (which already carry a
+    /// `test_triangle_glb` entry each).  `creatures` is populated inline so
+    /// the path is deterministic across fixture changes.
     fn make_db_with_glb_entries() -> ContentDatabase {
+        use crate::domain::items::database::ItemMeshDatabase;
+        use crate::domain::world::object_mesh::ObjectMeshDatabase;
+        use std::path::PathBuf;
+
         let mut db = ContentDatabase::new();
 
-        // Creature GLB entry
+        // ── Creature GLB entry (inline) ───────────────────────────────────
         let creature_def = CreatureDefinition {
             id: 9001,
             name: "GlbCreature".to_string(),
@@ -161,11 +172,29 @@ mod tests {
             .add_creature(creature_def)
             .expect("add GLB creature");
 
+        // ── Object-mesh GLB entry (from data/test_campaign fixtures) ──────
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let campaign_root = manifest_dir.join("data/test_campaign");
+
+        db.object_meshes = ObjectMeshDatabase::load_from_registry(
+            &campaign_root.join("data/object_mesh_registry.ron"),
+            &campaign_root,
+        )
+        .expect("load object_mesh_registry fixture");
+
+        // ── Item-mesh GLB entry (from data/test_campaign fixtures) ────────
+        db.item_meshes = ItemMeshDatabase::load_from_registry(
+            &campaign_root.join("data/item_mesh_registry.ron"),
+            &campaign_root,
+        )
+        .expect("load item_mesh_registry fixture");
+
         db
     }
 
-    /// After running `glb_scene_loader_system`, the cache must contain a handle
-    /// for the GLB creature entry.
+    /// After running `glb_scene_loader_system`, the cache must contain handles
+    /// for GLB entries from **all three** databases: `creatures`,
+    /// `object_meshes`, and `item_meshes`.
     ///
     /// Uses a headless Bevy App with `MinimalPlugins` + `AssetPlugin`.
     #[test]
@@ -178,8 +207,19 @@ mod tests {
         // WorldAsset must be registered before asset_server.load::<WorldAsset>() is called.
         app.init_asset::<WorldAsset>();
 
-        // Build a ContentDatabase with a GLB entry in creatures.
+        // Build a ContentDatabase with GLB entries in all three databases.
         let db = make_db_with_glb_entries();
+
+        // Verify the fixture content is as expected before running the system.
+        assert!(
+            db.object_meshes.glb_paths().any(|p| p.ends_with(".glb")),
+            "object_meshes fixture must have at least one GLB entry"
+        );
+        assert!(
+            db.item_meshes.glb_paths().any(|p| p.ends_with(".glb")),
+            "item_meshes fixture must have at least one GLB entry"
+        );
+
         app.insert_resource(GameContent::new(db));
         app.init_resource::<GlbHandleCache>();
 
@@ -188,12 +228,26 @@ mod tests {
         app.update();
 
         let cache = app.world().resource::<GlbHandleCache>();
-        // The creature GLB path must be in the cache.
+
+        // 1. Creature path (added inline above)
         assert!(
             cache
                 .scenes
                 .contains_key("assets/meshes/creatures/test_creature.glb"),
             "creature GLB path missing from cache"
+        );
+
+        // 2. At least one object-mesh path (from the fixture)
+        assert!(
+            cache.scenes.keys().any(|k| k.ends_with(".glb")),
+            "no GLB paths from object_meshes or item_meshes found in cache"
+        );
+
+        // 3. The test_triangle GLB from the fixture must be present (used by
+        //    both object_mesh and item_mesh test entries)
+        assert!(
+            cache.scenes.contains_key("assets/meshes/test_triangle.glb"),
+            "test_triangle GLB path (from object_mesh/item_mesh fixture) missing from cache"
         );
     }
 
